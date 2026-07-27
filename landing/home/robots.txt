@@ -2,6 +2,5 @@ User-agent: *
 Allow: /
 Disallow: /auth.html
 Disallow: /account.html
-Disallow: /old/
 
 Sitemap: https://docvex.ro/sitemap.xml

@@ -15,6 +15,7 @@
   --shadow-elev:0 18px 50px -24px rgba(15,23,42,0.30), 0 8px 24px -16px rgba(15,23,42,0.18);
   --overlay-scrim:rgba(15,23,42,0.45);
   --dot:color-mix(in srgb, var(--text-primary) 16%, transparent);
+  --dvx-footer-bg:#EDE8DB; --dvx-wm:rgba(139,94,60,0.18);
 }
 :root[data-theme="ink"] {
   --bg-page:#0F172A; --bg-card:#1E293B; --bg-elevated:#2A3548; --bg-input:#15213A;
@@ -27,124 +28,179 @@
   --shadow-elev:0 24px 60px -22px rgba(0,0,0,0.65), 0 10px 30px -18px rgba(0,0,0,0.5);
   --overlay-scrim:rgba(0,0,0,0.6);
   --dot:color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --dvx-footer-bg:#0B1222; --dvx-wm:rgba(220,201,163,0.16);
 }
 
-/* Reserve space for the fixed navbar (only on pages that render it). Matches the
-   homepage: taller reserve while the bar is in its at-top state, compacting on
-   scroll — both transition in lockstep with the header so content stays snug. */
-.dvx-has-navbar body { padding-top: 68px; transition: padding-top 0.15s ease; }
-.dvx-has-navbar.dvx-attop body { padding-top: 108px; }
+/* ── Ambient dot grid + cursor spotlight (the homepage / app background),
+     injected by chrome.js on every sub-page. The layers sit at NEGATIVE
+     z-index so page content needs no z-index of its own — which requires the
+     body background to be transparent (html carries the page color). ── */
+/* Unconditional so the very first frame (before chrome.js adds the class)
+   already paints the theme background — no white flash between pages. */
+html { background-color: var(--bg-page); }
+html.dvx-has-chrome { background: var(--bg-page); }
+.dvx-has-chrome body { background: transparent !important; }
+.dvx-dotgrid {
+  position: fixed; inset: 0; z-index: -2; pointer-events: none;
+  background-image: radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.6px);
+    background-size: 24px 24px; background-position: 0 0;
+}
+.cursor-spotlight {
+  position: fixed; top: 0; left: 0; width: 430px; height: 430px;
+  pointer-events: none; z-index: -1; will-change: transform;
+  background-image: radial-gradient(circle at center, color-mix(in srgb, var(--text-primary) 10%, transparent) 1.45px, transparent 1.85px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
+  -webkit-mask-image: radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
+}
+@media (prefers-reduced-motion: reduce) { .cursor-spotlight { display: none; } }
 
-/* ── Navbar (mirrors the homepage .dv-header scroll-aware treatment) ── */
+/* ── App-like tab switches: cross-document view transitions make same-origin
+     navigations cross-fade (old page fades out, new fades in) instead of
+     flashing white. Supported browsers only; others fall back to a normal
+     navigation. Pairs with the speculation-rules prerender chrome.js injects,
+     which loads the next page before the click so the switch is instant. ── */
+@view-transition { navigation: auto; }
+/* Match the app's page fade: new content starts slightly to the right and
+   eases into place; the old page does a quick plain fade-out. The header has
+   its own snapshot (view-transition-name below) so it stays put while only
+   the content slides. */
+@keyframes dvx-page-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+/* The old page holds fully visible underneath while the new one fades/slides
+   in over it — a true crossfade. (Fading the old page out on its own timing
+   leaves a mid-transition dip to the bare background that reads as flicker.) */
+::view-transition-old(root) { animation: none; }
+::view-transition-new(root) { animation: dvx-page-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.dvx-header { view-transition-name: dvx-header; }
+/* The ambient background must not ride the content slide — give the grid and
+   spotlight their own snapshots so they hold still across navigations (covers
+   .dvx-dotgrid and the page-specific en-/acc-/inst-dotgrid layers alike). */
+[class*="dotgrid"] { view-transition-name: dvx-dotgrid; }
+.cursor-spotlight { view-transition-name: dvx-spotlight; }
+/* No group morph or crossfade for the background layers — hold them frozen.
+   (Without this the spotlight would visibly glide: the incoming page spawns it
+   at a different position and the default group animation morphs between the
+   two. The JS also restores the cursor position across navigations.) */
+::view-transition-group(dvx-dotgrid), ::view-transition-group(dvx-spotlight),
+::view-transition-new(dvx-dotgrid), ::view-transition-new(dvx-spotlight) { animation: none; }
+/* Only the incoming page's layer renders — with both snapshots opaque the two
+   stacked copies read as a double-bright spotlight/grid. */
+::view-transition-old(dvx-dotgrid), ::view-transition-old(dvx-spotlight) { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
+
+/* ── Bottom-edge fade: content dissolves into the page background as it
+     scrolls out at the bottom of the viewport. Below the to-top button (z 60). ── */
+.dvx-has-chrome body::after {
+  content: ''; position: fixed; left: 0; right: 0; bottom: 0; height: 90px;
+  z-index: 55; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--bg-page));
+}
+
+/* ── Floating scroll-to-top button (appears after scrolling down) ── */
+.dvx-totop {
+  position: fixed; right: 22px; bottom: 22px; z-index: 60;
+  width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+  background: #DCC9A3; color: #0F172A;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 26px -10px rgba(0,0,0,0.5);
+  opacity: 0; transform: translateY(8px); pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.dvx-totop.is-visible { opacity: 1; transform: none; pointer-events: auto; }
+.dvx-totop:hover { background: #C8B58E; }
+
+/* Reserve space for the fixed navbar in pure CSS so it holds from the very
+   first paint — the navbar itself is injected by JS, and if the reserve
+   depended on that script the content would jump mid view-transition. The
+   reserve is CONSTANT (the tall at-top height): the bar's compact/tall switch
+   changes only its own look, never the page layout. Pages with
+   data-dvx-no-navbar (auth) reserve nothing. */
+html:not([data-dvx-no-navbar]) body { padding-top: 92px; }
+
+/* ── Navbar — the homepage's navbar, shared by every tab: always-glass compact
+     bar, round logo + DOCVEX wordmark, 13.5px links (active = accent), round
+     theme toggle, tan Get Started pill (tan/dark in BOTH themes, matching the
+     main tab). ── */
+/* Default = the at-top state (taller, fully transparent); .is-compact is
+   added on scroll for the glass-blur bar. Defaulting to at-top keeps the
+   header's first-paint appearance identical to its captured transition state. */
 .dvx-header {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
-  background: color-mix(in srgb, var(--bg-page) 72%, transparent);
-  backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid var(--border);
-  transition: background 0.15s ease, border-color 0.15s ease, backdrop-filter 0.15s ease;
+  background: transparent; border-bottom: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .dvx-header-inner {
   max-width: 1440px; margin: 0 auto;
-  display: flex; align-items: center; justify-content: space-between; gap: 20px;
-  padding: 14px clamp(20px, 5vw, 40px);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  padding: 26px 32px;
   transition: padding 0.15s ease;
 }
-.dvx-header.at-top {
-  background: transparent; border-bottom-color: transparent;
-  backdrop-filter: none; -webkit-backdrop-filter: none;
+.dvx-header.is-compact {
+  background: color-mix(in srgb, var(--bg-page) 82%, transparent);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border-bottom-color: var(--border);
 }
-.dvx-header.at-top .dvx-header-inner { padding-top: 34px; padding-bottom: 34px; }
-.dvx-logo { display: flex; align-items: center; text-decoration: none; }
-.dvx-lockup { height: 40px; width: auto; display: block; }
-.dvx-nav { display: flex; align-items: center; gap: 30px; }
-.dvx-nav a { position: relative; font-size: 14px; font-weight: 500; color: var(--text-secondary); text-decoration: none; padding: 4px 0; transition: color 150ms; }
-.dvx-nav a:hover { color: var(--text-primary); }
-.dvx-nav a::after { content: ''; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; border-radius: 2px; background: var(--accent); transform: scaleX(0); transform-origin: center; transition: transform 180ms ease; }
-.dvx-nav a:hover::after { transform: scaleX(0.5); }
-.dvx-nav a.is-active { color: var(--text-primary); font-weight: 600; }
-.dvx-nav a.is-active::after { transform: scaleX(1); }
-@media (max-width: 760px) { .dvx-nav { display: none; } }
-.dvx-actions { display: flex; align-items: center; gap: 14px; }
-.dvx-theme { width: 38px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; color: var(--text-secondary); border-radius: 8px; }
-.dvx-theme:hover { color: var(--text-primary); background: var(--bg-elevated); }
-.dvx-signin { display: inline-flex; align-items: center; height: 40px; padding: 0 14px; font-size: 14px; font-weight: 600; color: var(--text-secondary); text-decoration: none; }
-.dvx-signin:hover { color: var(--text-primary); }
-.dvx-signup { display: inline-flex; align-items: center; height: 40px; padding: 0 18px; border-radius: 9px; background: var(--accent); color: var(--text-on-accent); font-size: 14px; font-weight: 600; text-decoration: none; box-shadow: var(--shadow-card); }
-.dvx-signup:hover { background: var(--accent-hover); }
+.dvx-header.is-compact .dvx-header-inner { padding-top: 14px; padding-bottom: 14px; }
+.dvx-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.dvx-logo-ring { width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: var(--bg-input); border: 2px solid var(--accent); display: inline-flex; }
+.dvx-logo-ring img { width: 100%; height: 100%; object-fit: cover; }
+/* Navbar variant — the app icon carries its own rounded-square artwork, so no
+   ring chrome around it. The footer keeps the round ring + logo.png. */
+.dvx-logo-app { border-radius: 9px; border: none; background: transparent; }
+.dvx-logo-word { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 17px; font-weight: 800; letter-spacing: 0.08em; color: var(--text-primary); }
+.dvx-nav { display: flex; align-items: center; gap: 28px; }
+.dvx-nav a { font-size: 13.5px; font-weight: 500; color: var(--text-secondary); text-decoration: none; transition: color 150ms; }
+.dvx-nav a:hover { color: var(--accent); }
+.dvx-nav a.is-active { color: var(--accent); font-weight: 600; }
+@media (max-width: 860px) { .dvx-nav { display: none; } }
+.dvx-actions { display: flex; align-items: center; gap: 12px; }
+.dvx-theme { width: 40px; height: 40px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-strong); background: transparent; cursor: pointer; color: var(--text-secondary); border-radius: 50%; }
+.dvx-theme:hover { color: var(--text-primary); border-color: var(--accent); }
+.dvx-signin { display: inline-flex; align-items: center; height: 40px; font-size: 13.5px; font-weight: 600; color: var(--text-secondary); text-decoration: none; }
+.dvx-signin:hover { color: var(--accent); }
+.dvx-signup { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 18px; border-radius: 999px; background: #DCC9A3; color: #0F172A; font-size: 13.5px; font-weight: 700; text-decoration: none; }
+.dvx-signup:hover { color: #0F172A; }
+.dvx-signup-arrow { width: 28px; height: 28px; border-radius: 50%; background: var(--bg-page); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 
-/* Account chip + dropdown */
+/* Account chip + dropdown — identical to the homepage chip: bordered pill
+   with a 28px avatar + name + caret, and a simple menu anchored below. */
 .dvx-chip { position: relative; }
-.dvx-chip-trigger { display: inline-flex; align-items: center; gap: 10px; background: transparent; border: none; cursor: pointer; padding: 4px 8px 4px 6px; border-radius: 10px; transition: background 150ms; }
-.dvx-chip-trigger:hover { background: var(--bg-elevated); }
-.dvx-chip-avatarwrap { position: relative; flex-shrink: 0; display: inline-flex; }
-.dvx-chip-avatar { width: 36px; height: 36px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 15px; font-weight: 700; color: #fff; background: #0369A1; }
+.dvx-chip-trigger { display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 12px 0 6px; border-radius: 999px; background: var(--bg-input); border: 1px solid var(--border-strong); cursor: pointer; font-family: inherit; }
+.dvx-chip-avatarwrap { position: relative; width: 28px; height: 28px; flex: none; display: inline-flex; }
+.dvx-chip-avatar { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; }
 .dvx-chip-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.dvx-chip-status { position: absolute; bottom: -1px; right: -1px; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2.5px var(--bg-page); }
-.dvx-chip-text { display: flex; flex-direction: column; line-height: 1.2; text-align: left; }
-.dvx-chip-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
-.dvx-chip-email { font-size: 11.5px; color: var(--text-muted); }
-
-/* ── Account chip morph pill (tooltip → dropdown) ── */
-.dvx-morph-pill {
-  position: fixed; top: 0; left: 0; z-index: 10000;
-  padding: 6px 12px; border-radius: 999px;
-  background: var(--bg-card); border: 1px solid var(--border-strong);
-  color: var(--text-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 0.75rem; font-weight: 500;
-  white-space: nowrap; line-height: 1.2; pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  animation: dvx-tip-in 120ms ease-out;
-  transition: transform 90ms ease-out;
-  will-change: transform;
-}
-@keyframes dvx-tip-in { from { opacity: 0; } to { opacity: 1; } }
-.dvx-morph-pill.is-menu {
-  pointer-events: auto; padding: 4px;
-  border-radius: 10px; min-width: 180px;
-  background: var(--bg-card); border-color: var(--border-strong);
-  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
-  white-space: normal; transition: none; will-change: transform;
-  animation: dvx-tip-in 100ms ease-out;
-}
-.dvx-morph-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.dvx-morph-item {
-  display: flex; align-items: center; gap: 9px; width: 100%;
-  padding: 0.55rem 0.8rem; border-radius: 6px;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 0.85rem; font-weight: 500;
-  color: var(--text-primary); text-decoration: none;
-  background: transparent; border: none; cursor: pointer;
-  transition: background 120ms;
-}
-.dvx-morph-item:hover:not(:disabled) { background: var(--bg-elevated); outline: none; }
-.dvx-morph-item svg { flex: none; }
-.dvx-morph-danger { color: var(--danger-soft); }
-.dvx-morph-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger-soft); }
-.dvx-menu-account .dvx-morph-item:hover:not(:disabled) { background: transparent; }
-/* ── Footer ── */
-.dvx-footer { position: relative; background: var(--bg-elevated); color: var(--text-primary); border-top: 1px solid var(--border); }
-.dvx-footer-inner { max-width: 1440px; margin: 0 auto; padding: 64px clamp(20px, 5vw, 40px); }
-.dvx-footer-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.1fr; gap: 40px; }
-.dvx-footer-brandrow { display: flex; align-items: center; gap: 11px; }
-.dvx-footer-lockup { height: 40px; width: auto; max-width: 100%; display: block; object-fit: contain; }
-.dvx-footer-tag { margin: 16px 0 0; max-width: 24rem; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
-.dvx-footer-contact { margin-top: 24px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
-.dvx-footer-contact a { color: inherit; text-decoration: none; }
-.dvx-footer-news { margin-top: 22px; max-width: 280px; }
-.dvx-footer-newstitle { margin: 0 0 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; color: var(--text-muted); }
-.dvx-footer-newsform { display: flex; gap: 7px; }
-.dvx-footer-newsinput { flex: 1; min-width: 0; height: 36px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-primary); font-size: 12.5px; font-family: inherit; outline: none; transition: border-color 160ms; }
-.dvx-footer-newsinput:focus { border-color: var(--accent); }
+.dvx-chip-status { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; }
+.dvx-chip-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.dvx-chip-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 190px; padding: 4px; border-radius: 12px; background: var(--bg-card); border: 1px solid var(--border-strong); box-shadow: var(--shadow-elev); z-index: 60; }
+.dvx-chip-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 12px; border-radius: 8px; background: transparent; border: none; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text-primary); text-decoration: none; text-align: left; }
+.dvx-chip-item:hover { background: var(--bg-input); color: var(--text-primary); }
+.dvx-chip-item svg { flex: none; }
+.dvx-chip-danger { color: var(--danger-soft); }
+.dvx-chip-danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger-soft); }
+/* ── Footer — the homepage footer, shared by every tab: brand + Quick Links +
+     Contact Info + Newsletter pill form, bottom bar, outlined DOCVEX
+     watermark. ── */
+.dvx-footer { position: relative; border-top: 1px solid var(--border); background: var(--dvx-footer-bg); overflow: hidden; }
+.dvx-footer-grid { max-width: 1280px; margin: 0 auto; padding: 56px 32px 32px; display: grid; grid-template-columns: 1.4fr 1fr 1.2fr 1.2fr; gap: 40px; }
+.dvx-footer-tag { margin: 16px 0 0; max-width: 280px; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.dvx-footer-coltitle { margin: 0 0 14px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.dvx-footer-links { display: flex; flex-direction: column; gap: 9px; }
+.dvx-footer-links a, .dvx-footer-links span { font-size: 13px; color: var(--text-muted); text-decoration: none; }
+.dvx-footer-links a:hover { color: var(--text-primary); }
+.dvx-footer-newsform { display: flex; gap: 0; border: 1px solid var(--border-strong); border-radius: 999px; padding: 4px; background: var(--bg-input); }
+.dvx-footer-newsinput { flex: 1; min-width: 0; background: transparent; border: none; outline: none; padding: 0 14px; font-size: 13px; color: var(--text-primary); font-family: inherit; }
 .dvx-footer-newsinput::placeholder { color: var(--text-muted); }
-.dvx-footer-newsbtn { height: 36px; padding: 0 14px; border: none; border-radius: 9px; background: var(--accent); color: var(--text-on-accent); font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer; transition: background 150ms; }
-.dvx-footer-newsbtn:hover { background: var(--accent-hover); }
-.dvx-footer-newsmsg { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
-.dvx-footer-coltitle { margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.22em; color: var(--accent); }
-.dvx-footer-col ul { margin: 16px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.dvx-footer-col a { font-size: 14px; color: var(--text-muted); text-decoration: none; }
-.dvx-footer-col a:hover { color: var(--text-primary); }
-.dvx-footer-bottom { margin-top: 48px; display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); padding-top: 24px; font-size: 12px; color: var(--text-muted); }
-.dvx-footer-bottom p { margin: 0; }
+.dvx-footer-newsbtn { border: none; cursor: pointer; padding: 9px 18px; border-radius: 999px; background: #DCC9A3; color: #0F172A; font-size: 12.5px; font-weight: 700; font-family: inherit; }
+.dvx-footer-newsmsg { margin: 10px 0 0; font-size: 11.5px; color: var(--text-muted); }
+.dvx-footer-newsnote { margin: 10px 0 0; font-size: 11px; color: var(--text-muted); }
+.dvx-footer-bottom { max-width: 1280px; margin: 0 auto; padding: 18px 32px 26px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+.dvx-footer-bottom p { margin: 0; font-size: 12px; color: var(--text-muted); }
+.dvx-footer-bottomlinks { display: flex; gap: 20px; }
+.dvx-footer-bottomlinks a { font-size: 12px; color: var(--text-muted); text-decoration: none; }
+.dvx-footer-bottomlinks a:hover { color: var(--text-primary); }
+.dvx-footer-wm { position: relative; height: 150px; overflow: hidden; pointer-events: none; }
+.dvx-footer-wm span { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 230px; font-weight: 800; letter-spacing: 0.02em; line-height: 1; color: transparent; -webkit-text-stroke: 1.5px var(--dvx-wm); white-space: nowrap; }
 @media (max-width: 1024px) { .dvx-footer-grid { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 640px) { .dvx-footer-grid { grid-template-columns: 1fr; } .dvx-footer-bottom { flex-direction: column; align-items: flex-start; } }
+@media (max-width: 640px) { .dvx-footer-grid { grid-template-columns: 1fr; } .dvx-footer-bottom { flex-direction: column; align-items: flex-start; } .dvx-footer-wm span { font-size: 120px; } }

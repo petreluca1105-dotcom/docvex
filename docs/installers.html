@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="cream">
+<html lang="en" data-theme="ink">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -22,22 +22,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="chrome.css">
-<script>(function(){try{var t=localStorage.getItem('docvex.site.theme')||'cream';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-<!-- Auth gate: the Downloads tab is only available to signed-in users. -->
-<script>(function(){
-  try {
-    var raw = localStorage.getItem('sb-pntxlvhkqfryyyxlqytr-auth-token');
-    var ok = false;
-    if (raw) {
-      var p = JSON.parse(raw);
-      var s = (p && p.currentSession) ? p.currentSession : p;
-      var u = (s && s.user) || (p && p.user);
-      var exp = s && s.expires_at;
-      ok = !!u && !(exp && !s.refresh_token && (exp * 1000) < Date.now());
-    }
-    if (!ok) window.location.replace('/auth.html?redirect=installers.html');
-  } catch (e) { window.location.replace('/auth.html?redirect=installers.html'); }
-})();</script>
+<script>(function(){var d=document.documentElement,t='ink';try{t=localStorage.getItem('docvex.site.theme')||'ink';}catch(e){}d.setAttribute('data-theme',t);d.style.backgroundColor=t==='cream'?'#F5F2EA':'#0F172A';})();</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
@@ -49,10 +34,8 @@
   /* Ambient dot-grid + cursor spotlight (matches the homepage / account page). */
   .inst-dotgrid {
     position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image:
-      radial-gradient(ellipse 85% 75% at center, transparent 0%, transparent 32%, var(--bg-page) 92%),
-      radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.6px);
-    background-size: 100% 100%, 24px 24px; background-position: center, 0 0;
+    background-image: radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.6px);
+    background-size: 24px 24px; background-position: 0 0;
   }
   .cursor-spotlight {
     position: fixed; top: 0; left: 0; width: 430px; height: 430px;

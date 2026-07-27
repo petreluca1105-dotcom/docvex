@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="cream">
+<html lang="en" data-theme="ink">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -22,23 +22,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="chrome.css">
 <link rel="stylesheet" href="legal.css">
-<script>(function(){try{var t=localStorage.getItem('docvex.site.theme')||'cream';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-<script>
-  // Legacy deep-links: the old single-page legal center used #terms/#privacy/…
-  // anchors. Forward them to the dedicated document pages.
-  (function () {
-    var map = { terms: 'terms.html', privacy: 'privacy.html', cookies: 'cookies.html', gdpr: 'gdpr.html', confidentiality: 'security.html', security: 'security.html', dpa: 'dpa.html' };
-    var h = (window.location.hash || '').slice(1);
-    if (map[h]) window.location.replace(map[h]);
-  })();
-</script>
+<script>(function(){var d=document.documentElement,t='ink';try{t=localStorage.getItem('docvex.site.theme')||'ink';}catch(e){}d.setAttribute('data-theme',t);d.style.backgroundColor=t==='cream'?'#F5F2EA':'#0F172A';})();</script>
 </head>
 <body>
   <div class="lg-shell">
     <header class="lg-head">
       <p class="lg-eyebrow">DocVex</p>
       <h1 class="lg-title">Legal center</h1>
-      <p class="lg-lead">The agreements and policies that govern your use of DocVex — each maintained as its own document, gathered in one place.</p>
+      <p class="lg-lead">The agreements and policies that govern your use of DocVex — open any document below to read it right here.</p>
       <p class="lg-updated">All documents last updated: 18 July 2026</p>
     </header>
 
@@ -80,8 +71,75 @@
         <span class="lg-hub-open">Read the DPA &rarr;</span>
       </a>
     </div>
+
+    <div class="lg-dochost" id="lgDocHost" hidden></div>
   </div>
 
 <script type="module" src="chrome.js"></script>
+<script>
+// Combined legal center: the hub stays at the top and the selected document
+// renders inline below it, fetched from its standalone page (which still
+// exists for direct links / no-JS). #terms-style deep links load inline too.
+(function () {
+  var DOCS = { 'terms.html': 1, 'privacy.html': 1, 'cookies.html': 1, 'gdpr.html': 1, 'security.html': 1, 'dpa.html': 1 };
+  var host = document.getElementById('lgDocHost');
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.lg-hub-card'));
+  var spyObs = null;
+
+  function spy() {
+    if (spyObs) spyObs.disconnect();
+    var links = Array.prototype.slice.call(host.querySelectorAll('.lg-toc a[href^="#"]'));
+    if (!links.length) return;
+    var map = {};
+    links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+    spyObs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          links.forEach(function (l) { l.classList.remove('is-active'); });
+          var a = map[en.target.id]; if (a) a.classList.add('is-active');
+        }
+      });
+    }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+    host.querySelectorAll('.lg-card[id]').forEach(function (s) { spyObs.observe(s); });
+  }
+
+  function load(page, scroll) {
+    fetch(page).then(function (r) { return r.text(); }).then(function (text) {
+      var doc = new DOMParser().parseFromString(text, 'text/html');
+      var head = doc.querySelector('.lg-head');
+      var layout = doc.querySelector('.lg-layout');
+      if (!layout) { window.location.href = page; return; }
+      host.innerHTML = '';
+      if (head) host.appendChild(head);
+      host.appendChild(layout);
+      host.hidden = false;
+      cards.forEach(function (c) { c.classList.toggle('is-active', (c.getAttribute('href') || '') === page); });
+      try { history.replaceState(null, '', '#' + page.replace('.html', '')); } catch (e) {}
+      spy();
+      if (scroll !== false) host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch(function () { window.location.href = page; });
+  }
+
+  // Hub cards + legal-doc links inside the injected document open inline.
+  document.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest ? e.target.closest('a') : null;
+    if (!a) return;
+    var page = (a.getAttribute('href') || '').split('#')[0].split('?')[0];
+    if (!DOCS[page]) return;
+    if (!(a.closest('.lg-hub') || a.closest('#lgDocHost'))) return;
+    e.preventDefault();
+    load(page);
+  });
+
+  // Initial document: the #terms/#privacy/… deep link if present (incl. the
+  // legacy #confidentiality alias), otherwise the Terms & Conditions. Never
+  // auto-scroll on page load — the page opens at the top with the hub visible;
+  // only a card click scrolls down to the document.
+  var h = (window.location.hash || '').slice(1);
+  if (h === 'confidentiality') h = 'security';
+  load(DOCS[h + '.html'] ? h + '.html' : 'terms.html', false);
+})();
+</script>
 </body>
 </html>

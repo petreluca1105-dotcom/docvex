@@ -22,654 +22,687 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script>(function(){var d=document.documentElement,t='ink';try{t=localStorage.getItem('docvex.site.theme')||'ink';}catch(e){}d.setAttribute('data-theme',t);d.style.backgroundColor=t==='cream'?'#F5F2EA':'#0F172A';})();</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
+
+  :root, [data-theme="ink"] {
+    --bg-page:#0F172A; --bg-panel:#15213A; --bg-card:#1E293B; --bg-footer:#0B1222;
+    --tx-1:#F5F2EA; --tx-2:#C9CEDC; --tx-3:#8A93A8;
+    --br:245,242,234;
+    --acc:#DCC9A3; --acc-tx:#DCC9A3;
+    --hdr:rgba(15,23,42,0.82); --scrim:rgba(15,23,42,0.72); --scrim2:rgba(15,23,42,0.78);
+    --wm:rgba(220,201,163,0.16);
+    --dot:color-mix(in srgb, var(--tx-1) 11%, transparent);
+  }
+  [data-theme="cream"] {
+    --bg-page:#F5F2EA; --bg-panel:#FFFFFF; --bg-card:#FFFFFF; --bg-footer:#EDE8DB;
+    --tx-1:#0F172A; --tx-2:#334155; --tx-3:#6B7280;
+    --br:15,23,42;
+    --acc:#DCC9A3; --acc-tx:#8B5E3C;
+    --hdr:rgba(245,242,234,0.85); --scrim:rgba(255,255,255,0.80); --scrim2:rgba(255,255,255,0.85);
+    --wm:rgba(139,94,60,0.18);
+    --dot:color-mix(in srgb, var(--tx-1) 16%, transparent);
+  }
   html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; background: var(--bg-page); }
-  body { margin: 0; background: var(--bg-page); }
-  ::selection { background: var(--accent-soft); color: var(--text-primary); }
+  body { margin: 0; background: var(--bg-page); font-family: 'Inter', system-ui, sans-serif; }
+  a { color: var(--tx-1); }
+  a:hover { color: var(--acc-tx); }
+  ::selection { background: #DCC9A3; color: #0F172A; }
 
-  :root, [data-theme="cream"] {
-    --bg-page:#F5F2EA; --bg-card:#FFFFFF; --bg-elevated:#FAF7F0; --bg-sidebar:#FFFFFF; --bg-input:#FFFFFF;
-    --border:rgba(15,23,42,0.10); --border-strong:rgba(15,23,42,0.18);
-    --text-primary:#0F172A; --text-secondary:#1E293B; --text-muted:#6B7280;
-    --text-on-accent:#FFFFFF; --accent:#8B5E3C; --accent-hover:#74502F;
-    --accent-soft:#DCC9A3; --accent-tint:rgba(139,94,60,0.10);
-    --shadow-card:0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
-    --shadow-elev:0 18px 50px -24px rgba(15,23,42,0.30), 0 8px 24px -16px rgba(15,23,42,0.18);
-    --dot:color-mix(in srgb, var(--text-primary) 16%, transparent);
+  @keyframes dvSpin { to { transform: rotate(360deg); } }
+  @keyframes dvMarqL { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  @keyframes dvMarqR { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+  @media (prefers-reduced-motion: reduce) {
+    [style*="dvMarqL"], [style*="dvMarqR"], [style*="dvSpin"] { animation: none !important; }
   }
-  [data-theme="ink"] {
-    --bg-page:#0F172A; --bg-card:#1E293B; --bg-elevated:#2A3548; --bg-sidebar:#15213A; --bg-input:#15213A;
-    --border:rgba(245,242,234,0.10); --border-strong:rgba(245,242,234,0.20);
-    --text-primary:#F5F2EA; --text-secondary:#C9CEDC; --text-muted:#8A93A8;
-    --text-on-accent:#0F172A; --accent:#DCC9A3; --accent-hover:#C8B58E;
-    --accent-soft:#8B5E3C; --accent-tint:rgba(220,201,163,0.12);
-    --shadow-card:0 1px 3px rgba(0,0,0,0.40), 0 1px 2px rgba(0,0,0,0.25);
-    --shadow-elev:0 24px 60px -22px rgba(0,0,0,0.65), 0 10px 30px -18px rgba(0,0,0,0.5);
-    --dot:color-mix(in srgb, var(--text-primary) 11%, transparent);
-  }
-
-  /* Dark theme: flatten the Security / Pricing / footer panels to the page
-     background instead of the lighter card/elevated tone. */
-  [data-theme="ink"] #security,
-  [data-theme="ink"] #pricing,
-  [data-theme="ink"] footer { background: var(--bg-page) !important; }
-
-  /* Dark theme: the large cream/tan accent panels become brown. Remapping the
-     accent vars locally turns the panel bg/border brown AND makes the inverted
-     chips/buttons (cream bg + accent text) read as brown-on-cream for contrast,
-     while body text + icons (text-on-accent) become cream for visibility. */
-  [data-theme="ink"] .accent-panel { --accent: #8B5E3C; --accent-hover: #74502F; --accent-soft: #DCC9A3; --text-on-accent: #F5F2EA; }
-
-  @keyframes dv-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.55;transform:scale(.8)} }
-  @keyframes dv-spin { to { transform: rotate(360deg) } }
-
-  details > summary { list-style: none; cursor: pointer; }
-  details > summary::-webkit-details-marker { display: none; }
-  details[open] [data-plus] { transform: rotate(45deg); }
-  [data-faq] { transition: border-color 160ms; }
-  [data-faq][open] { border-color: var(--accent); }
-
-  a { color: inherit; }
-
-  /* Theme segmented toggle + hero switcher pills (were inline-bound in the design). */
-  .dv-seg{display:inline-flex;align-items:center;justify-content:center;width:34px;height:28px;border-radius:7px;border:none;cursor:pointer;transition:background 150ms,color 150ms,box-shadow 150ms;background:transparent;color:var(--text-muted);}
-  .dv-seg.is-on{background:var(--bg-card);color:var(--text-primary);box-shadow:var(--shadow-card);}
-  .dv-pill{display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;border:1px solid var(--border);cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:600;letter-spacing:0.01em;transition:all 160ms;background:transparent;color:var(--text-secondary);}
-  .dv-pill.is-on{background:var(--accent);color:var(--text-on-accent);border-color:transparent;}
 
   /* Cursor-following spotlight — a brighter copy of the ambient dot grid masked
      to a soft 215px circle, moved with the pointer (transform set per-frame in
      JS, with a counter-shifted background-position so the brighter dots stay
      locked to the viewport grid). Ported from the app's CursorSpotlight. */
-  .cursor-spotlight{
-    position:fixed; top:0; left:0; width:430px; height:430px;
-    pointer-events:none; z-index:1; will-change:transform;
-    background-image:radial-gradient(circle at center, color-mix(in srgb, var(--text-primary) 10%, transparent) 1.45px, transparent 1.85px);
-    background-size:24px 24px;
-    mask-image:radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
-    -webkit-mask-image:radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
+  .cursor-spotlight {
+    position: fixed; top: 0; left: 0; width: 430px; height: 430px;
+    pointer-events: none; z-index: 1; will-change: transform;
+    background-image: radial-gradient(circle at center, color-mix(in srgb, var(--tx-1) 10%, transparent) 1.45px, transparent 1.85px);
+    background-size: 24px 24px;
+    mask-image: radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
+    -webkit-mask-image: radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
   }
-  @media (prefers-reduced-motion: reduce) { .cursor-spotlight{ display:none; } }
+  @media (prefers-reduced-motion: reduce) { .cursor-spotlight { display: none; } }
 
-  /* Cursor spotlight on opaque surfaces (they cover the global fixed spotlight).
-     --sx/--sy are the cursor position RELATIVE to the surface, written per-frame
-     in JS. Two flavours:
-       • PANELS (cards: div/details) — no dot grid; a soft radial glow that
-         tracks the cursor sits above the panel's background, below its content.
-       • Full-bleed SECTIONS — keep the masked dot grid so they read continuous
-         with the ambient page background. */
-  .spot-surface{ position:relative; }
-  /* The cursor-following radial-gradient spotlight glow was removed. */
-  .spot-surface::before{ content:none; }
-  .spot-surface > *{ position:relative; z-index:1; }
+  /* Image slots from the design — static placeholder panels until real
+     photos/screenshots are dropped in (kept, not omitted). */
+  .dv-slot { position: relative; width: 100%; height: 100%; background: var(--bg-panel); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .dv-slot::before { content: ''; position: absolute; inset: 0; background-image: radial-gradient(circle, rgba(var(--br),0.07) 1.2px, transparent 1.6px); background-size: 22px 22px; }
+  .dv-slot::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 50% 40%, rgba(220,201,163,0.07), transparent 70%); }
+  .dv-slot > span { position: relative; z-index: 1; padding: 0 24px; text-align: center; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--tx-3); }
 
-  /* ── Left section timeline (scrollspy) — same rail/dot vocabulary as the
-       app's Versions tab: a 2px vertical line with a node per section. ── */
-  .dv-timeline{ position:fixed; left:24px; top:50%; transform:translateY(-50%); z-index:40; display:flex; flex-direction:column; opacity:1; pointer-events:auto; transition:opacity 280ms ease; }
-  .dv-timeline.is-hidden{ opacity:0; pointer-events:none; }
-  .dv-timeline::before{ content:''; position:absolute; left:6.5px; top:14px; bottom:14px; width:2px; transform:translateX(-50%); background:var(--border-strong); }
-  .dv-tl-dot{ position:relative; display:flex; align-items:center; gap:11px; padding:14px 0; background:none; border:none; cursor:pointer; font-family:inherit; }
-  .dv-tl-dot .d{ width:13px; height:13px; flex:none; box-sizing:border-box; border-radius:50%; background:var(--bg-page); border:2.5px solid var(--text-muted); transition:border-color 160ms, background 160ms, box-shadow 160ms; }
-  .dv-tl-dot .lbl{ font-size:12px; font-weight:600; letter-spacing:0.01em; color:var(--text-muted); white-space:nowrap; opacity:0; transform:translateX(-5px); transition:opacity 150ms, transform 150ms, color 150ms; }
-  .dv-timeline:hover .dv-tl-dot .lbl{ opacity:1; transform:none; }
-  .dv-tl-dot:hover .d{ border-color:var(--accent); }
-  .dv-tl-dot.is-active .d{ border-color:var(--accent); background:var(--accent); box-shadow:0 0 0 4px var(--accent-tint); }
-  .dv-tl-dot.is-active .lbl{ color:var(--text-primary); opacity:1; transform:none; }
-  @media (max-width:1180px){ .dv-timeline{ display:none; } }
-  @media (prefers-reduced-motion: reduce){ .dv-tl-dot .lbl{ transition:none; } }
+  /* Signed-in account chip (swaps in for Sign in + Get Started, same behaviour
+     as the previous homepage — session shared with the app via Supabase). */
+  .dv-chip { position: relative; }
+  .dv-chip-trigger { color: var(--tx-3); display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 12px 0 6px; border-radius: 999px; background: var(--bg-panel); border: 1px solid rgba(var(--br),0.16); cursor: pointer; font-family: inherit; }
+  .dv-chip-avatarwrap { position: relative; width: 28px; height: 28px; flex: none; }
+  .dv-chip-avatar { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #F5F2EA; }
+  .dv-chip-status { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; }
+  .dv-chip-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--tx-1); }
+  .dv-chip-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 190px; padding: 4px; border-radius: 12px; background: var(--bg-card); border: 1px solid rgba(var(--br),0.16); box-shadow: 0 18px 44px -14px rgba(0,0,0,0.7); z-index: 60; }
+  .dv-chip-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 12px; border-radius: 8px; background: transparent; border: none; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500; color: var(--tx-1); text-decoration: none; text-align: left; }
+  .dv-chip-item:hover { background: var(--bg-panel); color: var(--tx-1); }
+  .dv-chip-danger { color: #F0A4A4; }
+  .dv-chip-danger:hover { background: rgba(242,63,67,0.14); color: #F0A4A4; }
+  [hidden] { display: none !important; }
 
-  /* Header scroll transition: taller & transparent at top, compact & solid on scroll */
-  /* Body offset tracks navbar height: compact (68px) ↔ at-top (108px) */
-  body { padding-top:68px; transition:padding-top 0.15s ease; }
-  body.dvx-attop { padding-top:108px; }
-  .dv-header{
-    position:fixed; top:0; left:0; right:0; z-index:50;
-    backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%);
-    background:color-mix(in srgb, var(--bg-page) 72%, transparent);
-    border-bottom:1px solid var(--border);
-    transition:background 0.15s ease, border-color 0.15s ease, backdrop-filter 0.15s ease;
+  /* App-like tab switches: same-origin navigations cross-fade instead of
+     flashing (supported browsers; others fall back to a normal load). Matches
+     the app's page fade: new content starts slightly to the right and eases
+     into place; the header keeps its own snapshot so it stays put. */
+  @view-transition { navigation: auto; }
+  @keyframes dvx-page-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+  /* The old page holds fully visible underneath while the new one fades/slides
+     in over it — a true crossfade. (Fading the old page out on its own timing
+     leaves a mid-transition dip to the bare background that reads as flicker.) */
+  ::view-transition-old(root) { animation: none; }
+  ::view-transition-new(root) { animation: dvx-page-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .dv-hdr { view-transition-name: dvx-header; }
+  /* The ambient background must not ride the content slide — give the grid and
+     spotlight their own snapshots so they hold still across navigations. */
+  .dv-dotgrid { view-transition-name: dvx-dotgrid; }
+  .cursor-spotlight { view-transition-name: dvx-spotlight; }
+  /* No group morph or crossfade for the background layers — hold them frozen.
+     (Without this the spotlight would visibly glide: the incoming page spawns
+     it at a different position and the default group animation morphs between
+     the two. The JS also restores the cursor position across navigations.) */
+  ::view-transition-group(dvx-dotgrid), ::view-transition-group(dvx-spotlight),
+  ::view-transition-new(dvx-dotgrid), ::view-transition-new(dvx-spotlight) { animation: none; }
+  /* Only the incoming page's layer renders — with both snapshots opaque the two
+     stacked copies read as a double-bright spotlight/grid. */
+  ::view-transition-old(dvx-dotgrid), ::view-transition-old(dvx-spotlight) { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
   }
-  .dv-header > div{ padding:14px clamp(20px,5vw,40px); transition:padding 0.15s ease; }
-  .dv-header.at-top{
-    background:transparent;
-    border-bottom-color:transparent;
-    backdrop-filter:none; -webkit-backdrop-filter:none;
+
+  /* Scroll-aware header: a little taller + fully transparent at the very top,
+     compact glass once scrolled. */
+  .dv-hdr { transition: background 0.15s ease, border-color 0.15s ease; }
+  .dv-hdr-inner { transition: padding 0.15s ease; }
+  .dv-hdr.at-top { background: transparent !important; border-bottom-color: transparent !important; backdrop-filter: none !important; }
+  .dv-hdr.at-top .dv-hdr-inner { padding-top: 26px !important; padding-bottom: 26px !important; }
+
+  /* Bottom-edge fade: content dissolves into the page background as it
+     scrolls out at the bottom of the viewport. Below the to-top button (z 60). */
+  body::after {
+    content: ''; position: fixed; left: 0; right: 0; bottom: 0; height: 90px;
+    z-index: 55; pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--bg-page));
   }
-  .dv-header.at-top > div{ padding-top:34px; padding-bottom:34px; }
 
-  /* Navbar tabs — active-tab indicator (mirrors chrome.css .dvx-nav) */
-  .dvx-nav a{ position:relative; font-size:14px; font-weight:500; color:var(--text-secondary); text-decoration:none; padding:4px 0; transition:color 150ms; }
-  .dvx-nav a:hover{ color:var(--text-primary); }
-  .dvx-nav a::after{ content:''; position:absolute; left:0; right:0; bottom:-2px; height:2px; border-radius:2px; background:var(--accent); transform:scaleX(0); transform-origin:center; transition:transform 180ms ease; }
-  .dvx-nav a:hover::after{ transform:scaleX(0.5); }
-  .dvx-nav a.is-active{ color:var(--text-primary); font-weight:600; }
-  .dvx-nav a.is-active::after{ transform:scaleX(1); }
+  /* Floating scroll-to-top button (appears after scrolling down) */
+  .dvx-totop {
+    position: fixed; right: 22px; bottom: 22px; z-index: 60;
+    width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+    background: #DCC9A3; color: #0F172A;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 26px -10px rgba(0,0,0,0.5);
+    opacity: 0; transform: translateY(8px); pointer-events: none;
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  .dvx-totop.is-visible { opacity: 1; transform: none; pointer-events: auto; }
+  .dvx-totop:hover { background: #C8B58E; color: #0F172A; }
 
-  /* Morph pill shared with chrome.js pages */
-  .dvx-morph-pill{ position:fixed; top:0; left:0; z-index:10000; padding:6px 12px; border-radius:999px; background:var(--bg-card); border:1px solid var(--border-strong); color:var(--text-primary); font-family:'Inter',system-ui,-apple-system,sans-serif; font-size:0.75rem; font-weight:500; white-space:nowrap; line-height:1.2; pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,0.4); animation:dvx-tip-in 120ms ease-out; transition:transform 90ms ease-out; will-change:transform; }
-  @keyframes dvx-tip-in{ from{opacity:0} to{opacity:1} }
-  .dvx-morph-pill.is-menu{ pointer-events:auto; padding:4px; border-radius:10px; min-width:180px; background:var(--bg-card); border-color:var(--border-strong); box-shadow:0 12px 32px rgba(0,0,0,0.5); white-space:normal; transition:none; will-change:transform; animation:dvx-tip-in 100ms ease-out; }
-  .dvx-morph-list{ margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:2px; }
-  .dvx-morph-item{ display:flex; align-items:center; gap:9px; width:100%; padding:0.55rem 0.8rem; border-radius:6px; font-family:'Inter',system-ui,-apple-system,sans-serif; font-size:0.85rem; font-weight:500; color:var(--text-primary); text-decoration:none; background:transparent; border:none; cursor:pointer; transition:background 120ms; }
-  .dvx-morph-item:hover:not(:disabled){ background:var(--bg-elevated); outline:none; }
-  .dvx-morph-item svg{ flex:none; }
-  .dvx-morph-danger{ color:var(--danger, #B91C1C); }
-  .dvx-morph-danger:hover:not(:disabled){ background:color-mix(in srgb, var(--danger, #B91C1C) 14%, transparent); color:var(--danger-soft, #DC2626); }
+  /* Newsletter footer form feedback */
+  .dv-newsmsg { margin: 10px 0 0; font-size: 11.5px; color: var(--tx-3); }
+  .dv-newsmsg.err { color: #F0A4A4; }
 
-  /* Footer responsive columns */
-  @media (max-width: 1024px){ .dv-footer-grid{ grid-template-columns:1fr 1fr !important; } }
-  @media (max-width: 640px){
-    .dv-footer-grid{ grid-template-columns:1fr !important; }
-    .dv-footer-bottom{ flex-direction:column !important; align-items:flex-start !important; }
+  /* Responsive collapse — the design is a fixed desktop layout; these fold the
+     grids down without changing the desktop rendering. */
+  @media (max-width: 1023px) {
+    .dv-grid-who, .dv-grid-process, .dv-grid-news, .dv-grid-cta, .dv-grid-testimonial, .dv-sec-expertise { grid-template-columns: minmax(0,1fr) !important; }
+    .dv-grid-services, .dv-grid-work { grid-template-columns: minmax(0,1fr) !important; }
+    .dv-footer-grid { grid-template-columns: 1fr 1fr !important; }
+  }
+  @media (max-width: 860px) {
+    .dv-navlinks { display: none !important; }
+    .dv-footer-grid { grid-template-columns: 1fr !important; }
+    .dv-watermark-text { font-size: 120px !important; }
   }
 </style>
-
 </head>
 <body>
 
-<div id="dv-root" data-theme="cream" style="position:relative; min-height:100vh; background:var(--bg-page); color:var(--text-primary); font-family:'Inter',system-ui,-apple-system,sans-serif; overflow-x:clip;">
+<div style="position:relative; min-height:100vh; background:var(--bg-page); color:var(--tx-1); font-family:'Inter',system-ui,sans-serif; overflow-x:clip;">
 
-  <div aria-hidden="true" style="position:fixed; inset:0; z-index:0; pointer-events:none; background-image: radial-gradient(ellipse 85% 75% at center, transparent 0%, transparent 32%, var(--bg-page) 92%), radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.6px); background-size:100% 100%, 24px 24px; background-position:center, 0 0;"></div>
+  <!-- ambient dot grid + cursor spotlight (ported from the app's CursorSpotlight) -->
+  <div class="dv-dotgrid" aria-hidden="true" style="position:fixed; inset:0; z-index:0; pointer-events:none; background-image: radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.6px); background-size:24px 24px; background-position:0 0;"></div>
   <div class="cursor-spotlight" aria-hidden="true"></div>
 
-  <nav class="dv-timeline" id="dvTimeline" aria-label="Section navigation"></nav>
+  <div style="position:relative; z-index:2; padding-top:92px;">
 
-  <div style="position:relative; z-index:2;">
-
-    <!-- ============ NAV ============ -->
-    <header id="siteHeader" class="dv-header at-top">
-      <div style="max-width:1440px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:20px;">
-        <a href="#top" style="display:flex; align-items:center; text-decoration:none;">
-          <img src="assets/logo-lockup.png" alt="DocVex — Intelligent Legal Workflows" style="height:40px; width:auto; display:block;">
-        </a>
-
-        <nav class="dvx-nav" style="display:flex; align-items:center; gap:30px;">
-          <a href="index.html" class="is-active">Home</a>
-          <a href="company.html">Company</a>
-          <a href="legal.html">Legal</a>
-          <a href="installers.html">Download</a>
-          <a href="enroll.html">Enroll</a>
-        </nav>
-
-        <div style="display:flex; align-items:center; gap:14px;">
-          <button type="button" title="Toggle theme" class="dv-seg" data-theme-toggle onclick="dvToggleTheme()" style="width:38px; height:34px; border:none; background:transparent; box-shadow:none; color:var(--text-secondary);">
-            <svg data-theme-icon="cream" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-            <svg data-theme-icon="ink" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M12 3a6.4 6.4 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+  <!-- ============ NAV ============ -->
+  <header class="dv-hdr" style="position:fixed; top:0; left:0; right:0; z-index:50; background:var(--hdr); backdrop-filter:blur(18px); border-bottom:1px solid rgba(var(--br),0.08);">
+    <div class="dv-hdr-inner" style="max-width:1440px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:14px 32px;">
+      <a href="index.html" style="display:flex; align-items:center; gap:10px; text-decoration:none;">
+        <span style="width:36px; height:36px; border-radius:9px; overflow:hidden; display:inline-flex;"><img src="assets/appicon.png" alt="DocVex" style="width:100%; height:100%; object-fit:cover;"></span>
+        <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:17px; font-weight:800; letter-spacing:0.08em; color:var(--tx-1);">DOCVEX</span>
+      </a>
+      <nav class="dv-navlinks" style="display:flex; align-items:center; gap:28px;">
+        <a href="index.html" aria-current="page" style="font-size:13.5px; font-weight:600; color:var(--acc-tx); text-decoration:none;">Home</a>
+        <a href="company.html" style="font-size:13.5px; font-weight:500; color:var(--tx-2); text-decoration:none;">Company</a>
+        <a href="legal.html" style="font-size:13.5px; font-weight:500; color:var(--tx-2); text-decoration:none;">Legal</a>
+        <a href="installers.html" style="font-size:13.5px; font-weight:500; color:var(--tx-2); text-decoration:none;">Download</a>
+      </nav>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme" style="width:40px; height:40px; flex:none; border-radius:50%; border:1px solid rgba(var(--br),0.16); background:transparent; color:var(--tx-2); display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+          <svg data-ico="sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg data-ico="moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M12 3a6.4 6.4 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+        <span id="authButtons" style="display:contents;">
+          <a href="auth.html?mode=signin" style="font-size:13.5px; font-weight:600; color:var(--tx-2); text-decoration:none;">Sign in</a>
+          <a href="auth.html?mode=signup" style="display:inline-flex; align-items:center; gap:8px; height:40px; padding:0 6px 0 18px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:13.5px; font-weight:700; text-decoration:none;">Get Started
+            <span style="width:28px; height:28px; border-radius:50%; background:var(--bg-page); color:var(--acc-tx); display:inline-flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
+        </span>
+        <div class="dv-chip" id="accountChip" hidden>
+          <button class="dv-chip-trigger" id="acctTrigger" type="button" title="Account">
+            <span class="dv-chip-avatarwrap"><span class="dv-chip-avatar" id="acctAvatar"></span><span class="dv-chip-status" id="acctStatus" hidden></span></span>
+            <span class="dv-chip-name" id="acctName"></span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </button>
-          <span id="authButtons" style="display:contents;">
-            <a href="auth.html" style="display:inline-flex; align-items:center; height:40px; padding:0 14px; font-size:14px; font-weight:600; color:var(--text-secondary); text-decoration:none;">Sign in</a>
-            <a href="auth.html?mode=signup" style="display:inline-flex; align-items:center; height:40px; padding:0 18px; border-radius:9px; background:var(--accent); color:var(--text-on-accent); font-size:14px; font-weight:600; text-decoration:none; box-shadow:var(--shadow-card);">Sign up</a>
+          <div class="dv-chip-menu" id="acctMenu" hidden>
+            <a class="dv-chip-item" href="account.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"></path></svg>Account</a>
+            <button class="dv-chip-item dv-chip-danger" id="acctSignOut" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>Sign out</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ HERO ============ -->
+  <a id="top"></a>
+  <section style="position:relative; max-width:1280px; margin:0 auto; padding:64px 32px 40px; text-align:center;">
+    <div style="display:flex; align-items:center; justify-content:center; gap:14px;">
+      <div style="display:flex;">
+        <span style="width:34px; height:34px; border-radius:50%; border:2px solid var(--bg-page); background:#8B5E3C; color:#F5F2EA; font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center;">AV</span>
+        <span style="width:34px; height:34px; border-radius:50%; border:2px solid var(--bg-page); background:#DCC9A3; color:#0F172A; font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; margin-left:-10px;">MP</span>
+        <span style="width:34px; height:34px; border-radius:50%; border:2px solid var(--bg-page); background:#2A3548; color:#F5F2EA; font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; margin-left:-10px;">IC</span>
+        <span style="width:34px; height:34px; border-radius:50%; border:2px solid var(--bg-page); background:var(--bg-panel); color:var(--acc-tx); font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; margin-left:-10px;">+</span>
+      </div>
+      <div style="text-align:left;">
+        <div style="display:flex; gap:2px; color:var(--acc-tx);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+        </div>
+        <p style="margin:3px 0 0; font-size:12px; color:var(--tx-3);">Trusted by modern firms</p>
+      </div>
+    </div>
+    <h1 style="margin:28px auto 0; max-width:900px; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(40px,5.6vw,68px); font-weight:800; line-height:1.06; letter-spacing:-0.03em; color:var(--tx-1); text-wrap:balance;">Intelligent Legal Workflows<br>To Drive Your <span style="color:var(--acc-tx);">Firm Forward</span></h1>
+    <p style="margin:20px auto 0; max-width:560px; font-size:16px; line-height:1.6; color:var(--tx-2);">Draft, review and sign without the busywork in between — one quiet, private workspace built for the way firms actually work.</p>
+    <div style="margin-top:30px; display:flex; justify-content:center; gap:14px; flex-wrap:wrap;">
+      <a href="enroll.html?mode=demo" style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 8px 0 24px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:14.5px; font-weight:700; text-decoration:none;">Request A Demo
+        <span style="width:32px; height:32px; border-radius:50%; background:var(--bg-page); color:var(--acc-tx); display:inline-flex; align-items:center; justify-content:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+      </a>
+      <a href="#work" style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 22px; border-radius:999px; border:1px solid rgba(var(--br),0.22); color:var(--tx-1); font-size:14.5px; font-weight:600; text-decoration:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20"></polygon></svg> See The App
+      </a>
+    </div>
+
+    <!-- media panel -->
+    <div style="position:relative; margin:52px auto 0; max-width:1080px; height:440px; border-radius:24px; overflow:hidden; border:1px solid rgba(var(--br),0.12); box-shadow:0 24px 60px -22px rgba(0,0,0,0.65);">
+      <div class="dv-slot" style="position:absolute; inset:0;"><span>Product video still — coming soon</span></div>
+      <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;">
+        <span style="display:inline-flex; align-items:center; gap:10px; padding:12px 22px; border-radius:999px; background:var(--scrim); backdrop-filter:blur(8px); border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:13px; font-weight:600;">
+          <span style="width:30px; height:30px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 21 12 7 20"></polygon></svg></span>
+          Play Video
+        </span>
+      </div>
+    </div>
+
+    <!-- client strip -->
+    <div style="margin-top:44px; display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:20px 44px; opacity:0.6;">
+      <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.02em; color:var(--tx-2);">Vasilescu &amp; Partners</span>
+      <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.02em; color:var(--tx-2);">Lex Iuris</span>
+      <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.02em; color:var(--tx-2);">Meridian Law</span>
+      <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.02em; color:var(--tx-2);">Aequitas</span>
+      <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.02em; color:var(--tx-2);">Novak Legal</span>
+    </div>
+  </section>
+
+  <!-- ============ WHO WE ARE ============ -->
+  <section id="who" style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px;">
+    <div style="display:flex; justify-content:center;">
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> Who We Are</span>
+    </div>
+    <p style="margin:26px auto 0; max-width:820px; text-align:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(20px,2.4vw,28px); font-weight:600; line-height:1.45; color:var(--tx-2);">We build intelligent legal workflows for modern law firms — committed to delivering <span style="color:var(--acc-tx);">smart, scalable and private</span> software. With a deep understanding of legal practice, we focus on <span style="color:var(--acc-tx);">removing the administrative work</span> so lawyers can focus on the rest.</p>
+    <div style="margin-top:24px; display:flex; justify-content:center;">
+      <a href="#services" style="display:inline-flex; align-items:center; gap:10px; height:44px; padding:0 6px 0 20px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:13.5px; font-weight:700; text-decoration:none;">See How We Work
+        <span style="width:30px; height:30px; border-radius:50%; background:var(--bg-page); color:var(--acc-tx); display:inline-flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+      </a>
+    </div>
+
+    <div class="dv-grid-who" style="margin-top:48px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; align-items:stretch;">
+      <div style="position:relative; border-radius:22px; overflow:visible;">
+        <div style="position:absolute; top:-28px; left:-8px; z-index:2; width:128px; height:128px; border-radius:50%; background:var(--acc); color:#0F172A; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; box-shadow:0 14px 34px -12px rgba(0,0,0,0.6);">
+          <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:26px; font-weight:800;">GDPR</span>
+          <span style="font-size:10.5px; font-weight:600; line-height:1.3;">by design<br>EU data residency</span>
+        </div>
+        <div style="height:340px; border-radius:22px; overflow:hidden; border:1px solid rgba(var(--br),0.12);">
+          <div class="dv-slot"><span>Team at work</span></div>
+        </div>
+      </div>
+      <div style="position:relative; border-radius:22px;">
+        <div style="height:340px; border-radius:22px; overflow:hidden; border:1px solid rgba(var(--br),0.12);">
+          <div class="dv-slot"><span>Office / firm photo</span></div>
+        </div>
+        <div style="position:absolute; right:-14px; bottom:-24px; z-index:2; width:128px; height:128px;">
+          <div style="position:absolute; inset:0; border-radius:50%; background:var(--bg-panel); border:1px solid rgba(var(--br),0.16);"></div>
+          <svg viewBox="0 0 100 100" style="position:absolute; inset:0; animation:dvSpin 14s linear infinite;">
+            <defs><path id="dvCirc" d="M 50,50 m -36,0 a 36,36 0 1,1 72,0 a 36,36 0 1,1 -72,0"></path></defs>
+            <text style="font-size:9.2px; font-weight:600; letter-spacing:0.22em; fill:var(--tx-2);"><textPath href="#dvCirc">PRIVACY FIRST · LEGAL GRADE · NO AI TRAINING · </textPath></text>
+          </svg>
+          <span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--acc-tx);"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SERVICES ============ -->
+  <section id="services" style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px;">
+    <div style="display:flex; justify-content:center;">
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> The Platform That Drives Success</span>
+    </div>
+    <h2 style="margin:18px auto 0; text-align:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4vw,44px); font-weight:800; letter-spacing:-0.03em; color:var(--tx-1);">Smart Tools For <span style="color:var(--acc-tx);">Legal Work</span></h2>
+
+    <div class="dv-grid-services" style="margin-top:44px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) minmax(0,1fr); gap:20px; align-items:stretch;">
+      <div style="display:grid; gap:20px;">
+        <div style="background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:20px; padding:26px; display:flex; flex-direction:column; gap:12px;">
+          <span style="width:46px; height:46px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px;">AI</span>
+          <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:19px; font-weight:700; color:var(--tx-1);">AI Summaries</h3>
+          <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--tx-3);">Hundreds of pages, reduced to the clauses, dates and risks that matter — 84 pages summarized with 3 risks and 6 key dates flagged.</p>
+          <a href="#contact" style="margin-top:auto; display:inline-flex; align-items:center; gap:8px; width:max-content; padding:8px 4px 8px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:12.5px; font-weight:600; text-decoration:none;">Read More
+            <span style="width:24px; height:24px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
+        </div>
+        <div style="background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:20px; padding:26px; display:flex; flex-direction:column; gap:12px;">
+          <span style="width:46px; height:46px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px;">DR</span>
+          <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:19px; font-weight:700; color:var(--tx-1);">AI Drafting</h3>
+          <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--tx-3);">Engagement letters and contracts, generated in your firm's voice, from your firm's templates.</p>
+          <a href="#contact" style="margin-top:auto; display:inline-flex; align-items:center; gap:8px; width:max-content; padding:8px 4px 8px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:12.5px; font-weight:600; text-decoration:none;">Read More
+            <span style="width:24px; height:24px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
+        </div>
+      </div>
+      <div style="border-radius:22px; overflow:hidden; border:1px solid rgba(var(--br),0.12); min-height:520px; position:relative;">
+        <div class="dv-slot" style="position:absolute; inset:0;"><span>App on a laptop or phone</span></div>
+      </div>
+      <div style="display:grid; gap:20px;">
+        <div style="background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:20px; padding:26px; display:flex; flex-direction:column; gap:12px;">
+          <span style="width:46px; height:46px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px;">SS</span>
+          <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:19px; font-weight:700; color:var(--tx-1);">Smart Search</h3>
+          <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--tx-3);">Find precedent across every matter your firm has ever handled — instantly, across all your files.</p>
+          <a href="#contact" style="margin-top:auto; display:inline-flex; align-items:center; gap:8px; width:max-content; padding:8px 4px 8px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:12.5px; font-weight:600; text-decoration:none;">Read More
+            <span style="width:24px; height:24px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
+        </div>
+        <div style="background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:20px; padding:26px; display:flex; flex-direction:column; gap:12px;">
+          <span style="width:46px; height:46px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px;">WF</span>
+          <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:19px; font-weight:700; color:var(--tx-1);">Workflows</h3>
+          <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--tx-3);">Intake. Draft. Review. Close. Every step in sequence, no handoffs, with realtime sync for your whole team.</p>
+          <a href="#contact" style="margin-top:auto; display:inline-flex; align-items:center; gap:8px; width:max-content; padding:8px 4px 8px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:12.5px; font-weight:600; text-decoration:none;">Read More
+            <span style="width:24px; height:24px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- join banner -->
+    <div style="margin-top:24px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:999px; padding:12px 14px 12px 18px;">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <div style="display:flex;">
+          <span style="width:32px; height:32px; border-radius:50%; border:2px solid var(--bg-card); background:#8B5E3C; color:#F5F2EA; font-size:10px; font-weight:700; display:inline-flex; align-items:center; justify-content:center;">AV</span>
+          <span style="width:32px; height:32px; border-radius:50%; border:2px solid var(--bg-card); background:#DCC9A3; color:#0F172A; font-size:10px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; margin-left:-9px;">MP</span>
+          <span style="width:32px; height:32px; border-radius:50%; border:2px solid var(--bg-card); background:#2A3548; color:#F5F2EA; font-size:10px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; margin-left:-9px;">IC</span>
+        </div>
+        <p style="margin:0; font-size:14px; font-weight:600; color:var(--tx-1);">Join the firms already working smarter <span style="color:var(--tx-3); font-weight:500;">— solo lawyers to full legal teams</span></p>
+      </div>
+      <a href="enroll.html" style="display:inline-flex; align-items:center; gap:10px; height:42px; padding:0 6px 0 20px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:13px; font-weight:700; text-decoration:none;">Enroll Your Firm
+        <span style="width:30px; height:30px; border-radius:50%; background:var(--bg-page); color:var(--acc-tx); display:inline-flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ============ PROCESS ============ -->
+  <section style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px;">
+    <div style="display:flex; justify-content:center;">
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> Built To Work For You</span>
+    </div>
+    <h2 style="margin:18px auto 0; text-align:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4vw,44px); font-weight:800; letter-spacing:-0.03em; color:var(--tx-1);">Our Process, Your <span style="color:var(--acc-tx);">Matters</span></h2>
+
+    <div class="dv-grid-process" style="margin-top:44px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:32px; align-items:center;">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; gap:16px; align-items:flex-start; background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:16px; padding:20px 22px;">
+          <span style="width:40px; height:40px; flex-shrink:0; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-weight:800; font-size:15px;">01</span>
+          <div>
+            <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:17px; font-weight:700; color:var(--tx-1);">Discover And Intake</h3>
+            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--tx-3);">We start by understanding your matters — projects, members and role-based access set up from day one.</p>
+          </div>
+        </div>
+        <div style="display:flex; gap:16px; align-items:flex-start; background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:16px; padding:20px 22px;">
+          <span style="width:40px; height:40px; flex-shrink:0; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-weight:800; font-size:15px;">02</span>
+          <div>
+            <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:17px; font-weight:700; color:var(--tx-1);">Draft And Review</h3>
+            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--tx-3);">AI drafting from your firm's templates, smart search across precedent, and team chat right next to the files.</p>
+          </div>
+        </div>
+        <div style="display:flex; gap:16px; align-items:flex-start; background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:16px; padding:20px 22px;">
+          <span style="width:40px; height:40px; flex-shrink:0; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-weight:800; font-size:15px;">03</span>
+          <div>
+            <h3 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:17px; font-weight:700; color:var(--tx-1);">Sign And Close</h3>
+            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--tx-3);">Track every step to signature, keep files in a local folder on your machine, and stay current with the legal updates feed.</p>
+          </div>
+        </div>
+      </div>
+      <div style="position:relative; height:420px; border-radius:24px; overflow:hidden; border:1px solid rgba(var(--br),0.12);">
+        <div class="dv-slot" style="position:absolute; inset:0;"><span>Lawyers collaborating</span></div>
+        <div style="position:absolute; left:16px; bottom:16px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none;">
+          <span style="padding:6px 14px; border-radius:999px; background:var(--scrim2); border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:11.5px; font-weight:600;">.docx</span>
+          <span style="padding:6px 14px; border-radius:999px; background:var(--scrim2); border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:11.5px; font-weight:600;">.pdf</span>
+          <span style="padding:6px 14px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:11.5px; font-weight:700;">AI Summary</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MARQUEE ============ -->
+  <section style="position:relative; max-width:1600px; margin:0 auto; padding:8px 32px 24px; overflow:hidden; mask-image:linear-gradient(to right, transparent, #000 10%, #000 90%, transparent); -webkit-mask-image:linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);">
+    <div style="overflow:hidden; padding:8px 0;">
+      <div style="display:flex; gap:12px; width:max-content; animation:dvMarqL 32s linear infinite;">
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>AI Summaries</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Smart Search</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Legal Updates</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Team Chat</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Local Files</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>AI Drafting</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Realtime Sync</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Doc Viewer</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>AI Summaries</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Smart Search</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Legal Updates</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Team Chat</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Local Files</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>AI Drafting</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Realtime Sync</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Doc Viewer</span>
+      </div>
+    </div>
+    <div style="overflow:hidden; padding:8px 0;">
+      <div style="display:flex; gap:12px; width:max-content; animation:dvMarqR 36s linear infinite;">
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Role Permissions</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Encrypted Storage</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>GDPR Compliant</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>No AI Training</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Private Workspaces</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Multi-Matter View</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Intake To Close</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>EU Data Residency</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Role Permissions</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Encrypted Storage</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>GDPR Compliant</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>No AI Training</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Private Workspaces</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--acc); color:#0F172A; font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Multi-Matter View</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>Intake To Close</span>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; border:1px solid rgba(var(--br),0.14); background:var(--bg-panel); color:var(--tx-2); font-size:13px; font-weight:600; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7;"></span>EU Data Residency</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RECENT WORK ============ -->
+  <section id="work" style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:20px; flex-wrap:wrap;">
+      <div>
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> Our Work In Action</span>
+        <h2 style="margin:16px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4vw,44px); font-weight:800; letter-spacing:-0.03em; color:var(--tx-1);">Inside The <span style="color:var(--acc-tx);">Workspace</span></h2>
+      </div>
+      <a href="installers.html" style="display:inline-flex; align-items:center; gap:10px; height:44px; padding:0 6px 0 20px; border-radius:999px; border:1px solid var(--acc-tx); color:var(--acc-tx); font-size:13px; font-weight:700; text-decoration:none;">Explore The App
+        <span style="width:30px; height:30px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+      </a>
+    </div>
+
+    <div class="dv-grid-work" style="margin-top:40px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,1fr); gap:18px; align-items:center;">
+      <div style="height:320px; border-radius:20px; overflow:hidden; border:1px solid rgba(var(--br),0.12); opacity:0.85;">
+        <div class="dv-slot"><span>Chat screen</span></div>
+      </div>
+      <div style="position:relative; height:380px; border-radius:22px; overflow:hidden; border:1px solid var(--acc-tx); box-shadow:0 24px 60px -22px rgba(0,0,0,0.65);">
+        <div class="dv-slot" style="position:absolute; inset:0;"><span>AI Generate screen</span></div>
+        <div style="position:absolute; left:16px; right:16px; bottom:16px; background:#F5F2EA; border-radius:14px; padding:14px 18px; pointer-events:none;">
+          <p style="margin:0; font-size:10px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:#8B5E3C;">AI Drafting</p>
+          <p style="margin:4px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; color:#0F172A;">Shareholder Agreement v3</p>
+        </div>
+        <span style="position:absolute; top:16px; right:16px; width:44px; height:44px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; pointer-events:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+      </div>
+      <div style="height:320px; border-radius:20px; overflow:hidden; border:1px solid rgba(var(--br),0.12); opacity:0.85;">
+        <div class="dv-slot"><span>Files screen</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ EXPERTISE / STATS ============ -->
+  <section class="dv-sec-expertise" style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:48px; align-items:center;">
+    <div style="position:relative; height:420px;">
+      <div style="position:absolute; inset:24px; border-radius:50%; background:radial-gradient(circle, rgba(220,201,163,0.16), transparent 70%);"></div>
+      <div style="position:absolute; inset:0; border-radius:26px; overflow:hidden; border:1px solid rgba(var(--br),0.12);">
+        <div class="dv-slot"><span>App detail shot</span></div>
+      </div>
+    </div>
+    <div>
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> Backed By Real Guarantees</span>
+      <h2 style="margin:16px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(28px,3.6vw,40px); font-weight:800; letter-spacing:-0.03em; line-height:1.1; color:var(--tx-1);">Legal-Grade Confidentiality, <span style="color:var(--acc-tx);">From The First Line Of Code</span></h2>
+      <p style="margin:16px 0 0; max-width:520px; font-size:15px; line-height:1.6; color:var(--tx-3);">Engineered around client privilege — encrypted storage, per-firm tenancy with matter-level permissions, and files that stay in a local folder on your machine.</p>
+      <div style="margin-top:30px; display:flex; gap:36px; flex-wrap:wrap;">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+          <span style="width:88px; height:88px; border-radius:50%; border:2px solid var(--acc-tx); display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:21px; font-weight:800; color:var(--tx-1);">100%</span>
+          <span style="font-size:12.5px; font-weight:600; color:var(--tx-2); text-align:center;">EU Data Residency</span>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+          <span style="width:88px; height:88px; border-radius:50%; border:2px solid var(--acc-tx); display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:21px; font-weight:800; color:var(--tx-1);">0</span>
+          <span style="font-size:12.5px; font-weight:600; color:var(--tx-2); text-align:center;">Documents Used For AI Training</span>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+          <span style="width:88px; height:88px; border-radius:50%; border:2px solid var(--acc-tx); display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:21px; font-weight:800; color:var(--tx-1);">24/7</span>
+          <span style="font-size:12.5px; font-weight:600; color:var(--tx-2); text-align:center;">Realtime Sync Across Devices</span>
+        </div>
+      </div>
+      <a href="security.html" style="margin-top:32px; display:inline-flex; align-items:center; gap:10px; height:46px; padding:0 6px 0 22px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:14px; font-weight:700; text-decoration:none;">See How We Work
+        <span style="width:32px; height:32px; border-radius:50%; background:var(--bg-page); color:var(--acc-tx); display:inline-flex; align-items:center; justify-content:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ============ TESTIMONIAL ============ -->
+  <section style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px;">
+    <div style="display:flex; justify-content:center;">
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> What Our Clients Say</span>
+    </div>
+    <h2 style="margin:18px auto 0; text-align:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4vw,44px); font-weight:800; letter-spacing:-0.03em; color:var(--tx-1);">Results <span style="color:var(--acc-tx);">From Firms</span></h2>
+
+    <div class="dv-grid-testimonial" style="margin-top:44px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:32px; align-items:center; background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:24px; padding:28px;">
+      <div style="position:relative; height:300px; border-radius:18px; overflow:hidden; border:1px solid rgba(var(--br),0.12);">
+        <div class="dv-slot"><span>Client portrait</span></div>
+        <span style="position:absolute; top:14px; left:14px; width:40px; height:40px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:20px; font-weight:800; pointer-events:none;">&ldquo;</span>
+      </div>
+      <div>
+        <div style="display:flex; gap:3px; color:var(--acc-tx);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"></path></svg>
+        </div>
+        <p style="margin:18px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(18px,2vw,23px); font-weight:600; line-height:1.5; color:var(--tx-1);">&ldquo;Docvex removed the administrative work between drafting and signature. The judgment, the advocacy, the counsel — <span style="color:var(--acc-tx);">that stays with us.</span>&rdquo;</p>
+        <div style="margin-top:22px; display:flex; align-items:center; gap:12px;">
+          <span style="width:42px; height:42px; border-radius:50%; background:#8B5E3C; color:#F5F2EA; display:inline-flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;">AV</span>
+          <div>
+            <p style="margin:0; font-size:14.5px; font-weight:700; color:var(--tx-1);">Andrei Vasilescu</p>
+            <p style="margin:2px 0 0; font-size:12.5px; color:var(--tx-3);">Managing Partner, Vasilescu &amp; Partners</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ UPDATES / NEWS ============ -->
+  <section id="updates" style="position:relative; max-width:1280px; margin:0 auto; padding:72px 32px;">
+    <div style="display:flex; justify-content:center;">
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.16); background:var(--bg-panel); font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--tx-2);"><span style="width:6px; height:6px; border-radius:50%; background:var(--acc);"></span> Insights That Drive Practice</span>
+    </div>
+    <h2 style="margin:18px auto 0; text-align:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4vw,44px); font-weight:800; letter-spacing:-0.03em; color:var(--tx-1);">Legal Updates And <span style="color:var(--acc-tx);">Expert Signals</span></h2>
+
+    <div class="dv-grid-news" style="margin-top:44px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px;">
+      <div style="background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:16px;">
+        <div style="position:relative; height:230px; border-radius:14px; overflow:hidden;">
+          <div class="dv-slot"><span>Article image</span></div>
+          <span style="position:absolute; top:12px; left:12px; display:flex; flex-direction:column; align-items:center; padding:8px 12px; border-radius:12px; background:var(--acc); color:#0F172A; pointer-events:none;">
+            <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:18px; font-weight:800; line-height:1;">14</span>
+            <span style="font-size:10px; font-weight:700; letter-spacing:0.06em;">JUL</span>
           </span>
-          <div id="accountChip" hidden>
-            <button id="acctTrigger" type="button" title="Account" style="display:inline-flex; align-items:center; gap:10px; background:transparent; border:none; cursor:pointer; padding:4px 8px 4px 6px; border-radius:10px; transition:background 150ms;">
-              <span style="position:relative; flex-shrink:0; display:inline-flex;">
-                <span id="acctAvatar" style="width:36px; height:36px; border-radius:50%; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; color:#fff; background:#0369A1;"></span>
-                <span id="acctStatus" hidden style="position:absolute; bottom:-1px; right:-1px; width:12px; height:12px; border-radius:50%; box-shadow:0 0 0 2.5px var(--bg-page);"></span>
-              </span>
-              <span style="display:flex; flex-direction:column; line-height:1.2; text-align:left;">
-                <span id="acctName" style="font-size:13.5px; font-weight:600; color:var(--text-primary);"></span>
-                <span id="acctEmail" style="font-size:11.5px; color:var(--text-muted);"></span>
-              </span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:2px;"><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
+        </div>
+        <div style="padding:0 8px 8px;">
+          <div style="display:flex; gap:14px; align-items:center;">
+            <span style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--acc-tx);">EU &middot; GDPR</span>
+            <span style="font-size:11.5px; color:var(--tx-3);">Intelligence feed &middot; Reviewed by humans</span>
           </div>
+          <h3 style="margin:10px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:19px; font-weight:700; line-height:1.35; color:var(--tx-1);">New Guidance On AI-Generated Personal Data</h3>
+          <p style="margin:8px 0 0; font-size:13.5px; line-height:1.6; color:var(--tx-3);">EDPB clarifies controller obligations for synthetic outputs derived from training data.</p>
+          <a href="#updates" style="margin-top:14px; display:inline-flex; align-items:center; gap:8px; width:max-content; padding:8px 4px 8px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:12.5px; font-weight:600; text-decoration:none;">Read More
+            <span style="width:24px; height:24px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
         </div>
       </div>
-    </header>
-
-    <!-- ============ HERO ============ -->
-    <a id="top"></a>
-    <section style="position:relative; max-width:1440px; margin:0 auto; padding:clamp(40px,6vw,76px) clamp(20px,5vw,40px) clamp(48px,7vw,90px);">
-
-      <!-- VARIATION A — Product UI -->
-      <div class="dv-hero" data-hero="0">
-      <div style="display:flex; flex-wrap:wrap; gap:clamp(40px,6vw,64px); align-items:center;">
-        <div style="flex:1 1 380px; min-width:300px;">
-          <h1 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(46px,7vw,80px); font-weight:800; line-height:0.98; letter-spacing:-0.04em; color:var(--text-primary);">Documents.<br><span style="color:var(--accent);">Solved.</span></h1>
-          <p style="margin:22px 0 0; max-width:440px; font-size:clamp(16px,1.5vw,19px); line-height:1.6; color:var(--text-secondary);">Draft, review and sign without the busywork in between — in one quiet, private workspace built for the way firms actually work.</p>
-          <div style="margin-top:30px; display:flex; flex-wrap:wrap; gap:12px;">
-            <a href="enroll.html?mode=demo" style="display:inline-flex; align-items:center; height:48px; padding:0 24px; border-radius:11px; background:var(--accent); color:var(--text-on-accent); font-size:15px; font-weight:600; text-decoration:none; box-shadow:var(--shadow-card);">Request a demo</a>
-            <a href="enroll.html?mode=waitlist" style="display:inline-flex; align-items:center; height:48px; padding:0 24px; border-radius:11px; background:var(--bg-card); border:1px solid var(--border-strong); color:var(--text-primary); font-size:15px; font-weight:600; text-decoration:none;">Join the waitlist</a>
-          </div>
-          <div style="margin-top:18px; display:flex; align-items:center; gap:10px;">
-            <span style="font-size:12px; font-weight:500; color:var(--text-muted);">Preview</span>
-            <div id="heroViewToggle" title="Switch the hero visual" style="display:inline-flex; align-items:center; gap:2px; padding:3px; border-radius:999px; background:var(--bg-elevated); border:1px solid var(--border);">
-              <button type="button" data-hero-view="app" class="hero-seg is-on" style="border:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:999px; background:var(--accent); color:var(--text-on-accent);">App</button>
-              <button type="button" data-hero-view="cabinet" class="hero-seg" style="border:none; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:999px; background:transparent; color:var(--text-secondary);">Cabinet</button>
-            </div>
-          </div>
-          <div style="margin-top:40px; display:grid; grid-template-columns:repeat(2,1fr); gap:22px 28px; max-width:460px;">
-            <div><p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">Drafting</p><p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">From your firm's templates.</p></div>
-            <div><p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">Privacy</p><p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">GDPR by design.</p></div>
-            <div><p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">Workflows</p><p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">Intake to close.</p></div>
-            <div><p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">Insight</p><p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">Across every matter.</p></div>
-          </div>
-        </div>
-
-        <div style="flex:1 1 460px; min-width:320px;">
-          <!-- Cabinet recreation (from the old website) — toggled from the header -->
-          <div id="heroCabinet" hidden></div>
-          <!-- APP WINDOW MOCK -->
-          <div id="heroAppPreview" class="spot-surface" style="border-radius:16px; overflow:hidden; background:var(--bg-card); border:1px solid var(--border); box-shadow:var(--shadow-elev);">
-            <div style="display:flex; align-items:center; gap:14px; height:38px; padding:0 14px; background:var(--bg-elevated); border-bottom:1px solid var(--border);">
-              <div data-os="mac" style="display:flex; gap:7px;"><span style="width:11px;height:11px;border-radius:50%;background:#ec6a5e;"></span><span style="width:11px;height:11px;border-radius:50%;background:#f4bf4f;"></span><span style="width:11px;height:11px;border-radius:50%;background:#61c454;"></span></div>
-              <span style="flex:1; text-align:center; font-size:12px; font-weight:600; color:var(--text-muted); letter-spacing:0.04em;">Docvex — Vasilescu &amp; Partners</span>
-              <span data-os="mac" style="width:46px;"></span>
-              <div data-os="win" style="display:none; align-items:center; gap:0; margin-right:-8px;">
-                <span style="width:30px; height:24px; display:inline-flex; align-items:center; justify-content:center; color:var(--text-muted);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><line x1="4" y1="12" x2="20" y2="12"/></svg></span>
-                <span style="width:30px; height:24px; display:inline-flex; align-items:center; justify-content:center; color:var(--text-muted);"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="1.5"/></svg></span>
-                <span style="width:30px; height:24px; display:inline-flex; align-items:center; justify-content:center; color:var(--text-muted);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></span>
-              </div>
-            </div>
-            <div style="display:flex; align-items:center; gap:6px; height:42px; padding:0 12px; background:var(--bg-card); border-bottom:1px solid var(--border);">
-              <span style="width:22px; height:22px; border-radius:6px; overflow:hidden; background:#0F172A; flex-shrink:0;"><img src="assets/logo.png" alt="" style="width:100%;height:100%;object-fit:cover;"></span>
-              <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:12px; font-weight:700; letter-spacing:0.06em; color:var(--text-primary); margin-right:8px;">DOCVEX</span>
-              <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:6px; background:var(--bg-elevated); color:var(--text-primary); font-size:11px; font-weight:600;">Chat</span>
-              <span style="padding:4px 9px; font-size:11px; font-weight:500; color:var(--text-muted);">Files</span>
-              <span style="padding:4px 9px; font-size:11px; font-weight:500; color:var(--text-muted);">AI</span>
-              <span style="padding:4px 9px; font-size:11px; font-weight:500; color:var(--text-muted);">Updates</span>
-              <span title="Split view" style="margin-left:auto; width:24px; height:24px; border-radius:6px; background:var(--accent-tint); color:var(--accent); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="18" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></span>
-              <span style="margin-left:8px; width:24px; height:24px; border-radius:50%; background:var(--accent); color:var(--text-on-accent); font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">VP</span>
-            </div>
-            <div style="padding:12px; background:var(--bg-page);">
-              <div style="display:grid; grid-template-columns:1.25fr 1fr; grid-template-rows:1fr 1fr; gap:8px; height:322px;">
-
-                <!-- PRIMARY pane — Chat (spans left column) -->
-                <div style="grid-row:1 / span 2; display:flex; flex-direction:column; border:1px solid var(--border); border-radius:11px; overflow:hidden; background:transparent; min-height:0;">
-                  <div style="display:flex;align-items:center;gap:5px;padding:5px 7px;border-bottom:1px solid var(--border);background:var(--bg-sidebar);flex:0 0 auto;"><span style="width:16px;height:16px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted);flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span><span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;letter-spacing:-0.01em;color:var(--text-primary);flex-shrink:0;">Chat</span><span style="color:var(--text-muted);font-size:10px;flex-shrink:0;">·</span><span style="font-size:9.5px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:0;">Team &amp; private chat</span><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text-secondary);font-size:9px;flex-shrink:0;">Chat <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span></div>
-                  <div style="flex:1 1 auto; min-height:0; overflow:hidden; padding:10px; display:flex; flex-direction:column; gap:7px;">
-                    <div style="display:flex; gap:6px; align-items:flex-end;"><span style="width:18px;height:18px;border-radius:50%;background:var(--accent-soft);color:#0F172A;font-size:8px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">AV</span><span style="max-width:82%;padding:6px 9px;border-radius:11px 11px 11px 3px;background:var(--bg-elevated);border:1px solid var(--border);font-size:10.5px;line-height:1.35;color:var(--text-primary);">Can you send the latest draft?</span></div>
-                    <div style="display:flex; justify-content:flex-end;"><span style="max-width:82%;padding:6px 9px;border-radius:11px 11px 3px 11px;background:var(--accent);color:var(--text-on-accent);font-size:10.5px;line-height:1.35;">On it — sharing the v3 now.</span></div>
-                    <div style="display:flex; gap:6px; align-items:flex-end;"><span style="width:18px;height:18px;border-radius:50%;background:var(--accent-soft);color:#0F172A;font-size:8px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">AV</span><span style="max-width:82%;padding:6px 9px;border-radius:11px 11px 11px 3px;background:var(--bg-elevated);border:1px solid var(--border);font-size:10.5px;line-height:1.35;color:var(--text-primary);">Perfect. Ready for signature?</span></div>
-                  </div>
-                  <div style="flex:0 0 auto; padding:8px; border-top:1px solid var(--border); background:color-mix(in srgb, var(--bg-page) 66%, transparent);"><div style="display:flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--border);border-radius:999px;background:var(--bg-input);"><span style="flex:1;font-size:9.5px;color:var(--text-muted);">Message the team…</span><span style="width:16px;height:16px;border-radius:50%;background:var(--accent);color:var(--text-on-accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span></div></div>
-                </div>
-
-                <!-- AI pane (right top) -->
-                <div style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:transparent;min-height:0;">
-                  <div style="display:flex;align-items:center;gap:5px;padding:5px 7px;border-bottom:1px solid var(--border);background:var(--bg-sidebar);flex:0 0 auto;"><span style="width:16px;height:16px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted);flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span><span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;letter-spacing:-0.01em;color:var(--text-primary);flex-shrink:0;">AI</span><span style="color:var(--text-muted);font-size:10px;flex-shrink:0;">·</span><span style="font-size:9.5px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:0;">DocVex AI</span><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text-secondary);font-size:9px;flex-shrink:0;">AI <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span></div>
-                  <div style="flex:1 1 auto; min-height:0; overflow:hidden; padding:9px; display:flex; flex-direction:column; gap:6px;">
-                    <div style="display:flex; gap:6px;"><span style="width:16px;height:16px;border-radius:5px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 15.5 8.5 14 2.4 12.5a.5.5 0 0 1 0-1L8.5 10 9.9 3.9a.5.5 0 0 1 1 0L12.3 10l6.1 1.5a.5.5 0 0 1 0 1L12.3 14l-1.4 6.1a.5.5 0 0 1-1 0Z"/></svg></span><span style="font-size:10px;line-height:1.45;color:var(--text-secondary);">Summarized 84 pages — 3 risks, 6 key dates flagged.</span></div>
-                    <div style="margin-top:auto; display:flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid var(--border); border-radius:999px; background:var(--bg-input);"><span style="flex:1;font-size:9.5px;color:var(--text-muted);">Ask DocVex AI…</span><span style="width:14px;height:14px;border-radius:50%;background:var(--accent);color:var(--text-on-accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span></div>
-                  </div>
-                </div>
-
-                <!-- Files pane (right bottom) -->
-                <div style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:transparent;min-height:0;">
-                  <div style="display:flex;align-items:center;gap:5px;padding:5px 7px;border-bottom:1px solid var(--border);background:var(--bg-sidebar);flex:0 0 auto;"><span style="width:16px;height:16px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted);flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span><span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;letter-spacing:-0.01em;color:var(--text-primary);flex-shrink:0;">Files</span><span style="color:var(--text-muted);font-size:10px;flex-shrink:0;">·</span><span style="font-size:9.5px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:0;">Project files</span><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text-secondary);font-size:9px;flex-shrink:0;">Files <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span></div>
-                  <div style="flex:1 1 auto; min-height:0; overflow:hidden; padding:7px; display:flex; flex-direction:column; gap:5px;">
-                    <div style="display:flex;align-items:center;gap:7px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);"><span style="width:18px;height:18px;border-radius:5px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="14 2 14 8 20 8"/></svg></span><span style="flex:1;min-width:0;font-size:10px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Shareholder Agreement v3.pdf</span><span style="font-size:8.5px;color:var(--text-muted);flex-shrink:0;">2m</span></div>
-                    <div style="display:flex;align-items:center;gap:7px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);"><span style="width:18px;height:18px;border-radius:5px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="14 2 14 8 20 8"/></svg></span><span style="flex:1;min-width:0;font-size:10px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Diligence Checklist.xlsx</span><span style="font-size:8.5px;color:var(--text-muted);flex-shrink:0;">1h</span></div>
-                    <div style="display:flex;align-items:center;gap:7px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);"><span style="width:18px;height:18px;border-radius:5px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="14 2 14 8 20 8"/></svg></span><span style="flex:1;min-width:0;font-size:10px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Board minutes — 14 Oct.docx</span><span style="font-size:8.5px;color:var(--text-muted);flex-shrink:0;">2d</span></div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      </div>
-
-    </section>
-
-    <!-- ============ FEATURES ============ -->
-    <section id="features" style="position:relative; max-width:1440px; margin:0 auto; padding:clamp(56px,8vw,104px) clamp(20px,5vw,40px);">
-      <p style="margin:0; font-size:11px; font-weight:700; letter-spacing:0.22em; text-transform:uppercase; color:var(--accent);">The platform</p>
-      <h2 style="margin:14px 0 0; max-width:780px; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(32px,5vw,54px); font-weight:700; line-height:1.04; letter-spacing:-0.035em; color:var(--text-primary); text-wrap:pretty;">Everything a modern firm needs. <span style="color:var(--accent);">In one quiet workspace.</span></h2>
-      <p style="margin:18px 0 0; max-width:560px; font-size:17px; line-height:1.6; color:var(--text-secondary);">Drafting. Organizing. Tracking. Done — so your lawyers can focus on the rest.</p>
-
-      <div style="margin-top:44px; display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px;">
-        <div class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:18px; padding:28px; box-shadow:var(--shadow-card);">
-          <span style="display:inline-flex; width:46px; height:46px; border-radius:13px; align-items:center; justify-content:center; background:#0b1024; border:1px solid color-mix(in srgb, #7f77dd 32%, transparent); overflow:hidden;">
-            <svg viewBox="0 0 100 100" width="100%" height="100%" aria-label="AI" style="display:block;">
-              <defs>
-                <radialGradient id="sphHalo" cx="50%" cy="48%" r="50%">
-                  <stop offset="0%" stop-color="#3a5cff" stop-opacity="0.45"/>
-                  <stop offset="45%" stop-color="#2a3bdd" stop-opacity="0.18"/>
-                  <stop offset="100%" stop-color="#0c1226" stop-opacity="0"/>
-                </radialGradient>
-                <filter id="sphGlow" x="-80%" y="-80%" width="260%" height="260%">
-                  <feGaussianBlur in="SourceGraphic" stdDeviation="1.4" result="b"/>
-                  <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-              </defs>
-              <circle cx="50" cy="50" r="42" fill="url(#sphHalo)"/>
-              <g id="sphStrands" filter="url(#sphGlow)" fill="none" stroke-width="2.4"></g>
-              <circle cx="50" cy="16" r="1.5" fill="#dfe6ff" filter="url(#sphGlow)"/>
-              <circle cx="50" cy="84" r="1.5" fill="#dfe6ff" filter="url(#sphGlow)"/>
-            </svg>
+      <div style="background:var(--bg-card); border:1px solid rgba(var(--br),0.10); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:16px;">
+        <div style="position:relative; height:230px; border-radius:14px; overflow:hidden;">
+          <div class="dv-slot"><span>Article image</span></div>
+          <span style="position:absolute; top:12px; left:12px; display:flex; flex-direction:column; align-items:center; padding:8px 12px; border-radius:12px; background:var(--acc); color:#0F172A; pointer-events:none;">
+            <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:18px; font-weight:800; line-height:1;">11</span>
+            <span style="font-size:10px; font-weight:700; letter-spacing:0.06em;">JUL</span>
           </span>
-          <h3 style="margin:18px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:20px; font-weight:700; letter-spacing:-0.01em; color:var(--text-primary);">AI summaries</h3>
-          <p style="margin:9px 0 0; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Hundreds of pages, reduced to the clauses, dates and risks that matter.</p>
         </div>
-        <div class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:18px; padding:28px; box-shadow:var(--shadow-card);">
-          <span style="display:inline-flex; width:46px; height:46px; border-radius:13px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 22%, transparent);"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
-          <h3 style="margin:18px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:20px; font-weight:700; letter-spacing:-0.01em; color:var(--text-primary);">Smart search</h3>
-          <p style="margin:9px 0 0; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Find precedent across every matter your firm has ever handled.</p>
-        </div>
-        <div class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:18px; padding:28px; box-shadow:var(--shadow-card);">
-          <span style="display:inline-flex; width:46px; height:46px; border-radius:13px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 22%, transparent);"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>
-          <h3 style="margin:18px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:20px; font-weight:700; letter-spacing:-0.01em; color:var(--text-primary);">Workflows</h3>
-          <p style="margin:9px 0 0; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Intake. Draft. Review. Close. Every step in sequence, no handoffs.</p>
-        </div>
-        <div class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:18px; padding:28px; box-shadow:var(--shadow-card);">
-          <span style="display:inline-flex; width:46px; height:46px; border-radius:13px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 22%, transparent);"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
-          <h3 style="margin:18px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:20px; font-weight:700; letter-spacing:-0.01em; color:var(--text-primary);">Drafting</h3>
-          <p style="margin:9px 0 0; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Engagement letters and contracts, generated in your firm's voice.</p>
-        </div>
-        <div class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:18px; padding:28px; box-shadow:var(--shadow-card);">
-          <span style="display:inline-flex; width:46px; height:46px; border-radius:13px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 22%, transparent);"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
-          <h3 style="margin:18px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:20px; font-weight:700; letter-spacing:-0.01em; color:var(--text-primary);">Legal updates</h3>
-          <p style="margin:9px 0 0; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Legislation, summarized for your practice and reviewed by humans.</p>
+        <div style="padding:0 8px 8px;">
+          <div style="display:flex; gap:14px; align-items:center;">
+            <span style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--acc-tx);">Romania &middot; Civil</span>
+            <span style="font-size:11.5px; color:var(--tx-3);">Intelligence feed &middot; Reviewed by humans</span>
+          </div>
+          <h3 style="margin:10px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:19px; font-weight:700; line-height:1.35; color:var(--tx-1);">Amendments To The Civil Procedure Code</h3>
+          <p style="margin:8px 0 0; font-size:13.5px; line-height:1.6; color:var(--tx-3);">Updated appeal deadlines and revised electronic filing requirements, in effect Q3.</p>
+          <a href="#updates" style="margin-top:14px; display:inline-flex; align-items:center; gap:8px; width:max-content; padding:8px 4px 8px 16px; border-radius:999px; border:1px solid rgba(var(--br),0.18); color:var(--tx-1); font-size:12.5px; font-weight:600; text-decoration:none;">Read More
+            <span style="width:24px; height:24px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- ============ SECURITY ============ -->
-    <section id="security" class="spot-surface" style="position:relative; padding:clamp(56px,8vw,104px) clamp(20px,5vw,40px); background:var(--bg-card); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
-      <div style="max-width:1440px; margin:0 auto; display:flex; flex-wrap:wrap; gap:clamp(36px,5vw,64px);">
-        <div style="flex:1 1 320px; min-width:280px;">
-          <p style="margin:0; display:inline-flex; align-items:center; gap:9px; font-size:11px; font-weight:700; letter-spacing:0.22em; text-transform:uppercase; color:var(--accent);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg> Security</p>
-          <h2 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4.5vw,48px); font-weight:700; line-height:1.05; letter-spacing:-0.035em; color:var(--text-primary);">Built with <span style="color:var(--accent);">legal-grade confidentiality.</span></h2>
-          <p style="margin:18px 0 0; max-width:380px; font-size:17px; line-height:1.6; color:var(--text-secondary);">Engineered around client privilege — from the first line of code.</p>
-          <p style="margin:26px 0 0; max-width:420px; font-size:12.5px; line-height:1.6; color:var(--text-muted);">Docvex is a workflow platform. It does not provide legal advice or replace lawyers.</p>
+  <!-- ============ BIG CTA ============ -->
+  <section id="contact" style="position:relative; max-width:1280px; margin:0 auto; padding:40px 32px 80px;">
+    <div class="dv-grid-cta" style="position:relative; overflow:hidden; border-radius:28px; border:1px solid rgba(var(--br),0.12); background:linear-gradient(120deg, var(--bg-panel), var(--bg-card)); display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); align-items:center;">
+      <div style="padding:56px 48px;">
+        <h2 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(40px,5vw,64px); font-weight:800; letter-spacing:-0.02em; line-height:1.02; color:var(--tx-1);">LET US BUILD</h2>
+        <div style="display:flex; align-items:center; gap:18px; margin-top:8px;">
+          <span style="width:64px; height:64px; border-radius:50%; background:var(--acc); color:#0F172A; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          <h2 style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(40px,5vw,64px); font-weight:800; letter-spacing:0.04em; line-height:1.02; color:transparent; -webkit-text-stroke:1.5px var(--acc-tx);">TOGETHER</h2>
         </div>
-        <div style="flex:1 1 440px; min-width:300px; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px;">
-          <div class="spot-surface" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:16px; padding:22px;">
-            <span style="display:inline-flex; width:40px; height:40px; border-radius:11px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-            <h3 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">Encrypted storage</h3>
-            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--text-secondary);">Encryption at rest and in transit, with industry-standard keys.</p>
-          </div>
-          <div class="spot-surface" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:16px; padding:22px;">
-            <span style="display:inline-flex; width:40px; height:40px; border-radius:11px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
-            <h3 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">GDPR-compliant</h3>
-            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--text-secondary);">EU infrastructure and EU data residency, by design.</p>
-          </div>
-          <div class="spot-surface" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:16px; padding:22px;">
-            <span style="display:inline-flex; width:40px; height:40px; border-radius:11px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
-            <h3 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">Private workspaces</h3>
-            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--text-secondary);">Per-firm tenancy with matter-level permissions.</p>
-          </div>
-          <div class="spot-surface" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:16px; padding:22px;">
-            <span style="display:inline-flex; width:40px; height:40px; border-radius:11px; align-items:center; justify-content:center; background:var(--accent-tint); color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg></span>
-            <h3 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; color:var(--text-primary);">No AI training</h3>
-            <p style="margin:6px 0 0; font-size:13.5px; line-height:1.55; color:var(--text-secondary);">Your documents never train our models. Ever.</p>
-          </div>
+        <p style="margin:22px 0 0; max-width:420px; font-size:15px; line-height:1.6; color:var(--tx-2);">Request a demo or join the waitlist — we onboard a handful of firms at a time so every rollout gets attention.</p>
+        <div style="margin-top:26px; display:flex; gap:12px; flex-wrap:wrap;">
+          <a href="enroll.html?mode=demo" style="display:inline-flex; align-items:center; gap:10px; height:46px; padding:0 6px 0 22px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:14px; font-weight:700; text-decoration:none;">Request A Demo
+            <span style="width:32px; height:32px; border-radius:50%; background:var(--bg-page); color:var(--acc-tx); display:inline-flex; align-items:center; justify-content:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg></span>
+          </a>
+          <a href="enroll.html" style="display:inline-flex; align-items:center; height:46px; padding:0 22px; border-radius:999px; border:1px solid rgba(var(--br),0.22); color:var(--tx-1); font-size:14px; font-weight:600; text-decoration:none;">Join The Waitlist</a>
         </div>
       </div>
-    </section>
-
-    <!-- ============ LEGAL UPDATES ============ -->
-    <section id="updates" style="position:relative; max-width:1440px; margin:0 auto; padding:clamp(56px,8vw,104px) clamp(20px,5vw,40px); display:flex; flex-wrap:wrap; gap:clamp(36px,5vw,72px);">
-      <div style="flex:1 1 300px; min-width:280px;">
-        <p style="margin:0; display:inline-flex; align-items:center; gap:9px; font-size:11px; font-weight:700; letter-spacing:0.22em; text-transform:uppercase; color:var(--accent);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> Legal AI updates</p>
-        <h2 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4.5vw,48px); font-weight:700; line-height:1.05; letter-spacing:-0.035em; color:var(--text-primary);">The law moves. <span style="color:var(--accent);">Your firm moves with it.</span></h2>
-        <p style="margin:18px 0 0; max-width:380px; font-size:17px; line-height:1.6; color:var(--text-secondary);">Legislation, summarized for your practice and reviewed by humans.</p>
-        <a href="#demo" style="margin-top:22px; display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--accent); text-decoration:none;">See the feed <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
+      <div style="position:relative; height:100%; min-height:360px;">
+        <div class="dv-slot" style="position:absolute; inset:0;"><span>Team photo</span></div>
+        <div style="position:absolute; inset:0; background:linear-gradient(90deg, var(--bg-panel) 0%, transparent 40%); pointer-events:none;"></div>
       </div>
-      <div class="spot-surface" style="flex:1 1 460px; min-width:300px; background:var(--bg-card); border:1px solid var(--border); border-radius:20px; box-shadow:var(--shadow-card); padding:8px 22px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 0 12px; border-bottom:1px solid var(--border);">
-          <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; color:var(--text-primary);">Intelligence feed</p>
-          <span style="display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border-radius:999px; background:var(--accent-tint); font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent);"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:dv-pulse 2s ease-in-out infinite;"></span>Live</span>
-        </div>
-        <div style="display:flex; align-items:flex-start; gap:14px; padding:16px 0; border-bottom:1px solid var(--border);">
-          <span style="width:38px;height:38px;border-radius:10px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 15.5 8.5 14 2.4 12.5a.5.5 0 0 1 0-1L8.5 10 9.9 3.9a.5.5 0 0 1 1 0L12.3 10l6.1 1.5a.5.5 0 0 1 0 1L12.3 14l-1.4 6.1a.5.5 0 0 1-1 0Z"/></svg></span>
-          <div style="flex:1; min-width:0;">
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;"><span style="font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:var(--accent);color:var(--text-on-accent);">EU · GDPR</span><span style="font-size:11px;color:var(--text-muted);">Today · 09:14</span></div>
-            <p style="margin:9px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:14.5px; font-weight:600; color:var(--text-primary);">New guidance on AI-generated personal data.</p>
-            <p style="margin:5px 0 0; font-size:13px; line-height:1.5; color:var(--text-secondary);">EDPB clarifies controller obligations for synthetic outputs derived from training data.</p>
-          </div>
-        </div>
-        <div style="display:flex; align-items:flex-start; gap:14px; padding:16px 0; border-bottom:1px solid var(--border);">
-          <span style="width:38px;height:38px;border-radius:10px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="14 2 14 8 20 8"/></svg></span>
-          <div style="flex:1; min-width:0;">
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;"><span style="font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:var(--accent);color:var(--text-on-accent);">Romania · Civil</span><span style="font-size:11px;color:var(--text-muted);">Yesterday</span></div>
-            <p style="margin:9px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:14.5px; font-weight:600; color:var(--text-primary);">Amendments to the Civil Procedure Code.</p>
-            <p style="margin:5px 0 0; font-size:13px; line-height:1.5; color:var(--text-secondary);">Updated appeal deadlines and revised electronic filing requirements, in effect Q3.</p>
-          </div>
-        </div>
-        <div style="display:flex; align-items:flex-start; gap:14px; padding:16px 0;">
-          <span style="width:38px;height:38px;border-radius:10px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span>
-          <div style="flex:1; min-width:0;">
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;"><span style="font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:var(--accent);color:var(--text-on-accent);">Employment</span><span style="font-size:11px;color:var(--text-muted);">2 days ago</span></div>
-            <p style="margin:9px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:14.5px; font-weight:600; color:var(--text-primary);">Remote work registration changes.</p>
-            <p style="margin:5px 0 0; font-size:13px; line-height:1.5; color:var(--text-secondary);">Employers must notify the labour inspectorate within 5 working days.</p>
-          </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer style="position:relative; border-top:1px solid rgba(var(--br),0.10); background:var(--bg-footer); overflow:hidden;">
+    <div class="dv-footer-grid" style="position:relative; max-width:1280px; margin:0 auto; padding:56px 32px 32px; display:grid; grid-template-columns:1.4fr 1fr 1.2fr 1.2fr; gap:40px;">
+      <div>
+        <a href="index.html" style="display:flex; align-items:center; gap:10px; text-decoration:none;">
+          <span style="width:36px; height:36px; border-radius:50%; overflow:hidden; background:var(--bg-panel); border:2px solid var(--acc-tx); display:inline-flex;"><img src="assets/logo.png" alt="DocVex" style="width:100%; height:100%; object-fit:cover;"></span>
+          <span style="font-family:'Plus Jakarta Sans',sans-serif; font-size:17px; font-weight:800; letter-spacing:0.08em; color:var(--tx-1);">DOCVEX</span>
+        </a>
+        <p style="margin:16px 0 0; max-width:280px; font-size:13px; line-height:1.6; color:var(--tx-3);">Intelligent legal workflows for modern law firms. Privacy-first local file storage and focused AI tooling.</p>
+      </div>
+      <div>
+        <p style="margin:0 0 14px; font-family:'Plus Jakarta Sans',sans-serif; font-size:14px; font-weight:700; color:var(--tx-1);">Quick Links</p>
+        <div style="display:flex; flex-direction:column; gap:9px;">
+          <a href="index.html" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Home</a>
+          <a href="company.html" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Company</a>
+          <a href="#services" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Services</a>
+          <a href="#updates" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Updates</a>
+          <a href="installers.html" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Download</a>
+          <a href="enroll.html" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Enroll</a>
+          <a href="legal.html" style="font-size:13px; color:var(--tx-3); text-decoration:none;">Legal</a>
         </div>
       </div>
-    </section>
-
-    <!-- ============ PRICING ============ -->
-    <section id="pricing" class="spot-surface" style="position:relative; padding:clamp(56px,8vw,104px) clamp(20px,5vw,40px); background:var(--bg-card); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
-      <div style="max-width:1440px; margin:0 auto;">
-        <div style="text-align:center; max-width:680px; margin:0 auto;">
-          <p style="margin:0; font-size:11px; font-weight:700; letter-spacing:0.22em; text-transform:uppercase; color:var(--accent);">Pricing</p>
-          <h2 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4.5vw,48px); font-weight:700; line-height:1.05; letter-spacing:-0.035em; color:var(--text-primary);">Priced for the work <span style="color:var(--accent);">it gives you back.</span></h2>
-          <p style="margin:16px 0 0; font-size:17px; line-height:1.6; color:var(--text-secondary);">Three plans, matched to the size of your firm.</p>
-        </div>
-        <div style="margin-top:44px; display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px; align-items:start;">
-          <div class="spot-surface" style="background:var(--bg-page); border:1px solid var(--border); border-radius:20px; padding:30px; box-shadow:var(--shadow-card);">
-            <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:24px; font-weight:700; color:var(--text-primary);">Solo</p>
-            <p style="margin:5px 0 0; font-size:13.5px; color:var(--text-muted);">For independent lawyers.</p>
-            <p style="margin:22px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:26px; font-weight:700; color:var(--text-primary);">On request</p>
-            <p style="margin:3px 0 0; font-size:12px; color:var(--text-muted);">Pricing matched to your firm.</p>
-            <div style="margin:22px 0; display:flex; flex-direction:column; gap:11px;">
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> AI drafting from your templates.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Smart search across your matters.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Legal updates feed.</span>
-            </div>
-            <a href="enroll.html?mode=demo" style="display:flex; align-items:center; justify-content:center; height:46px; border-radius:11px; background:var(--bg-card); border:1px solid var(--border-strong); color:var(--text-primary); font-size:14.5px; font-weight:600; text-decoration:none;">Talk to us</a>
-          </div>
-
-          <div class="spot-surface accent-panel" style="--spot-glow:var(--text-on-accent); background:var(--accent); border:1px solid var(--accent); border-radius:20px; padding:30px; box-shadow:var(--shadow-elev); position:relative;">
-            <span style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); padding:5px 14px; border-radius:999px; background:var(--text-on-accent); color:var(--accent); font-size:10px; font-weight:700; letter-spacing:0.16em; text-transform:uppercase; white-space:nowrap;">Most popular</span>
-            <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:24px; font-weight:700; color:var(--text-on-accent);">Firm</p>
-            <p style="margin:5px 0 0; font-size:13.5px; color:color-mix(in srgb, var(--text-on-accent) 72%, transparent);">For boutique and mid-sized firms.</p>
-            <p style="margin:22px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:26px; font-weight:700; color:var(--text-on-accent);">On request</p>
-            <p style="margin:3px 0 0; font-size:12px; color:color-mix(in srgb, var(--text-on-accent) 58%, transparent);">Pricing matched to your firm.</p>
-            <div style="margin:22px 0; display:flex; flex-direction:column; gap:11px;">
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:color-mix(in srgb, var(--text-on-accent) 88%, transparent);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-on-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Everything in Solo.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:color-mix(in srgb, var(--text-on-accent) 88%, transparent);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-on-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Workflows. Intake to close.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:color-mix(in srgb, var(--text-on-accent) 88%, transparent);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-on-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Role-based permissions.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:color-mix(in srgb, var(--text-on-accent) 88%, transparent);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-on-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Multi-matter view.</span>
-            </div>
-            <a href="enroll.html?mode=demo" style="display:flex; align-items:center; justify-content:center; height:46px; border-radius:11px; background:var(--text-on-accent); color:var(--accent); font-size:14.5px; font-weight:700; text-decoration:none;">Request demo</a>
-          </div>
-
-          <div class="spot-surface" style="background:var(--bg-page); border:1px solid var(--border); border-radius:20px; padding:30px; box-shadow:var(--shadow-card);">
-            <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:24px; font-weight:700; color:var(--text-primary);">Enterprise</p>
-            <p style="margin:5px 0 0; font-size:13.5px; color:var(--text-muted);">For large firms and legal teams.</p>
-            <p style="margin:22px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:26px; font-weight:700; color:var(--text-primary);">On request</p>
-            <p style="margin:3px 0 0; font-size:12px; color:var(--text-muted);">Pricing matched to your firm.</p>
-            <div style="margin:22px 0; display:flex; flex-direction:column; gap:11px;">
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Everything in Firm.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Custom integrations.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> On-premise option.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> SSO and audit logs.</span>
-              <span style="display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text-secondary);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:2px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg> Dedicated success manager.</span>
-            </div>
-            <a href="enroll.html?mode=demo" style="display:flex; align-items:center; justify-content:center; height:46px; border-radius:11px; background:var(--bg-card); border:1px solid var(--border-strong); color:var(--text-primary); font-size:14.5px; font-weight:600; text-decoration:none;">Contact sales</a>
-          </div>
+      <div>
+        <p style="margin:0 0 14px; font-family:'Plus Jakarta Sans',sans-serif; font-size:14px; font-weight:700; color:var(--tx-1);">Contact Info</p>
+        <div style="display:flex; flex-direction:column; gap:9px;">
+          <a href="mailto:docvexteam@docvex.ro" style="font-size:13px; color:var(--tx-3); text-decoration:none;">docvexteam@docvex.ro</a>
+          <a href="https://docvex.ro" style="font-size:13px; color:var(--tx-3); text-decoration:none;">docvex.ro</a>
+          <span style="font-size:13px; color:var(--tx-3);">Bucharest, Romania</span>
         </div>
       </div>
-    </section>
-
-    <!-- ============ FAQ ============ -->
-    <section id="faq" style="position:relative; max-width:1440px; margin:0 auto; padding:clamp(56px,8vw,104px) clamp(20px,5vw,40px); display:flex; flex-wrap:wrap; gap:clamp(36px,5vw,72px);">
-      <div style="flex:1 1 300px; min-width:260px;">
-        <p style="margin:0; font-size:11px; font-weight:700; letter-spacing:0.22em; text-transform:uppercase; color:var(--accent);">FAQ</p>
-        <h2 style="margin:14px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(30px,4.5vw,48px); font-weight:700; line-height:1.05; letter-spacing:-0.035em; color:var(--text-primary);">Answers. <span style="color:var(--accent);">Without the marketing.</span></h2>
-        <p style="margin:18px 0 0; max-width:360px; font-size:17px; line-height:1.6; color:var(--text-secondary);">Plain language for the cautious — because lawyers ask better questions than most.</p>
+      <div>
+        <p style="margin:0 0 14px; font-family:'Plus Jakarta Sans',sans-serif; font-size:14px; font-weight:700; color:var(--tx-1);">Newsletter</p>
+        <form id="newsForm" style="display:flex; gap:0; border:1px solid rgba(var(--br),0.16); border-radius:999px; padding:4px; background:var(--bg-panel);">
+          <input id="newsEmail" type="email" placeholder="Your Email" autocomplete="email" aria-label="Email for the newsletter" style="flex:1; min-width:0; background:transparent; border:none; outline:none; padding:0 14px; font-size:13px; color:var(--tx-1); font-family:inherit;">
+          <button type="submit" style="border:none; cursor:pointer; padding:9px 18px; border-radius:999px; background:var(--acc); color:#0F172A; font-size:12.5px; font-weight:700; font-family:inherit;">Subscribe</button>
+        </form>
+        <p class="dv-newsmsg" id="newsMsg" hidden></p>
+        <p style="margin:10px 0 0; font-size:11px; color:var(--tx-3);">Legal updates, summarized for your practice.</p>
       </div>
-      <div style="flex:1 1 480px; min-width:300px; display:flex; flex-direction:column; gap:12px;">
-        <details data-faq open class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:4px 20px; box-shadow:var(--shadow-card);">
-          <summary style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:600; color:var(--text-primary);">Does Docvex replace lawyers?<span data-plus style="display:inline-flex; transition:transform 220ms; color:var(--accent); flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></summary>
-          <p style="margin:0; padding:0 0 16px; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">No. Docvex removes the administrative work. The judgment, the advocacy, the counsel — that stays with you.</p>
-        </details>
-        <details data-faq class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:4px 20px; box-shadow:var(--shadow-card);">
-          <summary style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:600; color:var(--text-primary);">Is my firm's data used to train AI?<span data-plus style="display:inline-flex; transition:transform 220ms; color:var(--accent); flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></summary>
-          <p style="margin:0; padding:0 0 16px; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Never. Your documents stay yours.</p>
-        </details>
-        <details data-faq class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:4px 20px; box-shadow:var(--shadow-card);">
-          <summary style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:600; color:var(--text-primary);">Is Docvex GDPR compliant?<span data-plus style="display:inline-flex; transition:transform 220ms; color:var(--accent); flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></summary>
-          <p style="margin:0; padding:0 0 16px; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Yes. EU infrastructure, EU data residency, and processing agreements designed for European firms.</p>
-        </details>
-        <details data-faq class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:4px 20px; box-shadow:var(--shadow-card);">
-          <summary style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:600; color:var(--text-primary);">What about hallucinations?<span data-plus style="display:inline-flex; transition:transform 220ms; color:var(--accent); flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></summary>
-          <p style="margin:0; padding:0 0 16px; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Every output is grounded in your firm's templates and prior matters. Humans review before anything leaves the firm.</p>
-        </details>
-        <details data-faq class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:4px 20px; box-shadow:var(--shadow-card);">
-          <summary style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:600; color:var(--text-primary);">How long does a rollout take?<span data-plus style="display:inline-flex; transition:transform 220ms; color:var(--accent); flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></summary>
-          <p style="margin:0; padding:0 0 16px; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Most firms are live in under a week.</p>
-        </details>
-        <details data-faq class="spot-surface" style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:4px 20px; box-shadow:var(--shadow-card);">
-          <summary style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:600; color:var(--text-primary);">What does it cost?<span data-plus style="display:inline-flex; transition:transform 220ms; color:var(--accent); flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></summary>
-          <p style="margin:0; padding:0 0 16px; font-size:14.5px; line-height:1.6; color:var(--text-secondary);">Pricing is matched to the size of your firm. Talk to us.</p>
-        </details>
+    </div>
+    <div style="position:relative; max-width:1280px; margin:0 auto; padding:18px 32px 26px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-top:1px solid rgba(var(--br),0.08);">
+      <p style="margin:0; font-size:12px; color:var(--tx-3);">&copy; 2026 DocVex. All rights reserved.</p>
+      <div style="display:flex; gap:20px;">
+        <a href="terms.html" style="font-size:12px; color:var(--tx-3); text-decoration:none;">Terms &amp; Conditions</a>
+        <a href="privacy.html" style="font-size:12px; color:var(--tx-3); text-decoration:none;">Privacy Policy</a>
       </div>
-    </section>
+    </div>
+    <div style="position:relative; height:150px; overflow:hidden; pointer-events:none;">
+      <span class="dv-watermark-text" style="position:absolute; left:50%; top:10px; transform:translateX(-50%); font-family:'Plus Jakarta Sans',sans-serif; font-size:230px; font-weight:800; letter-spacing:0.02em; line-height:1; color:transparent; -webkit-text-stroke:1.5px var(--wm); white-space:nowrap;">DOCVEX</span>
+    </div>
+  </footer>
 
-    <!-- ============ FINAL CTA ============ -->
-    <section id="demo" style="position:relative; max-width:1440px; margin:0 auto; padding:0 clamp(20px,5vw,40px) clamp(64px,9vw,120px);">
-      <div class="spot-surface accent-panel" style="--spot-glow:var(--text-on-accent); position:relative; overflow:hidden; border-radius:28px; background:var(--accent); padding:clamp(48px,7vw,96px) clamp(24px,5vw,48px); text-align:center;">
-        <div style="position:relative; max-width:680px; margin:0 auto;">
-          <p style="margin:0; font-size:11px; font-weight:700; letter-spacing:0.3em; text-transform:uppercase; color:var(--text-on-accent);">docvex.ro</p>
-          <h2 style="margin:16px 0 0; font-family:'Plus Jakarta Sans',sans-serif; font-size:clamp(32px,5vw,56px); font-weight:800; line-height:1.02; letter-spacing:-0.04em; color:var(--text-on-accent);">Modernize <span style="color:var(--accent-soft);">your legal workflow.</span></h2>
-          <p style="margin:24px auto 0; max-width:460px; font-size:17px; line-height:1.6; color:color-mix(in srgb, var(--text-on-accent) 75%, transparent);">Cut the busywork. Get your evenings back.</p>
-          <div style="margin-top:32px; display:flex; flex-wrap:wrap; gap:12px; justify-content:center;">
-            <a href="enroll.html?mode=demo" style="display:inline-flex; align-items:center; height:50px; padding:0 26px; border-radius:12px; background:var(--text-on-accent); color:var(--accent); font-size:15px; font-weight:700; text-decoration:none;">Request a demo</a>
-            <a href="enroll.html?mode=waitlist" style="display:inline-flex; align-items:center; height:50px; padding:0 26px; border-radius:12px; background:transparent; border:1px solid color-mix(in srgb, var(--text-on-accent) 40%, transparent); color:var(--text-on-accent); font-size:15px; font-weight:600; text-decoration:none;">Join the waitlist</a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ FOOTER ============ -->
-    <footer style="position:relative; background:var(--bg-elevated); color:var(--text-primary); border-top:1px solid var(--border);">
-      <div style="max-width:1440px; margin:0 auto; padding:64px clamp(20px,5vw,40px);">
-        <div class="dv-footer-grid" style="display:grid; grid-template-columns:1.4fr 1fr 1fr 1.1fr; gap:40px;">
-
-          <!-- Brand -->
-          <div>
-            <div style="display:flex; align-items:center;">
-              <img src="assets/logo-lockup.png" alt="DocVex — Intelligent Legal Workflows" style="height:40px; width:auto; display:block;">
-            </div>
-            <p style="margin:16px 0 0; max-width:24rem; font-size:14px; line-height:1.6; color:var(--text-muted);">Intelligent legal workflows for modern law firms.</p>
-            <div style="margin-top:24px; display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--text-muted);">
-              <p style="margin:0;"><a href="mailto:docvexteam@docvex.ro" style="color:inherit; text-decoration:none;">docvexteam@docvex.ro</a></p>
-              <p style="margin:0;"><a href="https://docvex.ro" style="color:inherit; text-decoration:none;">docvex.ro</a></p>
-            </div>
-            <div style="margin-top:22px; max-width:280px;">
-              <p style="margin:0 0 8px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.16em; color:var(--text-muted);">Legal Newsfeed — weekly briefing</p>
-              <form id="dvxNewsForm" style="display:flex; gap:7px;">
-                <input id="dvxNewsEmail" type="email" placeholder="you@firm.law" autocomplete="email" aria-label="Email for the newsletter" style="flex:1; min-width:0; height:36px; padding:0 11px; border-radius:9px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-primary); font-size:12.5px; font-family:inherit; outline:none;">
-                <button type="submit" style="height:36px; padding:0 14px; border:none; border-radius:9px; background:var(--accent); color:var(--text-on-accent); font-size:12.5px; font-weight:700; font-family:inherit; cursor:pointer;">Subscribe</button>
-              </form>
-              <p id="dvxNewsMsg" style="margin:8px 0 0; font-size:12px; color:var(--text-muted);" hidden></p>
-            </div>
-          </div>
-
-          <!-- Product -->
-          <div>
-            <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.22em; color:var(--accent);">Product</p>
-            <ul style="margin:16px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:10px;">
-              <li><a href="#features" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Features</a></li>
-              <li><a href="#security" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Security</a></li>
-              <li><a href="#updates" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Updates</a></li>
-              <li><a href="#pricing" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Pricing</a></li>
-              <li><a href="#faq" style="font-size:14px; color:var(--text-muted); text-decoration:none;">FAQ</a></li>
-            </ul>
-          </div>
-
-          <!-- Company -->
-          <div>
-            <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.22em; color:var(--accent);">Company</p>
-            <ul style="margin:16px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:10px;">
-              <li><a href="company.html#about" style="font-size:14px; color:var(--text-muted); text-decoration:none;">About</a></li>
-              <li><a href="company.html#customers" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Customers</a></li>
-              <li><a href="company.html#careers" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Careers</a></li>
-              <li><a href="company.html#contact" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Contact</a></li>
-            </ul>
-          </div>
-
-          <!-- Legal -->
-          <div>
-            <p style="margin:0; font-family:'Plus Jakarta Sans',sans-serif; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.22em; color:var(--accent);">Legal</p>
-            <ul style="margin:16px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:10px;">
-              <li><a href="terms.html" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Terms &amp; Conditions</a></li>
-              <li><a href="privacy.html" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Privacy Policy</a></li>
-              <li><a href="cookies.html" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Cookie Policy</a></li>
-              <li><a href="gdpr.html" style="font-size:14px; color:var(--text-muted); text-decoration:none;">GDPR Compliance</a></li>
-              <li><a href="security.html" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Security Policy</a></li>
-              <li><a href="dpa.html" style="font-size:14px; color:var(--text-muted); text-decoration:none;">Data Processing Agreement</a></li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="dv-footer-bottom" style="margin-top:48px; display:flex; flex-direction:row; align-items:center; justify-content:space-between; gap:12px; border-top:1px solid var(--border); padding-top:24px; font-size:12px; color:var(--text-muted);">
-          <p style="margin:0;">© 2026 DOCVEX. All rights reserved.</p>
-          <p style="margin:0; text-transform:uppercase; letter-spacing:0.22em;">Intelligent Legal Workflows</p>
-        </div>
-      </div>
-    </footer>
   </div>
-
 </div>
-<script type="module">
-// Footer newsletter signup → enrollments (type 'newsletter'; degrades to a
-// tagged 'waitlist' row if the live table constrains the type column).
-import { supabase as dvxNewsSb } from './supabase.js';
-(function () {
-  var form = document.getElementById('dvxNewsForm');
-  if (!form) return;
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    var email = (document.getElementById('dvxNewsEmail').value || '').trim();
-    var msg = document.getElementById('dvxNewsMsg');
-    var show = function (text, ok) { msg.textContent = text; msg.style.color = ok ? '' : 'var(--danger-soft)'; msg.hidden = false; };
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { show('Please enter a valid email address.', false); return; }
-    dvxNewsSb.from('enrollments').insert({ type: 'newsletter', name: null, email: email, firm: null, message: null }).then(function (res) {
-      if (res.error) return dvxNewsSb.from('enrollments').insert({ type: 'waitlist', name: null, email: email, firm: null, message: '[newsletter subscription]' });
-      return res;
-    }).then(function (res) {
-      if (res && res.error) { show('Something went wrong — try again later.', false); return; }
-      form.hidden = true;
-      show('Subscribed — welcome to the briefing.', true);
-    });
-  });
-})();
-</script>
+
 <script type="module">
 import { supabase } from './supabase.js';
-// ── Signed-in header: swap the Sign in / Sign up buttons for the user's
-//    avatar + name + email by reading the app's Supabase session from
-//    localStorage (shared when the site + app are served from the same origin). ──
-// A module (like account.html / chrome.js) so the static `import` above works.
-// This block previously used dynamic import() inside a CLASSIC script, which some
-// browsers' parsers reject ("Unexpected token '/'") — aborting the whole block.
-// Guarded so an unexpected session shape can't throw and abort the module either.
+
+// ── Signed-in header: swap Sign in / Get Started for the account chip by
+//    reading the app's Supabase session (shared origin ⇒ shared session). ──
 try {
-(function () {
   var SUPABASE_AUTH_KEY = 'sb-pntxlvhkqfryyyxlqytr-auth-token';
   var AVATAR_PALETTE = ['#0891B2','#BE185D','#4F46E5','#047857','#B45309','#6D28D9','#DC2626','#0369A1','#DB2777','#059669','#7C3AED','#EA580C'];
+  var STATUS_COLORS = { online: '#23a55a', idle: '#f0b232', dnd: '#f23f43', offline: '#80848e' };
   function djb2(seed) { var h = 0; seed = seed || ''; for (var i = 0; i < seed.length; i++) { h = ((h << 5) - h) + seed.charCodeAt(i); h |= 0; } return Math.abs(h); }
   function avatarColor(seed) { return AVATAR_PALETTE[djb2(seed) % AVATAR_PALETTE.length]; }
-
-  // Activity-status colours (same as the app / account page).
-  var STATUS_COLORS = { online: '#23a55a', idle: '#f0b232', dnd: '#f23f43', offline: '#80848e' };
 
   function readUser() {
     var raw;
     try { raw = localStorage.getItem(SUPABASE_AUTH_KEY); } catch (e) { return null; }
     if (!raw) return null;
     var parsed; try { parsed = JSON.parse(raw); } catch (e) { return null; }
-    // supabase-js v2 stores the session directly; older gotrue wraps it in currentSession.
     var session = parsed && parsed.currentSession ? parsed.currentSession : parsed;
     var user = (session && session.user) || (parsed && parsed.user);
     if (!user) return null;
-    // Treat a long-expired access token with no refresh token as signed-out.
     var exp = session && session.expires_at;
     if (exp && !(session.refresh_token) && (exp * 1000) < Date.now()) return null;
     return user;
@@ -680,15 +713,11 @@ try {
     var chip = document.getElementById('accountChip');
     if (!auth || !chip) return;
     var user = readUser();
-    // Clear the inline display too — it would otherwise override [hidden]'s
-    // display:none and keep the chip visible after sign-out until a refresh.
-    if (!user) { auth.style.display = 'contents'; chip.hidden = true; chip.style.display = 'none'; return; }
+    if (!user) { auth.style.display = 'contents'; chip.hidden = true; return; }
 
     var meta = user.user_metadata || {};
     var name = meta.full_name || meta.name || user.email || 'Account';
-    var email = user.email || '';
     document.getElementById('acctName').textContent = name;
-    document.getElementById('acctEmail').textContent = email;
 
     var av = document.getElementById('acctAvatar');
     if (meta.avatar_url) {
@@ -696,10 +725,9 @@ try {
       av.innerHTML = '<img src="' + String(meta.avatar_url).replace(/"/g, '&quot;') + '" alt="" referrerpolicy="no-referrer" style="width:100%;height:100%;object-fit:cover;">';
     } else {
       av.textContent = (name.trim()[0] || '?').toUpperCase();
-      av.style.background = avatarColor(user.id || email || name);
+      av.style.background = avatarColor(user.id || user.email || name);
     }
 
-    // Activity status circle on the avatar.
     var statusDot = document.getElementById('acctStatus');
     if (statusDot) {
       var status = meta.status || 'online';
@@ -717,323 +745,137 @@ try {
 
     auth.style.display = 'none';
     chip.hidden = false;
-    chip.style.display = 'inline-flex';
   }
 
   render();
-  // Reflect sign-in / sign-out that happened in another tab while this one is open.
   window.addEventListener('storage', function (e) { if (e.key === SUPABASE_AUTH_KEY) render(); });
-  // Live same-tab updates: re-render on sign-out / status change (USER_UPDATED).
-  if (readUser()) {
-    supabase.auth.onAuthStateChange(function () { render(); });
-  }
+  if (readUser()) { supabase.auth.onAuthStateChange(function () { render(); }); }
 
-  // ── Account chip morph pill (tooltip → dropdown) ──
-  (function () {
-    var trigger = document.getElementById('acctTrigger');
-    if (!trigger) return;
-    var pill = null, curX = 0, curY = 0, isMenu = false, oldRect = null, onKey = null, onDown = null;
-    var ICON_USER = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>';
-    var ICON_OUT  = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
-    function getName() { var el = document.getElementById('acctName'); return (el && el.textContent) || 'Account'; }
-    function clamp(el) {
-      var w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
-      return { x: Math.max(8, Math.min(curX - 8 - w, vw - 8 - w)), y: Math.max(8, Math.min(curY + 8, vh - 8 - h)) };
-    }
-    function removePill() { if (pill) { pill.remove(); pill = null; } }
-    function doSignOut() {
+  // Chip dropdown (Account / Sign out)
+  var trigger = document.getElementById('acctTrigger');
+  var menu = document.getElementById('acctMenu');
+  if (trigger && menu) {
+    trigger.addEventListener('click', function (e) { e.stopPropagation(); menu.hidden = !menu.hidden; });
+    window.addEventListener('mousedown', function (e) { if (!menu.hidden && !menu.contains(e.target) && !trigger.contains(e.target)) menu.hidden = true; });
+    window.addEventListener('keydown', function (e) { if (e.key === 'Escape') menu.hidden = true; });
+    document.getElementById('acctSignOut').addEventListener('click', function () {
       supabase.auth.signOut()
-        .catch(function() { try { localStorage.removeItem(SUPABASE_AUTH_KEY); } catch(e) {} })
-        .then(function() { render(); });
-    }
-    function addDismiss() {
-      onKey = function(e) { if (e.key === 'Escape') closeMenu(); };
-      onDown = function(e) { if (pill && pill.contains(e.target)) return; if (trigger.contains(e.target)) return; closeMenu(); };
-      window.addEventListener('keydown', onKey);
-      window.addEventListener('mousedown', onDown, true);
-    }
-    function removeDismiss() {
-      if (onKey) { window.removeEventListener('keydown', onKey); onKey = null; }
-      if (onDown) { window.removeEventListener('mousedown', onDown, true); onDown = null; }
-    }
-    function openMenu() {
-      if (pill) { oldRect = pill.getBoundingClientRect(); removePill(); }
-      isMenu = true;
-      pill = document.createElement('div');
-      pill.className = 'dvx-morph-pill is-menu';
-      pill.setAttribute('role', 'menu');
-      pill.innerHTML =
-        '<ul class="dvx-morph-list" role="none">' +
-          '<li role="none"><a class="dvx-morph-item" href="account.html" role="menuitem">' + ICON_USER + 'Account</a></li>' +
-          '<li role="none"><button class="dvx-morph-item dvx-morph-danger" type="button" role="menuitem">' + ICON_OUT + 'Sign out</button></li>' +
-        '</ul>';
-      document.body.appendChild(pill);
-      pill.querySelector('.dvx-morph-danger').addEventListener('click', function() { closeMenu(); doSignOut(); });
-      var pos = clamp(pill);
-      pill.style.transition = 'none';
-      pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
-      void pill.offsetWidth;
-      if (oldRect) {
-        var nr = pill.getBoundingClientRect();
-        var sx = oldRect.width / nr.width, sy = oldRect.height / nr.height;
-        pill.style.transformOrigin = 'top right';
-        pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px) scale(' + sx + ',' + sy + ')';
-        void pill.offsetWidth;
-        pill.style.transition = 'transform 220ms cubic-bezier(0.16,1,0.3,1)';
-        pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px) scale(1,1)';
-        oldRect = null;
-      } else { pill.style.transition = ''; }
-      addDismiss();
-    }
-    function closeMenu() { isMenu = false; removeDismiss(); removePill(); }
-    trigger.addEventListener('mousemove', function(e) {
-      curX = e.clientX; curY = e.clientY;
-      if (isMenu) return;
-      if (!pill) { pill = document.createElement('div'); pill.className = 'dvx-morph-pill'; pill.setAttribute('role', 'tooltip'); document.body.appendChild(pill); }
-      pill.textContent = getName();
-      var pos = clamp(pill), first = !pill._placed; pill._placed = true;
-      if (first) { pill.style.transition = 'none'; pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)'; void pill.offsetWidth; pill.style.transition = ''; }
-      else { pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)'; }
+        .catch(function () { try { localStorage.removeItem(SUPABASE_AUTH_KEY); } catch (e) {} })
+        .then(function () { menu.hidden = true; render(); });
     });
-    trigger.addEventListener('mouseleave', function() { if (!isMenu) removePill(); });
-    trigger.addEventListener('click', function(e) { e.stopPropagation(); if (isMenu) closeMenu(); else openMenu(); });
-  })();
-})();
-} catch (e) { /* the account chip is non-essential — never let it halt the header/theme wiring */ }
-</script>
-<script>
-// ── Header scroll transition (taller & transparent at top → compact & solid on
-//    scroll). Its own block so nothing above can stop it from wiring up. ──
-(function () {
-  var hdr = document.getElementById('siteHeader');
-  if (hdr) {
-    var onScroll = function () {
-      var atTop = window.scrollY <= 8;
-      hdr.classList.toggle('at-top', atTop);
-      document.body.classList.toggle('dvx-attop', atTop);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
   }
-})();
-</script>
-<script>
-// ── Theme toggle + OS detection + cursor spotlight. Own block so dvToggleTheme
-//    is always defined for the header button, even if code above errors. ──
-(function () {
-  var root = document.getElementById('dv-root');
-  if (!root) return;
-  function setTheme(t) {
-    root.setAttribute('data-theme', t);
-    // Mirror onto <html> so the page/overscroll (macOS rubber-band) bg follows the theme.
-    document.documentElement.setAttribute('data-theme', t);
-    // The toggle shows the icon of the theme it will switch TO.
-    var next = (t === 'cream') ? 'ink' : 'cream';
-    var icons = document.querySelectorAll('[data-theme-icon]');
-    for (var i = 0; i < icons.length; i++) icons[i].style.display = (icons[i].getAttribute('data-theme-icon') === next ? '' : 'none');
-    try { localStorage.setItem('docvex.site.theme', t); } catch (e) {}
-  }
-  function toggleTheme() {
-    setTheme(root.getAttribute('data-theme') === 'cream' ? 'ink' : 'cream');
-  }
-  window.dvSetTheme = setTheme;
-  window.dvToggleTheme = toggleTheme;
-  var saved = 'cream';
-  try { saved = localStorage.getItem('docvex.site.theme') || 'cream'; } catch (e) {}
-  setTheme(saved);
+} catch (e) {}
 
-  // App-preview titlebar: match the visitor's OS (Windows controls on the right,
-  // macOS traffic lights on the left).
-  function detectOS() {
-    var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
-    var ua = navigator.userAgent || '';
-    if (/win/i.test(p) || /Windows/i.test(ua)) return 'win';
-    return 'mac';
-  }
-  var os = detectOS();
-  var macEls = document.querySelectorAll('[data-os="mac"]');
-  for (var m = 0; m < macEls.length; m++) macEls[m].style.display = (os === 'win') ? 'none' : (macEls[m].tagName === 'DIV' ? 'flex' : '');
-  var winEls = document.querySelectorAll('[data-os="win"]');
-  for (var w = 0; w < winEls.length; w++) winEls[w].style.display = (os === 'win') ? 'flex' : 'none';
-
-  // Cursor-following spotlight (matches the app's CursorSpotlight): move ONE
-  // small box via transform on each frame and counter-shift its dot grid so the
-  // brighter dots stay pinned to the viewport grid.
-  (function initSpotlight() {
-    var el = document.querySelector('.cursor-spotlight');
-    if (!el) return;
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { el.style.display = 'none'; return; }
-    var R = 215, frame = null;
-    var x = window.innerWidth / 2, y = window.innerHeight / 2;
-    // Opaque sections cover the global spotlight, so each carries its own masked
-    // dot layer; we feed it the cursor position RELATIVE to that section.
-    var surfaces = document.querySelectorAll('.spot-surface');
-    function apply() {
-      frame = null;
-      var px = Math.round(x), py = Math.round(y);
-      el.style.transform = 'translate3d(' + (px - R) + 'px,' + (py - R) + 'px,0)';
-      el.style.backgroundPosition = (R - px) + 'px ' + (R - py) + 'px';
-      for (var i = 0; i < surfaces.length; i++) {
-        var r = surfaces[i].getBoundingClientRect();
-        surfaces[i].style.setProperty('--sx', (x - r.left) + 'px');
-        surfaces[i].style.setProperty('--sy', (y - r.top) + 'px');
+// ── Footer newsletter → enrollments table (same rows as chrome.js's form:
+//    type 'newsletter', degrading to a tagged 'waitlist' row if constrained). ──
+var form = document.getElementById('newsForm');
+if (form) {
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var email = (document.getElementById('newsEmail').value || '').trim();
+    var msg = document.getElementById('newsMsg');
+    var show = function (text, ok) { msg.textContent = text; msg.classList.toggle('err', !ok); msg.hidden = false; };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { show('Please enter a valid email address.', false); return; }
+    supabase.from('enrollments').insert({ type: 'newsletter', name: null, email: email, firm: null, message: null }).then(function (res) {
+      if (res.error) {
+        return supabase.from('enrollments').insert({ type: 'waitlist', name: null, email: email, firm: null, message: '[newsletter subscription]' });
       }
-    }
-    function onMove(e) {
-      x = e.clientX; y = e.clientY;
-      if (frame == null) frame = requestAnimationFrame(apply);
-    }
-    apply();
-    window.addEventListener('pointermove', onMove, { passive: true });
-  })();
-})();
+      return res;
+    }).then(function (res) {
+      if (res && res.error) show('Something went wrong — please try again.', false);
+      else { show("You're subscribed — legal updates, weekly.", true); document.getElementById('newsEmail').value = ''; }
+    }).catch(function () { show('Something went wrong — please try again.', false); });
+  });
+}
 </script>
 <script>
-// ── Hero visual toggle: App preview ↔ Cabinet (recreated from the old site's
-//    LuxuryCabinet). ──
 (function () {
-  var app = document.getElementById('heroAppPreview');
-  var cab = document.getElementById('heroCabinet');
-  var toggle = document.getElementById('heroViewToggle');
-  if (!app || !cab || !toggle) return;
-
-  function books(y, x, items) {
-    x = x || 60; var gap = 6, cur = x, out = '';
-    items.forEach(function (b) {
-      var yy = y + (78 - b.h);
-      out += '<rect x="' + cur + '" y="' + yy + '" width="' + b.w + '" height="' + b.h + '" fill="' + b.fill + '" stroke="#000" stroke-opacity="0.25"/>'
-           + '<rect x="' + cur + '" y="' + yy + '" width="1" height="' + b.h + '" fill="#F5F2EA" opacity="0.10"/>'
-           + '<rect x="' + cur + '" y="' + (yy + 12) + '" width="' + b.w + '" height="2" fill="#000" opacity="0.25"/>';
-      cur += b.w + gap;
-    });
-    return '<g>' + out + '</g>';
-  }
-
-  function cabinetSVG() {
-    var shelves = [210, 380, 550, 720].map(function (y) {
-      return '<g><rect x="48" y="' + y + '" width="544" height="14" fill="url(#walnutInterior)"/>'
-        + '<rect x="48" y="' + (y + 13) + '" width="544" height="2" fill="#000" opacity="0.45"/></g>';
-    }).join('');
-
-    var folders = [0, 9, 18, 27, 36, 45, 54].map(function (dy, i) {
-      return '<rect x="240" y="' + (478 + dy) + '" width="148" height="9" fill="' + (i % 2 === 0 ? '#F5F2EA' : '#E6D6B3') + '" stroke="#000" stroke-opacity="0.18"/>';
-    }).join('');
-
-    return '' +
-'<svg viewBox="0 0 640 860" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="DOCVEX walnut V cabinet" style="display:block;height:auto;width:100%;">' +
-  '<defs>' +
-    '<linearGradient id="walnutBase" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#A6724B"/><stop offset="55%" stop-color="#8B5E3C"/><stop offset="100%" stop-color="#5D3E25"/></linearGradient>' +
-    '<filter id="grainDark" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.85 0.012" numOctaves="5" seed="9" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 0.14 0 0 0 0 0.07 0 0 0 0 0.03 0 0 0 0.95 -0.30"/></filter>' +
-    '<filter id="grainLight" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.85 0.012" numOctaves="4" seed="9" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 0.85 0 0 0 0 0.62 0 0 0 0.42 -0.45"/></filter>' +
-    '<filter id="knots" x="0%" y="0%" width="100%" height="100%"><feTurbulence type="turbulence" baseFrequency="0.020 0.009" numOctaves="3" seed="3" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 0.05 0 0 0 0 0.02 0 0 0 0 0.01 0 0 0 0.5 -0.5"/></filter>' +
-    '<pattern id="walnut" patternUnits="userSpaceOnUse" x="0" y="0" width="640" height="860"><rect width="640" height="860" fill="url(#walnutBase)"/><rect width="640" height="860" filter="url(#knots)"/><rect width="640" height="860" filter="url(#grainDark)"/><rect width="640" height="860" filter="url(#grainLight)"/></pattern>' +
-    '<pattern id="walnutInterior" patternUnits="userSpaceOnUse" x="0" y="0" width="640" height="200"><rect width="640" height="200" fill="#7C5535"/><rect width="640" height="200" filter="url(#grainDark)" opacity="0.7"/><rect width="640" height="200" filter="url(#grainLight)" opacity="0.6"/></pattern>' +
-    '<linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0F172A" stop-opacity="0.55"/><stop offset="45%" stop-color="#0F172A" stop-opacity="0.42"/><stop offset="100%" stop-color="#0F172A" stop-opacity="0.62"/></linearGradient>' +
-    '<linearGradient id="glassReflect" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#F5F2EA" stop-opacity="0.18"/><stop offset="30%" stop-color="#F5F2EA" stop-opacity="0.03"/><stop offset="55%" stop-color="#F5F2EA" stop-opacity="0.12"/><stop offset="100%" stop-color="#F5F2EA" stop-opacity="0"/></linearGradient>' +
-    '<linearGradient id="backwall" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1E293B"/><stop offset="100%" stop-color="#0F172A"/></linearGradient>' +
-    '<linearGradient id="frame" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#0B1220"/><stop offset="50%" stop-color="#1E293B"/><stop offset="100%" stop-color="#0B1220"/></linearGradient>' +
-    '<radialGradient id="floor" cx="0.5" cy="0.5" r="0.5"><stop offset="0%" stop-color="#000" stop-opacity="0.55"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>' +
-    '<clipPath id="doorClip"><rect x="40" y="40" width="560" height="760" rx="6"/></clipPath>' +
-  '</defs>' +
-  '<ellipse cx="320" cy="830" rx="280" ry="22" fill="url(#floor)"/>' +
-  '<rect x="24" y="24" width="592" height="792" rx="10" fill="url(#frame)"/>' +
-  '<rect x="24" y="24" width="592" height="792" rx="10" fill="none" stroke="#2B3A52" stroke-width="1" opacity="0.85"/>' +
-  '<rect x="40" y="40" width="560" height="760" rx="6" fill="url(#backwall)"/>' +
-  '<g clip-path="url(#doorClip)">' + shelves +
-    books(150, 60, [{w:22,h:60,fill:'#1E293B'},{w:18,h:56,fill:'#DCC9A3'},{w:24,h:58,fill:'#0F172A'},{w:16,h:52,fill:'#8B5E3C'},{w:28,h:60,fill:'#1E293B'},{w:20,h:54,fill:'#E6D6B3'},{w:22,h:58,fill:'#1E293B'},{w:18,h:56,fill:'#DCC9A3'},{w:26,h:60,fill:'#0F172A'},{w:20,h:54,fill:'#8B5E3C'},{w:22,h:58,fill:'#1E293B'},{w:18,h:56,fill:'#DCC9A3'},{w:24,h:60,fill:'#0F172A'}]) +
-    books(320, 60, [{w:38,h:60,fill:'#1E293B'},{w:38,h:60,fill:'#1E293B'},{w:38,h:60,fill:'#1E293B'},{w:30,h:58,fill:'#DCC9A3'},{w:30,h:58,fill:'#DCC9A3'},{w:30,h:58,fill:'#DCC9A3'},{w:38,h:60,fill:'#0F172A'},{w:38,h:60,fill:'#0F172A'},{w:38,h:60,fill:'#0F172A'}]) +
-    '<g><rect x="60" y="470" width="160" height="78" rx="3" fill="#5D3E25"/><rect x="60" y="470" width="160" height="14" fill="#4A311E"/><rect x="130" y="503" width="20" height="6" rx="1" fill="#DCC9A3"/><rect x="60" y="470" width="160" height="78" rx="3" fill="none" stroke="#000" stroke-opacity="0.35"/>' + folders +
-      '<rect x="410" y="470" width="180" height="78" rx="3" fill="#3A2718"/><rect x="410" y="470" width="180" height="14" fill="#291A0F"/><rect x="490" y="503" width="20" height="6" rx="1" fill="#DCC9A3"/><rect x="410" y="470" width="180" height="78" rx="3" fill="none" stroke="#000" stroke-opacity="0.35"/></g>' +
-    '<g><rect x="60" y="640" width="14" height="78" rx="7" fill="#DCC9A3"/><rect x="78" y="640" width="14" height="78" rx="7" fill="#8B5E3C"/><rect x="96" y="640" width="14" height="78" rx="7" fill="#DCC9A3"/><rect x="60" y="640" width="50" height="6" rx="2" fill="#000" opacity="0.35"/>' +
-      books(640, 130, [{w:30,h:78,fill:'#1E293B'},{w:26,h:76,fill:'#0F172A'},{w:28,h:78,fill:'#5D3E25'},{w:30,h:78,fill:'#1E293B'},{w:24,h:72,fill:'#DCC9A3'},{w:32,h:78,fill:'#0F172A'}]) +
-      '<rect x="460" y="660" width="130" height="58" rx="2" fill="#DCC9A3"/><rect x="460" y="660" width="130" height="6" fill="#8B5E3C"/><line x1="460" y1="690" x2="590" y2="690" stroke="#8B5E3C" stroke-width="1" opacity="0.6"/></g>' +
-  '</g>' +
-  '<g clip-path="url(#doorClip)"><polygon points="50,52 168,52 320,712 470,52 590,52 330,790 310,790" fill="url(#walnut)"/><polyline points="50,52 320,712 590,52" fill="none" stroke="#E6D6B3" stroke-opacity="0.08" stroke-width="1.5"/></g>' +
-  '<rect x="40" y="40" width="560" height="760" rx="6" fill="url(#glass)"/>' +
-  '<rect x="40" y="40" width="560" height="760" rx="6" fill="url(#glassReflect)"/>' +
-  '<rect x="92" y="40" width="48" height="760" fill="#F5F2EA" opacity="0.05"/>' +
-  '<line x1="320" y1="40" x2="320" y2="800" stroke="#000" stroke-opacity="0.55" stroke-width="1"/>' +
-  '<rect x="305" y="370" width="4" height="120" rx="1" fill="#0B1220"/><rect x="305" y="370" width="4" height="3" fill="#2B3A52"/>' +
-  '<rect x="331" y="370" width="4" height="120" rx="1" fill="#0B1220"/><rect x="331" y="370" width="4" height="3" fill="#2B3A52"/>' +
-  '<rect x="40" y="40" width="560" height="760" rx="6" fill="none" stroke="#0B1220" stroke-width="2"/>' +
-  '<rect x="24" y="24" width="592" height="3" rx="2" fill="#3A4A6A" opacity="0.6"/>' +
-  '<rect x="40" y="800" width="560" height="16" fill="#0B1220"/><rect x="40" y="800" width="560" height="1" fill="#2B3A52"/>' +
-'</svg>';
-  }
-
-  cab.innerHTML = '<div style="filter:drop-shadow(0 30px 60px rgba(0,0,0,0.45)); max-width:520px; margin:0 auto;">' + cabinetSVG() + '</div>';
-
-  function setView(view) {
-    var isCab = view === 'cabinet';
-    cab.hidden = !isCab;
-    app.style.display = isCab ? 'none' : '';
-    toggle.querySelectorAll('[data-hero-view]').forEach(function (b) {
-      var on = b.getAttribute('data-hero-view') === view;
-      b.classList.toggle('is-on', on);
-      b.style.background = on ? 'var(--accent)' : 'transparent';
-      b.style.color = on ? 'var(--text-on-accent)' : 'var(--text-secondary)';
-    });
-    try { localStorage.setItem('docvex.hero.view', view); } catch (e) {}
-  }
-
-  toggle.querySelectorAll('[data-hero-view]').forEach(function (b) {
-    b.addEventListener('click', function () { setView(b.getAttribute('data-hero-view')); });
+  var btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  var sun = btn.querySelector('[data-ico="sun"]');
+  var moon = btn.querySelector('[data-ico="moon"]');
+  function cur() { return document.documentElement.getAttribute('data-theme') === 'cream' ? 'cream' : 'ink'; }
+  function paint() { var t = cur(); sun.style.display = t === 'ink' ? '' : 'none'; moon.style.display = t === 'cream' ? '' : 'none'; }
+  btn.addEventListener('click', function () {
+    var t = cur() === 'cream' ? 'ink' : 'cream';
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem('docvex.site.theme', t); } catch (e) {}
+    paint();
   });
-
-  var saved = 'app';
-  try { saved = localStorage.getItem('docvex.hero.view') || 'app'; } catch (e) {}
-  setView(saved);
+  paint();
 })();
-</script>
-<script>
-// ── Left section timeline (scrollspy) ──
+
+// ── Cursor-following spotlight (matches the app's CursorSpotlight): move ONE
+//    small box via transform each frame and counter-shift its dot grid so the
+//    brighter dots stay pinned to the viewport grid. ──
 (function () {
-  var nav = document.getElementById('dvTimeline');
-  if (!nav) return;
-  var hero = document.querySelector('section'); // the hero section (first <section>)
-  var ITEMS = [
-    { label: 'Product',     el: document.getElementById('features') },
-    { label: 'Security',    el: document.getElementById('security') },
-    { label: 'Updates',     el: document.getElementById('updates') },
-    { label: 'Pricing',     el: document.getElementById('pricing') },
-    { label: 'FAQ',         el: document.getElementById('faq') },
-    { label: 'Get started', el: document.getElementById('demo') },
-  ].filter(function (it) { return it.el; });
-
-  var dots = ITEMS.map(function (it) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'dv-tl-dot';
-    b.innerHTML = '<span class="d"></span><span class="lbl">' + it.label + '</span>';
-    b.addEventListener('click', function () {
-      if (it.top) window.scrollTo({ top: 0, behavior: 'smooth' });
-      else it.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    nav.appendChild(b);
-    return b;
-  });
-
-  function setActive(i) {
-    for (var k = 0; k < dots.length; k++) dots[k].classList.toggle('is-active', k === i);
+  var el = document.querySelector('.cursor-spotlight');
+  if (!el) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { el.style.display = 'none'; return; }
+  var R = 215, frame = null;
+  // Restore the cursor position from the previous page so the spotlight is
+  // already in place after a tab change (the view transition holds it frozen).
+  var saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem('dvx.spot') || 'null'); } catch (e) {}
+  var x = saved ? saved.x : window.innerWidth / 2;
+  var y = saved ? saved.y : window.innerHeight / 2;
+  function apply() {
+    frame = null;
+    var px = Math.round(x), py = Math.round(y);
+    el.style.transform = 'translate3d(' + (px - R) + 'px,' + (py - R) + 'px,0)';
+    el.style.backgroundPosition = (R - px) + 'px ' + (R - py) + 'px';
+    try { sessionStorage.setItem('dvx.spot', JSON.stringify({ x: px, y: py })); } catch (e) {}
   }
+  function onMove(e) {
+    x = e.clientX; y = e.clientY;
+    if (frame == null) frame = requestAnimationFrame(apply);
+  }
+  apply();
+  window.addEventListener('pointermove', onMove, { passive: true });
+})();
 
-  // Pick the section whose top is closest to (just above) the viewport's upper third.
+// ── Scroll-aware header: taller + transparent at the very top. Hysteresis —
+//    compacting changes the header height (and with it the scroll position),
+//    so a single threshold would flip-flop near the top of the page. ──
+(function () {
+  var hdr = document.querySelector('.dv-hdr');
+  if (!hdr) return;
+  var compact = false;
   function onScroll() {
-    var marker = window.innerHeight * 0.35;
-    // Hide the rail entirely while the hero section is still in view.
-    var heroRect = hero.getBoundingClientRect();
-    var inHero = heroRect.bottom - marker > 0;
-    nav.classList.toggle('is-hidden', inHero);
-    if (inHero) return;
-    var active = 0;
-    for (var i = 0; i < ITEMS.length; i++) {
-      var rect = ITEMS[i].el.getBoundingClientRect();
-      if (rect.top - marker <= 0) active = i;
-    }
-    setActive(active);
+    var y = window.scrollY;
+    if (compact) { if (y < 4) compact = false; }
+    else if (y > 40) { compact = true; }
+    hdr.classList.toggle('at-top', !compact);
   }
   window.addEventListener('scroll', onScroll, { passive: true });
-  window.addEventListener('resize', onScroll, { passive: true });
+  onScroll();
+})();
+
+// ── Prerender likely navigation targets on hover so tab changes are instant;
+//    the view-transition cross-fade makes them feel like in-app tab switches.
+//
+(function () {
+  if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('speculationrules'))) return;
+  var sr = document.createElement('script');
+  sr.type = 'speculationrules';
+  sr.textContent = JSON.stringify({
+    prerender: [{ where: { href_matches: '/*' }, eagerness: 'moderate' }],
+  });
+  document.head.appendChild(sr);
+})();
+
+// ── Floating scroll-to-top button, shown once the page is scrolled past 400px. ──
+(function () {
+  var btn = document.createElement('button');
+  btn.className = 'dvx-totop';
+  btn.type = 'button';
+  btn.title = 'Back to top';
+  btn.setAttribute('aria-label', 'Back to top');
+  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  btn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  document.body.appendChild(btn);
+  function onScroll() { btn.classList.toggle('is-visible', window.scrollY > 400); }
+  window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 })();
 </script>

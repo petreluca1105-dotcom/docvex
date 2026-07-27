@@ -1,688 +1,679 @@
 <!doctype html>
-<html lang="en" data-theme="cream" data-dvx-no-navbar>
+<html lang="en" data-theme="ink">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <base href="/">
 <title>Sign in — DocVex</title>
-<meta name="description" content="Sign in to DocVex or create your account.">
-<meta name="robots" content="noindex">
-<link rel="icon" href="favicon.ico">
-<link rel="canonical" href="https://docvex.ro/auth.html">
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="DocVex">
-<meta property="og:title" content="Sign in — DocVex">
-<meta property="og:description" content="Sign in to DocVex or create your account.">
-<meta property="og:url" content="https://docvex.ro/auth.html">
-<meta property="og:image" content="https://docvex.ro/assets/logo-lockup.png">
-<meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Sign in — DocVex">
-<meta name="twitter:description" content="Sign in to DocVex or create your account.">
-<meta name="twitter:image" content="https://docvex.ro/assets/logo-lockup.png">
+<meta name="description" content="Sign in to your DocVex workspace.">
 <meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Cinzel:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="chrome.css">
-<script>(function(){try{var t=localStorage.getItem('docvex.site.theme')||'cream';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script>(function(){var d=document.documentElement,t='ink';try{t=localStorage.getItem('docvex.site.theme')||'ink';}catch(e){}d.setAttribute('data-theme',t);d.style.backgroundColor=t==='cream'?'#F5F2EA':'#0F172A';})();</script>
 <style>
-  /* ── DocVex "The Cabinet" auth screen — ported from the main app
-       (src/components/auth/authCabinet.css). Fixed light brand treatment,
-       not theme-reactive. All classes auv-prefixed. ── */
-  *, *::before, *::after { box-sizing: border-box; }
-  html, body { margin: 0; }
-  /* Fill the viewport as a column: navbar (fixed) · cabinet (fills) · footer.
-     The cabinet flexes to the remaining height so the footer is always visible
-     and the page itself never scrolls. */
-  body {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-    background: #F5F2EA; color: #0F172A;
-    min-height: 100vh; display: flex; flex-direction: column;
-  }
+/* ── "The Cabinet" — the DocVex app's sign-in screen, on the website ─────────
+   A verbatim port of the desktop app's auth screen (src/components/auth/
+   authCabinet.css + AuthCabinet.jsx): split ink brand panel beside a cream
+   sign-in / 3-step onboarding form. Deliberately NOT theme-reactive and with no
+   site navbar — it is a fixed branded surface, exactly as in the app, so the
+   two sign-in experiences read as the same product. Keep this file in sync with
+   authCabinet.css when either changes. All classes are `auv-`-prefixed (`au-`
+   for the few web-only bits: the stage, the backdrop, the back link). */
 
-  /* Brand palette (from tokens.css) */
-  :root {
-    --auv-ink: #0F172A; --auv-slate: #1E293B; --auv-sand: #DCC9A3;
-    --auv-cream: #F5F2EA; --auv-cognac: #8B5E3C; --auv-cognac-d: #74502F;
-  }
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  --auv-ink: #0F172A;
+  --auv-slate: #1E293B;
+  --auv-sand: #DCC9A3;
+  --auv-cream: #F5F2EA;
+  --auv-cognac: #8B5E3C;
+  --auv-cognac-d: #74502F;      /* cognac hover — not a semantic token */
+  background: var(--bg-page); color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+[hidden] { display: none !important; }
 
-  /* ── Page shell + ambient dot-grid backdrop (cream surface, ink dots) ── */
-  /* Cabinet fills the viewport minus half the footer, so ~half the footer
-     peeks below the fold. --dvx-foot-half is set to footerHeight/2 by JS. */
-  .auth-page {
-    position: relative; flex: 0 0 auto; width: 100%; display: flex;
-    min-height: calc(100vh - var(--dvx-foot-half, 180px));
-  }
+/* ── Stage ──────────────────────────────────────────────────────────────────
+   The page wears the site's shared chrome (navbar + footer + ambient dot grid
+   and cursor spotlight, all injected by chrome.js) and follows the visitor's
+   Cream/Ink theme, like every other sub-page. The cabinet itself does NOT —
+   it's the app's fixed branded surface, so it sits on top as a self-contained
+   card carrying its own cream interior. The app locks its window to 1104x640
+   for this screen; the card keeps those exact proportions rather than
+   stretching across a 27" monitor. The top padding clears the navbar, which is
+   `position: fixed` and ~92px tall at rest — padding rather than a shrunken
+   box, so the card can never slide under it on a short viewport.
+   NOT vertically centred and no `min-height: 100vh`: with both, the leftover
+   viewport height was split above and below the card, adding ~75px of dead
+   space on top of the padding on a laptop screen. The stage is now exactly as
+   tall as the card, so the gap under the navbar is just the padding and the
+   footer follows straight on.
+   Mind the asymmetry in the numbers: the navbar is fixed, so it occupies none
+   of this box — the top padding has to carry its ~92px height on top of the
+   air we actually want to see (120 = 92 + 28). The bottom number is the gap
+   before the footer as-is. */
+.au-stage {
+  position: relative; z-index: 1;
+  display: flex; justify-content: center;
+  padding: 120px 24px 180px;
+}
+.auv-cabinet {
+  position: relative;
+  width: 100%; max-width: 1104px;
+  height: 640px; min-height: 480px; max-height: calc(100vh - 240px);
+  border-radius: 14px; overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  /* Two stacked shadows so the card reads as lifted off the page: a wide soft
+     cast, plus a tighter one that grounds the bottom edge. Pure black rather
+     than slate-tinted, and NOT theme-conditional — the cabinet must look
+     identical whichever theme the site is in, and black still darkens the Ink
+     page (#0F172A) enough to read. */
+  box-shadow:
+    0 34px 70px -22px rgba(0, 0, 0, 0.62),
+    0 14px 30px -16px rgba(0, 0, 0, 0.45);
+}
 
-  /* Back-to-site button (replaces the navbar on the login tab). */
-  .auv-back {
-    /* Sit just to the right of the navy brand panel (its width is the same clamp). */
-    position: fixed; top: 18px; left: calc(clamp(360px, 38%, 460px) + 18px); z-index: 60;
-    display: inline-flex; align-items: center; gap: 7px;
-    background: rgba(255,255,255,0.72); border: 1px solid rgba(15,23,42,0.12);
-    border-radius: 999px; padding: 8px 15px 8px 11px;
-    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; color: #1E293B;
-    cursor: pointer; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 6px 18px -8px rgba(15,23,42,0.3); transition: background 150ms, border-color 150ms;
-  }
-  .auv-back:hover { background: #fff; border-color: rgba(15,23,42,0.24); }
-  .auth-page::before {
-    content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image:
-      radial-gradient(ellipse 80% 70% at center, transparent 0%, transparent 35%, #F5F2EA 90%),
-      radial-gradient(circle at center, rgba(15, 23, 42, 0.09) 1.2px, transparent 1.6px);
-    background-size: 100% 100%, 24px 24px;
-    background-position: center, 0 0;
-  }
-  /* Cursor-following spotlight — brighter dots masked to a soft circle. */
-  .cursor-spotlight {
-    position: fixed; top: 0; left: 0; width: 430px; height: 430px; z-index: 0;
-    pointer-events: none; will-change: transform;
-    background-image: radial-gradient(circle at center, rgba(15, 23, 42, 0.12) 1.45px, transparent 1.85px);
-    background-size: 24px 24px;
-    -webkit-mask-image: radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
-    mask-image: radial-gradient(circle 215px at center, #000 0%, #000 42%, transparent 100%);
-  }
+/* No height here — .auv-cabinet above owns it (this rule comes later in the
+   sheet, so a height: 100% would win and collapse the card). */
+.auv-root {
+  position: relative; width: 100%;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.auv-root, .auv-root * { box-sizing: border-box; }
 
-  /* ── Animations ── */
-  @keyframes auvFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-  @keyframes auvPop  { 0% { opacity: 0; transform: scale(.7); } 60% { transform: scale(1.08); } 100% { opacity: 1; transform: scale(1); } }
-  .auv-fade { animation: auvFade .35s ease both; }
+/* ── Animations ── */
+@keyframes auvFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes auvPop  { 0% { opacity: 0; transform: scale(.7); } 60% { transform: scale(1.08); } 100% { opacity: 1; transform: scale(1); } }
+.auv-fade { animation: auvFade .35s ease both; }
 
-  /* ── Cabinet layout ── */
-  .auv-root { position: relative; z-index: 1; flex: 1; min-height: 0; width: 100%; display: flex; }
-  .auv-cabinet { display: flex; flex: 1; min-height: 0; background: transparent; }
+/* ════════════════ Form vocabulary ════════════════ */
+.auv-h3 {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 20.8px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--auv-ink); margin: 0 0 4.8px;
+}
+.auv-h3.sm { font-size: 18.4px; margin: 0 0 3.2px; }
+.auv-sub { margin: 0 0 17.6px; font-size: 11.2px; line-height: 1.55; color: #6b7280; }
+.auv-sub.center { text-align: center; }
+.auv-sub strong { font-weight: 600; }
 
-  /* Left: brand panel (deep ink) */
-  .auv-cab-brand {
-    position: relative; width: clamp(360px, 38%, 460px); flex-shrink: 0;
-    background: var(--auv-ink); overflow: hidden; isolation: isolate;
-    display: flex; flex-direction: column; justify-content: space-between;
-    padding: 34px 38px; color: var(--auv-cream);
-  }
-  .auv-cab-brand::before {
-    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background-image:
-      radial-gradient(ellipse 100% 100% at 50% 40%, transparent 0%, transparent 55%, var(--auv-ink) 100%),
-      radial-gradient(circle at center, rgba(220, 201, 163, 0.10) 1.2px, transparent 1.6px);
-    background-size: 100% 100%, 24px 24px; background-position: center, 0 0;
-  }
-  /* Brand lockup (the full DocVex logo image) */
-  .auv-cab-lockup { position: relative; z-index: 1; display: block; user-select: none; }
-  .auv-cab-lockup img { width: auto; height: 92px; max-width: 100%; object-fit: contain; -webkit-user-drag: none; display: block; }
+/* Fields */
+.auv-field { margin-bottom: 12.8px; }
+.auv-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5.6px; }
+.auv-label { font-size: 8.4px; letter-spacing: 0.13em; text-transform: uppercase; font-weight: 700; color: #8a8f9a; }
+.auv-input {
+  width: 100%; height: 36.8px; padding: 0 11.2px; border-radius: 7.2px;
+  border: 1px solid rgba(15, 23, 42, 0.14); background: #FCFBF8;
+  color: var(--auv-ink); font-size: 11.2px; font-family: 'Inter', sans-serif;
+  outline: none; transition: border-color 160ms, box-shadow 160ms, background 160ms;
+}
+.auv-input::placeholder { color: #9aa0ab; }
+.auv-input:focus { border-color: var(--auv-cognac); box-shadow: 0 0 0 2.4px rgba(139, 94, 60, 0.13); background: #fff; }
 
-  .auv-cab-pitch { position: relative; z-index: 1; }
-  .auv-cab-h2 { font-family: 'Cinzel', serif; font-size: 30px; font-weight: 600; line-height: 1.18; color: var(--auv-cream); margin: 0 0 22px; letter-spacing: 0.01em; }
-  .auv-cab-h2 span { color: var(--auv-sand); }
-  .auv-cab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 18px; }
-  .auv-cab-grid-t { font-family: 'Cinzel', serif; font-size: 15px; font-weight: 600; color: var(--auv-cream); letter-spacing: 0.03em; }
-  .auv-cab-grid-d { font-size: 12px; color: rgba(245, 242, 234, 0.55); margin-top: 3px; }
+/* Password strength */
+.auv-strength-wrap { margin-top: -4.8px; margin-bottom: 3.2px; }
+.auv-strength { display: flex; gap: 4.8px; }
+.auv-strength span { flex: 1; height: 3.2px; border-radius: 2.4px; background: rgba(15, 23, 42, 0.10); transition: background 200ms; }
+.auv-strength span.is-on { background: var(--auv-cognac); }
+.auv-strength-label { margin: 5.6px 0 0; font-size: 9.2px; color: #9aa0ab; }
 
-  /* Wood edge rail at the bottom of the brand panel */
-  .auv-wood-edge {
-    position: absolute; left: 0; right: 0; bottom: 0; height: 12px; z-index: 1;
-    background-color: var(--auv-cognac); background-image: url('assets/wood-h.svg');
-    background-size: cover; background-position: center;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
-  }
+/* Messages */
+.auv-err { margin: 11.2px 0 0; font-size: 10.4px; color: #B91C1C; }
+.auv-notice { margin: 11.2px 0 0; font-size: 10.4px; color: #15803D; }
 
-  /* Right: form panel (transparent — backdrop shows through). Scrolls inside
-     itself on short screens so the page (and footer) stay put. */
-  .auv-cab-form { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; padding: 28px 48px; background: transparent; overflow-y: auto; }
-  .auv-cab-form-inner { width: 100%; max-width: 380px; }
+/* Buttons */
+.auv-btn {
+  width: 100%; height: 38.4px; margin-top: 16px; border: none; border-radius: 7.2px;
+  font-size: 11.6px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer; transition: background 150ms, transform 100ms, opacity 150ms;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.auv-btn:active:not(:disabled) { transform: translateY(1px); }
+.auv-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.auv-btn--cognac { background: var(--auv-cognac); color: #fff; }
+.auv-btn--cognac:hover:not(:disabled) { background: var(--auv-cognac-d); }
+.auv-btn--ghost { background: #fff; color: var(--auv-slate); border: 1px solid rgba(15, 23, 42, 0.16); width: auto; padding: 0 17.6px; }
+.auv-btn--ghost:hover:not(:disabled) { background: #FAF7F0; }
+.auv-btn.is-grow { flex: 1; width: auto; }
+.auv-btn.is-auto { width: auto; padding: 0 24px; }
+.auv-btn-row { display: flex; gap: 9.6px; margin-top: 19.2px; }
+.auv-btn-row .auv-btn { margin-top: 0; }
 
-  /* ── Form vocabulary ── */
-  .auv-h3 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--auv-ink); margin: 0 0 6px; }
-  .auv-h3.sm { font-size: 23px; margin: 0 0 4px; }
-  .auv-sub { margin: 0 0 22px; font-size: 14px; line-height: 1.55; color: #6b7280; }
-  .auv-sub.center { text-align: center; }
-  .auv-sub strong { font-weight: 600; }
+/* "or" divider */
+.auv-or { display: flex; align-items: center; gap: 9.6px; margin: 17.6px 0; color: #b5b9c2; font-size: 9.6px; }
+.auv-or::before, .auv-or::after { content: ''; flex: 1; height: 1px; background: rgba(15, 23, 42, 0.10); }
 
-  .auv-field { margin-bottom: 16px; }
-  .auv-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
-  .auv-label { font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; font-weight: 700; color: #8a8f9a; }
-  .auv-input {
-    width: 100%; height: 46px; padding: 0 14px; border-radius: 9px;
-    border: 1px solid rgba(15, 23, 42, 0.14); background: #FCFBF8;
-    color: var(--auv-ink); font-size: 14px; font-family: 'Inter', sans-serif;
-    outline: none; transition: border-color 160ms, box-shadow 160ms, background 160ms;
-  }
-  .auv-input::placeholder { color: #9aa0ab; }
-  .auv-input:focus { border-color: var(--auv-cognac); box-shadow: 0 0 0 3px rgba(139, 94, 60, 0.13); background: #fff; }
+/* Google button */
+.auv-google {
+  width: 100%; height: 38.4px; display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; border-radius: 7.2px; font-size: 11.2px; font-weight: 600; font-family: 'Inter', sans-serif;
+  border: 1px solid rgba(15, 23, 42, 0.16); background: #fff; color: var(--auv-slate);
+  cursor: pointer; transition: background 150ms, border-color 150ms;
+}
+.auv-google:hover { background: #FAF7F0; border-color: rgba(15, 23, 42, 0.26); }
 
-  .auv-strength-wrap { margin-top: -6px; margin-bottom: 4px; }
-  .auv-strength { display: flex; gap: 6px; }
-  .auv-strength span { flex: 1; height: 4px; border-radius: 3px; background: rgba(15, 23, 42, 0.10); transition: background 200ms; }
-  .auv-strength span.is-on { background: var(--auv-cognac); }
-  .auv-strength-label { margin: 7px 0 0; font-size: 11.5px; color: #9aa0ab; }
+/* Links + footer */
+.auv-link {
+  background: none; border: 0; padding: 0; font-family: inherit;
+  font-size: 9.6px; font-weight: 600; color: var(--auv-cognac);
+  text-decoration: none; cursor: pointer;
+}
+.auv-link:hover { text-decoration: underline; text-underline-offset: 1.6px; }
+.auv-foot { text-align: center; margin: 20.8px 0 0; font-size: 10.4px; color: #6b7280; }
+.auv-foot .auv-link { font-size: 10.4px; }
 
-  .auv-err { margin: 14px 0 0; font-size: 13px; color: #B91C1C; }
-  .auv-notice { margin: 14px 0 0; font-size: 13px; color: #15803D; }
-  .auv-msg:empty { display: none; }
+/* Checkboxes */
+.auv-check { display: flex; gap: 8.8px; align-items: flex-start; cursor: pointer; }
+.auv-check input { margin-top: 1.6px; width: 13.6px; height: 13.6px; accent-color: var(--auv-cognac); cursor: pointer; flex-shrink: 0; }
+.auv-check span { font-size: 10.4px; line-height: 1.5; color: #4b5260; }
+.auv-check a { color: var(--auv-cognac); font-weight: 600; text-decoration: none; }
+.auv-check a:hover { text-decoration: underline; }
+.auv-check strong { color: var(--auv-ink); font-weight: 600; }
 
-  .auv-btn {
-    width: 100%; height: 48px; margin-top: 20px; border: none; border-radius: 9px;
-    font-size: 14.5px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif;
-    cursor: pointer; transition: background 150ms, transform 100ms, opacity 150ms;
-    display: inline-flex; align-items: center; justify-content: center;
-  }
-  .auv-btn:active:not(:disabled) { transform: translateY(1px); }
-  .auv-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-  .auv-btn--cognac { background: var(--auv-cognac); color: #fff; }
-  .auv-btn--cognac:hover:not(:disabled) { background: var(--auv-cognac-d); }
-  .auv-btn--ghost { background: #fff; color: var(--auv-slate); border: 1px solid rgba(15, 23, 42, 0.16); width: auto; padding: 0 22px; }
-  .auv-btn--ghost:hover:not(:disabled) { background: #FAF7F0; }
-  .auv-btn.is-grow { flex: 1; width: auto; }
-  .auv-btn.is-auto { width: auto; padding: 0 30px; }
-  .auv-btn-row { display: flex; gap: 12px; margin-top: 24px; }
-  .auv-btn-row .auv-btn { margin-top: 0; }
+/* Review summary */
+.auv-summary { background: #fff; border: 1px solid rgba(15, 23, 42, 0.10); border-radius: 8.8px; padding: 11.2px 14.4px; margin-bottom: 16px; }
+.auv-summary-row { display: flex; justify-content: space-between; padding: 4.8px 0; font-size: 10.4px; }
+.auv-summary-row span { color: #8a8f9a; }
+.auv-summary-row strong { color: var(--auv-ink); font-weight: 600; }
+.auv-summary-rule { height: 1px; background: rgba(15, 23, 42, 0.07); }
 
-  .auv-or { display: flex; align-items: center; gap: 12px; margin: 22px 0; color: #b5b9c2; font-size: 12px; }
-  .auv-or::before, .auv-or::after { content: ''; flex: 1; height: 1px; background: rgba(15, 23, 42, 0.10); }
+/* Done state */
+.auv-done { text-align: center; }
+.auv-done-mark { width: 52.8px; height: 52.8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 17.6px; background: var(--auv-cognac); animation: auvPop .5s cubic-bezier(.16, 1, .3, 1) both; }
 
-  .auv-google {
-    width: 100%; height: 48px; display: inline-flex; align-items: center; justify-content: center;
-    gap: 10px; border-radius: 9px; font-size: 14px; font-weight: 600; font-family: 'Inter', sans-serif;
-    border: 1px solid rgba(15, 23, 42, 0.16); background: #fff; color: var(--auv-slate);
-    cursor: pointer; transition: background 150ms, border-color 150ms;
-  }
-  .auv-google:hover { background: #FAF7F0; border-color: rgba(15, 23, 42, 0.26); }
+/* Wood edge (brand-panel bottom rail) */
+.auv-wood-edge {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 9.6px; z-index: 1;
+  background-color: var(--auv-cognac); background-image: url('assets/wood-h.svg');
+  background-size: cover; background-position: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+}
 
-  .auv-link { background: none; border: 0; padding: 0; font-family: inherit; font-size: 12px; font-weight: 600; color: var(--auv-cognac); text-decoration: none; cursor: pointer; }
-  .auv-link:hover { text-decoration: underline; text-underline-offset: 2px; }
-  .auv-foot { text-align: center; margin: 26px 0 0; font-size: 13px; color: #6b7280; }
-  .auv-foot .auv-link { font-size: 13px; }
+/* ════════════════ The Cabinet layout ════════════════ */
+.auv-cabinet { display: flex; background: transparent; }
+.auv-cab-brand {
+  position: relative; width: 368px; flex-shrink: 0;
+  background: var(--auv-ink); overflow: hidden; isolation: isolate;
+  display: flex; flex-direction: column;
+  justify-content: space-between; padding: 36.8px 33.6px; color: var(--auv-cream);
+}
+/* Static ambient dot grid (light dots on ink), faded into the panel toward the
+   edges — the base layer the contained cursor spotlight brightens. */
+.auv-cab-brand::before {
+  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 100% 100% at 50% 40%, transparent 0%, transparent 55%, var(--auv-ink) 100%),
+    radial-gradient(circle at center, rgba(220, 201, 163, 0.10) 0.96px, transparent 1.28px);
+  background-size: 100% 100%, 19.2px 19.2px;
+  background-position: center, 0 0;
+}
+/* The app pairs the grid above with a contained cursor spotlight
+   (<CursorSpotlight contain/> in AuthCabinet.jsx). It's deliberately NOT
+   ported here: the site already runs its own page-wide spotlight from
+   chrome.js, and two pointer-driven radial gradients on one screen is what
+   made the app's sign-in feel heavy. The grid stays static. */
+.auv-cab-lockup { position: relative; z-index: 1; display: block; width: 100%; max-width: 256px; height: auto; user-select: none; -webkit-user-drag: none; }
+.auv-cab-pitch { position: relative; z-index: 1; }
+.auv-cab-h2 { font-family: 'Cinzel', serif; font-size: 24px; font-weight: 600; line-height: 1.18; color: var(--auv-cream); margin: 0 0 17.6px; letter-spacing: 0.01em; }
+.auv-cab-h2 span { color: var(--auv-sand); }
+.auv-cab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 14.4px; }
+.auv-cab-grid-t { font-family: 'Cinzel', serif; font-size: 12px; font-weight: 600; color: var(--auv-cream); letter-spacing: 0.03em; }
+.auv-cab-grid-d { font-size: 9.6px; color: rgba(245, 242, 234, 0.55); margin-top: 2.4px; }
+/* Scrolls rather than overflowing, so a taller step — sign-up's confirm view —
+   stays reachable inside the fixed-height cabinet. */
+/* The form side carries the app's cream surface and its ambient dot grid +
+   vignette itself (in the app they're painted by the page, .auth-page::before —
+   here the page belongs to the website and follows its theme). Applied as
+   background-image rather than a ::before so it stays put when this panel
+   scrolls. */
+.auv-cab-form {
+  flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+  padding: 28px 44.8px;
+  background-color: var(--auv-cream);
+  background-image:
+    radial-gradient(ellipse 80% 70% at center, transparent 0%, transparent 35%, #F5F2EA 90%),
+    radial-gradient(circle at center, rgba(15, 23, 42, 0.09) 0.96px, transparent 1.28px);
+  background-size: 100% 100%, 19.2px 19.2px;
+  background-position: center, 0 0;
+  min-height: 0; overflow-y: auto;
+}
+.auv-cab-form-inner { width: 100%; max-width: 304px; }
 
-  .auv-check { display: flex; gap: 11px; align-items: flex-start; cursor: pointer; }
-  .auv-check input { margin-top: 2px; width: 17px; height: 17px; accent-color: var(--auv-cognac); cursor: pointer; flex-shrink: 0; }
-  .auv-check span { font-size: 13px; line-height: 1.5; color: #4b5260; }
-  .auv-check a { color: var(--auv-cognac); font-weight: 600; text-decoration: none; }
-  .auv-check a:hover { text-decoration: underline; }
-  .auv-check strong { color: var(--auv-ink); font-weight: 600; }
+.auv-cab-stepper { display: flex; align-items: center; margin-bottom: 24px; }
+.auv-cab-step { display: flex; flex-direction: column; align-items: center; gap: 5.6px; }
+.auv-cab-stepline { flex: 1; height: 1px; background: rgba(15, 23, 42, 0.14); margin: 0 6.4px 17.6px; }
+.auv-cab-dot {
+  width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10.4px; font-weight: 700; font-family: 'Plus Jakarta Sans', sans-serif;
+  background: transparent; color: #9aa0ab; border: 1px solid rgba(15, 23, 42, 0.18);
+}
+.auv-cab-dot.is-active { background: #fff; color: var(--auv-cognac); border: 1.6px solid var(--auv-cognac); }
+.auv-cab-dot.is-done { background: var(--auv-cognac); color: #fff; border: 1px solid var(--auv-cognac); }
+.auv-cab-step-label { font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: #8a8f9a; }
 
-  .auv-summary { background: #fff; border: 1px solid rgba(15, 23, 42, 0.10); border-radius: 11px; padding: 14px 18px; margin-bottom: 20px; }
-  .auv-summary-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
-  .auv-summary-row span { color: #8a8f9a; }
-  .auv-summary-row strong { color: var(--auv-ink); font-weight: 600; }
-  .auv-summary-rule { height: 1px; background: rgba(15, 23, 42, 0.07); }
-
-  .auv-done { text-align: center; }
-  .auv-done-mark { width: 66px; height: 66px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 22px; background: var(--auv-cognac); animation: auvPop .5s cubic-bezier(.16, 1, .3, 1) both; }
-
-  /* Stepper */
-  .auv-cab-stepper { display: flex; align-items: center; margin-bottom: 30px; }
-  .auv-cab-step { display: flex; flex-direction: column; align-items: center; gap: 7px; }
-  .auv-cab-stepline { flex: 1; height: 1px; background: rgba(15, 23, 42, 0.14); margin: 0 8px 22px; }
-  .auv-cab-dot {
-    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 700; font-family: 'Plus Jakarta Sans', sans-serif;
-    background: transparent; color: #9aa0ab; border: 1px solid rgba(15, 23, 42, 0.18);
-  }
-  .auv-cab-dot.is-active { background: #fff; color: var(--auv-cognac); border: 2px solid var(--auv-cognac); }
-  .auv-cab-dot.is-done { background: var(--auv-cognac); color: #fff; border: 1px solid var(--auv-cognac); }
-  .auv-cab-step-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: #8a8f9a; }
-
-  /* Top-left "back to site" link, floats over the cream form side */
-  .auv-home { position: fixed; top: 22px; right: 26px; z-index: 5; font-size: 13px; font-weight: 600; color: var(--auv-slate); text-decoration: none; display: inline-flex; align-items: center; gap: 7px; opacity: 0.8; transition: opacity 150ms; }
-  .auv-home:hover { opacity: 1; }
-
-  [hidden] { display: none !important; }
-
-  @media (max-width: 820px) {
-    .auv-cab-brand { display: none; }
-    .auv-cab-form { padding: 32px 24px; }
-    .auv-home { color: var(--auv-slate); }
-    .auv-back { left: 18px; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .auv-fade, .auv-done-mark { animation: none !important; }
-    .cursor-spotlight { display: none; }
-  }
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .auv-cab-brand { display: none; }
+  .auv-cab-form { padding: 25.6px 19.2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auv-fade, .auv-done-mark { animation: none !important; }
+}
 </style>
 </head>
 <body>
-<button class="auv-back" id="authBack" type="button">
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-  Back
-</button>
+  <div class="au-stage">
+    <div class="auv-root auv-cabinet">
+      <!-- ── Left: brand panel ── -->
+      <aside class="auv-cab-brand">
+        <img class="auv-cab-lockup" src="assets/logo-lockup.png" alt="DocVex — Intelligent Legal Workflows" draggable="false">
 
-<div class="auth-page">
-  <div class="cursor-spotlight" id="spotlight" aria-hidden="true"></div>
-
-  <div class="auv-root auv-cabinet">
-    <!-- ── Left: brand panel ── -->
-    <aside class="auv-cab-brand">
-      <div class="auv-cab-lockup">
-        <img src="assets/logo-lockup.png" alt="DocVex — Intelligent Legal Workflows">
-      </div>
-      <div class="auv-cab-pitch">
-        <h2 class="auv-cab-h2">Documents.<br><span>Solved.</span></h2>
-        <div class="auv-cab-grid">
-          <div><div class="auv-cab-grid-t">Drafting.</div><div class="auv-cab-grid-d">From your templates.</div></div>
-          <div><div class="auv-cab-grid-t">Privacy.</div><div class="auv-cab-grid-d">GDPR by design.</div></div>
-          <div><div class="auv-cab-grid-t">Workflows.</div><div class="auv-cab-grid-d">Intake to close.</div></div>
-          <div><div class="auv-cab-grid-t">Insight.</div><div class="auv-cab-grid-d">Across every matter.</div></div>
-        </div>
-      </div>
-      <span class="auv-wood-edge" aria-hidden="true"></span>
-    </aside>
-
-    <!-- ── Right: form panel ── -->
-    <section class="auv-cab-form">
-      <div class="auv-cab-form-inner" id="formInner">
-
-        <!-- SIGN IN -->
-        <div class="auv-fade" data-view="signin">
-          <h3 class="auv-h3">Welcome back</h3>
-          <p class="auv-sub">Sign in to your DocVex workspace.</p>
-          <div class="auv-field">
-            <div class="auv-label-row"><label class="auv-label" for="si-email">Email</label></div>
-            <input class="auv-input" id="si-email" type="email" placeholder="you@firm.law" autocomplete="email">
-          </div>
-          <div class="auv-field">
-            <div class="auv-label-row"><label class="auv-label" for="si-pass">Password</label><button type="button" class="auv-link" data-forgot>Forgot?</button></div>
-            <input class="auv-input" id="si-pass" type="password" placeholder="••••••••" autocomplete="current-password">
-          </div>
-          <p class="auv-msg" data-msg="signin"></p>
-          <button class="auv-btn auv-btn--cognac" data-action="signin">Sign in</button>
-          <div class="auv-or"><span>or</span></div>
-          <button type="button" class="auv-google" data-action="google">
-            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/><path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
-            Continue with Google
-          </button>
-          <p class="auv-foot">New to DocVex? <button type="button" class="auv-link" data-go="signup">Create an account</button></p>
-        </div>
-
-        <!-- SIGN UP -->
-        <div class="auv-fade" data-view="signup" hidden>
-          <div class="auv-cab-stepper" id="stepper">
-            <div class="auv-cab-step"><span class="auv-cab-dot" data-dot="0">1</span><span class="auv-cab-step-label">Account</span></div>
-            <span class="auv-cab-stepline"></span>
-            <div class="auv-cab-step"><span class="auv-cab-dot" data-dot="1">2</span><span class="auv-cab-step-label">Profile</span></div>
-            <span class="auv-cab-stepline"></span>
-            <div class="auv-cab-step"><span class="auv-cab-dot" data-dot="2">3</span><span class="auv-cab-step-label">Confirm</span></div>
-          </div>
-
-          <!-- Step 0 — Account -->
-          <div data-step="0">
-            <h3 class="auv-h3 sm">Create your account</h3>
-            <p class="auv-sub">Start with your work email.</p>
-            <div class="auv-field">
-              <div class="auv-label-row"><label class="auv-label" for="su-email">Email</label></div>
-              <input class="auv-input" id="su-email" type="email" placeholder="you@firm.law" autocomplete="email">
-            </div>
-            <div class="auv-field">
-              <div class="auv-label-row"><label class="auv-label" for="su-pass">Password</label></div>
-              <input class="auv-input" id="su-pass" type="password" placeholder="At least 8 characters" autocomplete="new-password">
-            </div>
-            <div class="auv-strength-wrap">
-              <div class="auv-strength"><span data-bar="0"></span><span data-bar="1"></span><span data-bar="2"></span></div>
-              <p class="auv-strength-label" id="strengthLabel">Use 8+ characters.</p>
-            </div>
-            <p class="auv-msg" data-msg="step0"></p>
-            <button class="auv-btn auv-btn--cognac" data-action="next">Continue</button>
-            <div class="auv-or"><span>or</span></div>
-            <button type="button" class="auv-google" data-action="google">
-              <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/><path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
-              Sign up with Google
-            </button>
-            <p class="auv-foot">Already a member? <button type="button" class="auv-link" data-go="signin">Sign in</button></p>
-          </div>
-
-          <!-- Step 1 — Profile -->
-          <div data-step="1" hidden>
-            <h3 class="auv-h3 sm">Tell us about you</h3>
-            <p class="auv-sub">This personalises your workspace.</p>
-            <div class="auv-field">
-              <div class="auv-label-row"><label class="auv-label" for="su-name">Full name</label></div>
-              <input class="auv-input" id="su-name" type="text" placeholder="Ana Popescu">
-            </div>
-            <div class="auv-field">
-              <div class="auv-label-row"><label class="auv-label" for="su-firm">Firm / organization</label></div>
-              <input class="auv-input" id="su-firm" type="text" placeholder="Popescu & Asociații">
-            </div>
-            <p class="auv-msg" data-msg="step1"></p>
-            <div class="auv-btn-row">
-              <button class="auv-btn auv-btn--ghost" data-action="back">Back</button>
-              <button class="auv-btn auv-btn--cognac is-grow" data-action="next">Continue</button>
-            </div>
-          </div>
-
-          <!-- Step 2 — Confirm -->
-          <div data-step="2" hidden>
-            <h3 class="auv-h3 sm">Almost there</h3>
-            <p class="auv-sub">Review and accept to finish.</p>
-            <div class="auv-summary" id="summary">
-              <div class="auv-summary-row"><span>Name</span><strong data-sum="name">—</strong></div>
-              <div class="auv-summary-rule"></div>
-              <div class="auv-summary-row"><span>Firm</span><strong data-sum="firm">—</strong></div>
-              <div class="auv-summary-rule"></div>
-              <div class="auv-summary-row"><span>Email</span><strong data-sum="email">your email</strong></div>
-            </div>
-            <label class="auv-check"><input type="checkbox" id="su-agree"><span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms &amp; Conditions</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
-            <label class="auv-check" style="margin-top:13px;"><input type="checkbox" id="su-news"><span>Send me the <strong>Legal Newsfeed</strong> — a weekly briefing on Romanian legislation.</span></label>
-            <p class="auv-msg" data-msg="step2"></p>
-            <div class="auv-btn-row">
-              <button class="auv-btn auv-btn--ghost" data-action="back">Back</button>
-              <button class="auv-btn auv-btn--cognac is-grow" data-action="finish">Create account</button>
-            </div>
+        <div class="auv-cab-pitch">
+          <h2 class="auv-cab-h2">Documents.<br><span>Solved.</span></h2>
+          <div class="auv-cab-grid">
+            <div><div class="auv-cab-grid-t">Drafting.</div><div class="auv-cab-grid-d">From your templates.</div></div>
+            <div><div class="auv-cab-grid-t">Privacy.</div><div class="auv-cab-grid-d">GDPR by design.</div></div>
+            <div><div class="auv-cab-grid-t">Workflows.</div><div class="auv-cab-grid-d">Intake to close.</div></div>
+            <div><div class="auv-cab-grid-t">Insight.</div><div class="auv-cab-grid-d">Across every matter.</div></div>
           </div>
         </div>
 
-        <!-- DONE -->
-        <div class="auv-fade auv-done" data-view="done" hidden>
-          <div class="auv-done-mark"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <h3 class="auv-h3" id="doneTitle">Confirm your email</h3>
-          <p class="auv-sub center" id="doneSub"></p>
-          <button class="auv-btn auv-btn--cognac is-auto" data-go="signin">Back to sign in</button>
-        </div>
+        <span class="auv-wood-edge" aria-hidden="true"></span>
+      </aside>
 
-        <!-- SET NEW PASSWORD (arrived via a password-reset email link) -->
-        <div class="auv-fade" data-view="recovery" hidden>
-          <h3 class="auv-h3">Set a new password</h3>
-          <p class="auv-sub">Choose a new password for your DocVex account.</p>
-          <div class="auv-field">
-            <div class="auv-label-row"><label class="auv-label" for="rc-pass">New password</label></div>
-            <input class="auv-input" id="rc-pass" type="password" placeholder="••••••••" autocomplete="new-password">
-          </div>
-          <div class="auv-field">
-            <div class="auv-label-row"><label class="auv-label" for="rc-pass2">Confirm password</label></div>
-            <input class="auv-input" id="rc-pass2" type="password" placeholder="••••••••" autocomplete="new-password">
-          </div>
-          <p class="auv-msg" data-msg="recovery"></p>
-          <button class="auv-btn auv-btn--cognac" data-action="set-password">Save new password</button>
-        </div>
-
-      </div>
-    </section>
+      <!-- ── Right: form panel ── -->
+      <section class="auv-cab-form">
+        <div class="auv-cab-form-inner" id="auForm"></div>
+      </section>
+    </div>
   </div>
-</div>
 
 <script type="module">
+// The website's sign-in screen — the same flow the desktop app runs
+// (src/components/auth/useAuthFlow.js), reimplemented without React and talking
+// to the shared Supabase project directly. An account created here is the same
+// account the app signs in with. On success the visitor returns to the page they
+// came from (?next=, default the landing page) — never into an app shell.
 import { supabase } from './supabase.js';
 
-(function () {
-  var root = document.getElementById('formInner');
-  // Where to go after a successful sign-in / sign-up. Honour ?redirect=<page.html>
-  // (same-site relative page only) so gated tabs can bounce back here and return.
-  var HOME_URL = 'index.html';
-  try {
-    var rd = new URLSearchParams(window.location.search).get('redirect');
-    if (rd && /^[a-z0-9_\-]+\.html$/i.test(rd)) HOME_URL = rd;
-  } catch (e) {}
-  // Absolute URL of this page (no query) — used as the OAuth redirect target.
-  var REDIRECT_URL = window.location.origin + window.location.pathname + (HOME_URL !== 'index.html' ? '?redirect=' + HOME_URL : '');
+const form = document.getElementById('auForm');
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // ── View switching (signin / signup / done) ──
-  function showView(name) {
-    var views = root.querySelectorAll('[data-view]');
-    for (var i = 0; i < views.length; i++) {
-      var v = views[i];
-      var on = v.getAttribute('data-view') === name;
-      v.hidden = !on;
-      if (on) { v.classList.remove('auv-fade'); void v.offsetWidth; v.classList.add('auv-fade'); }
-    }
-    clearMsgs();
-  }
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const STRENGTH_LABELS = ['Use 8+ characters', 'Weak', 'Good', 'Strong'];
+function passwordStrength(pw) {
+  pw = pw || '';
+  if (pw.length === 0) return 0;
+  if (pw.length < 8) return 1;
+  if (/[0-9]/.test(pw) && /[A-Za-z]/.test(pw) && pw.length >= 12) return 3;
+  return 2;
+}
 
-  // ── Signup stepper ──
-  var step = 0;
-  function showStep(n) {
-    step = n;
-    var steps = root.querySelectorAll('[data-step]');
-    for (var i = 0; i < steps.length; i++) {
-      var on = parseInt(steps[i].getAttribute('data-step'), 10) === n;
-      steps[i].hidden = !on;
-      if (on) { steps[i].classList.remove('auv-fade'); void steps[i].offsetWidth; steps[i].classList.add('auv-fade'); }
-    }
-    var dots = root.querySelectorAll('[data-dot]');
-    for (var j = 0; j < dots.length; j++) {
-      var idx = parseInt(dots[j].getAttribute('data-dot'), 10);
-      dots[j].className = 'auv-cab-dot' + (n > idx ? ' is-done' : n === idx ? ' is-active' : '');
-      dots[j].innerHTML = n > idx
-        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
-        : (idx + 1);
-    }
-    clearMsgs();
-  }
-
-  // ── Messages ──
-  function setMsg(key, text, kind) {
-    var el = root.querySelector('[data-msg="' + key + '"]');
-    if (!el) return;
-    el.textContent = text || '';
-    el.className = 'auv-msg' + (text ? (kind === 'ok' ? ' auv-notice' : ' auv-err') : '');
-  }
-  function clearMsgs() {
-    var msgs = root.querySelectorAll('[data-msg]');
-    for (var i = 0; i < msgs.length; i++) { msgs[i].textContent = ''; msgs[i].className = 'auv-msg'; }
-  }
-
-  // ── Password strength (mirrors the app: length + variety, 0–3) ──
-  function strengthOf(pw) {
-    if (!pw) return 0;
-    var s = 0;
-    if (pw.length >= 8) s++;
-    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) s++;
-    if (/\d/.test(pw) || /[^A-Za-z0-9]/.test(pw)) s++;
-    return Math.min(s, 3);
-  }
-  var STRENGTH_LABELS = ['Use 8+ characters.', 'Weak — add a mix of cases.', 'Good — add a number or symbol.', 'Strong password.'];
-  var suPass = document.getElementById('su-pass');
-  suPass.addEventListener('input', function () {
-    var s = strengthOf(suPass.value);
-    var bars = root.querySelectorAll('[data-bar]');
-    for (var i = 0; i < bars.length; i++) bars[i].className = (s >= i + 1) ? 'is-on' : '';
-    document.getElementById('strengthLabel').textContent = STRENGTH_LABELS[s];
-  });
-
-  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  // ── Wire up clicks ──
-  root.addEventListener('click', function (e) {
-    var go = e.target.closest('[data-go]');
-    if (go) { var to = go.getAttribute('data-go'); if (to === 'signup') showStep(0); showView(to); return; }
-
-    var act = e.target.closest('[data-action]');
-    if (!act) {
-      if (e.target.closest('[data-prevent]')) e.preventDefault();
-      if (e.target.closest('[data-forgot]')) {
-        var fem = document.getElementById('si-email').value.trim();
-        if (!EMAIL_RE.test(fem)) { setMsg('signin', 'Enter your email above first, then tap "Forgot?" again.'); return; }
-        supabase.auth.resetPasswordForEmail(fem, {
-          redirectTo: window.location.origin + window.location.pathname,
-        }).then(function (res) {
-          if (res.error) { setMsg('signin', friendly(res.error)); return; }
-          setMsg('signin', 'Password reset link sent — check your email.', 'ok');
-        });
-      }
-      return;
-    }
-    var action = act.getAttribute('data-action');
-
-    if (action === 'set-password') {
-      var np = document.getElementById('rc-pass').value;
-      var np2 = document.getElementById('rc-pass2').value;
-      if (np.length < 8) return setMsg('recovery', 'Password must be at least 8 characters.');
-      if (np !== np2) return setMsg('recovery', 'Passwords don’t match.');
-      act.disabled = true; act.textContent = 'Saving…';
-      supabase.auth.updateUser({ password: np }).then(function (res) {
-        if (res.error) {
-          setMsg('recovery', friendly(res.error));
-          act.disabled = false; act.textContent = 'Save new password';
-          return;
-        }
-        window.location.href = HOME_URL;
-      });
-      return;
-    }
-
-    if (action === 'signin') {
-      var em = document.getElementById('si-email').value.trim();
-      var pw = document.getElementById('si-pass').value;
-      if (!EMAIL_RE.test(em)) return setMsg('signin', 'Enter a valid email address.');
-      if (!pw) return setMsg('signin', 'Enter your password.');
-      act.disabled = true; act.textContent = 'Signing in…';
-      supabase.auth.signInWithPassword({ email: em, password: pw }).then(function (res) {
-        if (res.error) {
-          setMsg('signin', friendly(res.error));
-          act.disabled = false; act.textContent = 'Sign in';
-          return;
-        }
-        window.location.href = HOME_URL;
-      });
-      return;
-    }
-
-    if (action === 'google') {
-      var key = act.closest('[data-view="signup"]') ? 'step0' : 'signin';
-      supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: REDIRECT_URL },
-      }).then(function (res) {
-        if (res.error) setMsg(key, friendly(res.error));
-      });
-      return;
-    }
-
-    if (action === 'next') {
-      if (step === 0) {
-        var sem = document.getElementById('su-email').value.trim();
-        var spw = document.getElementById('su-pass').value;
-        if (!EMAIL_RE.test(sem)) return setMsg('step0', 'Enter a valid email address.');
-        if (spw.length < 8) return setMsg('step0', 'Password must be at least 8 characters.');
-        showStep(1);
-      } else if (step === 1) {
-        var nm = document.getElementById('su-name').value.trim();
-        if (!nm) return setMsg('step1', 'Please enter your name.');
-        // Fill the confirm summary.
-        root.querySelector('[data-sum="name"]').textContent = nm || '—';
-        root.querySelector('[data-sum="firm"]').textContent = document.getElementById('su-firm').value.trim() || '—';
-        root.querySelector('[data-sum="email"]').textContent = document.getElementById('su-email').value.trim() || 'your email';
-        showStep(2);
-      }
-      return;
-    }
-
-    if (action === 'back') { showStep(Math.max(0, step - 1)); return; }
-
-    if (action === 'finish') {
-      if (!document.getElementById('su-agree').checked) return setMsg('step2', 'Please accept the Terms to continue.');
-      act.disabled = true; act.textContent = 'Creating…';
-      var email = document.getElementById('su-email').value.trim();
-      var password = document.getElementById('su-pass').value;
-      var fullName = document.getElementById('su-name').value.trim();
-      var firm = document.getElementById('su-firm').value.trim();
-      var wantsNews = document.getElementById('su-news').checked;
-      supabase.auth.signUp({
-        email: email,
-        password: password,
-        options: {
-          data: { full_name: fullName, firm: firm, newsletter_opt_in: wantsNews },
-          emailRedirectTo: window.location.origin + window.location.pathname.replace(/auth\.html$/, '') + HOME_URL,
-        },
-      }).then(function (res) {
-        if (res.error) {
-          setMsg('step2', friendly(res.error));
-          act.disabled = false; act.textContent = 'Create account';
-          return;
-        }
-        // If email confirmation is required, no session is returned → show the
-        // "confirm your email" panel. Otherwise we're signed in → go home.
-        if (res.data && res.data.session) {
-          window.location.href = HOME_URL;
-          return;
-        }
-        var safe = (email || 'your email').replace(/[<>&]/g, '');
-        document.getElementById('doneTitle').textContent = 'Confirm your email';
-        document.getElementById('doneSub').innerHTML = 'We’ve sent a confirmation link to <strong>' + safe + '</strong>. Open it to enter your workspace.';
-        showView('done');
-        act.disabled = false; act.textContent = 'Create account';
-      });
-      return;
-    }
-  });
-
-  // Map Supabase auth errors to short, human messages.
-  function friendly(error) {
-    var m = (error && error.message) || 'Something went wrong. Please try again.';
-    if (/invalid login credentials/i.test(m)) return 'Incorrect email or password.';
-    if (/email not confirmed/i.test(m)) return 'Please confirm your email first — check your inbox.';
-    if (/already registered|already exists/i.test(m)) return 'That email is already registered. Try signing in.';
-    if (/rate limit|too many/i.test(m)) return 'Too many attempts. Please wait a moment and try again.';
-    if (/password/i.test(m) && /6|characters|short/i.test(m)) return 'Password is too short.';
-    return m;
-  }
-
-  // ── Password-recovery landing: the reset email links back to this page.
-  // supabase-js (detectSessionInUrl: true) exchanges the token and fires
-  // PASSWORD_RECOVERY — switch to the set-new-password panel.
-  supabase.auth.onAuthStateChange(function (event) {
-    if (event === 'PASSWORD_RECOVERY') showView('recovery');
-  });
-
-  // ── Back button (navbar is hidden on this tab) ──
-  var backBtn = document.getElementById('authBack');
-  if (backBtn) backBtn.addEventListener('click', function () {
-    if (window.history.length > 1) window.history.back();
-    else window.location.href = 'index.html';
-  });
-
-  // ── Size the cabinet so ~half the footer peeks below the fold ──
-  function setFootHalf() {
-    var f = document.querySelector('.dvx-footer');
-    if (f) document.documentElement.style.setProperty('--dvx-foot-half', Math.round(f.offsetHeight / 2) + 'px');
-  }
-  window.addEventListener('load', setFootHalf);
-  window.addEventListener('resize', setFootHalf);
-  setTimeout(setFootHalf, 60);
-  setTimeout(setFootHalf, 350);
-
-  // ── Single cursor spotlight (form side) ──
-  // Counter-shift the background-position so the brighter dots stay pinned to the
-  // base grid (same trick as the homepage / account / installers spotlights);
-  // moving only the transform makes the dots swim out of alignment.
-  (function () {
-    var spot = document.getElementById('spotlight');
-    if (!spot) return;
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { spot.style.display = 'none'; return; }
-    var R = 215, frame = null, x = window.innerWidth / 2, y = window.innerHeight / 2;
-    function apply() {
-      frame = null;
-      var px = Math.round(x), py = Math.round(y);
-      spot.style.transform = 'translate3d(' + (px - R) + 'px,' + (py - R) + 'px,0)';
-      spot.style.backgroundPosition = (R - px) + 'px ' + (R - py) + 'px';
-    }
-    apply();
-    window.addEventListener('pointermove', function (e) { x = e.clientX; y = e.clientY; if (frame == null) frame = requestAnimationFrame(apply); }, { passive: true });
-  })();
-
-  // ── OAuth return: supabase-js exchanges the ?code automatically (detectSessionInUrl).
-  //    Wait for the session, then send the user home. ──
-  var params = new URLSearchParams(window.location.search);
-  if (params.get('code') || params.get('error')) {
-    if (params.get('error')) {
-      setMsg('signin', params.get('error_description') || 'Sign-in was cancelled.');
-      history.replaceState(null, '', REDIRECT_URL);
-    } else {
-      setMsg('signin', 'Signing you in…', 'ok');
-      supabase.auth.getSession().then(function (res) {
-        if (res.data && res.data.session) { window.location.href = HOME_URL; }
-      });
-    }
-  }
-  // Belt-and-braces: redirect as soon as the OAuth code exchange fires SIGNED_IN.
-  supabase.auth.onAuthStateChange(function (event, session) {
-    if (event === 'SIGNED_IN' && session && (params.get('code'))) {
-      window.location.href = HOME_URL;
-    }
-  });
-
-  // ── Open in signup mode via ?mode=signup ──
-  if (params.get('mode') === 'signup') { showStep(0); showView('signup'); }
+// Where to go after a successful sign-in. Same-origin relative paths only —
+// echoing an arbitrary ?next= back into location would be an open redirect.
+const params = new URLSearchParams(location.search);
+const NEXT = (() => {
+  const raw = params.get('next') || 'index.html';
+  return /^[\w./-]+$/.test(raw) && !raw.startsWith('//') && !raw.includes('..') ? raw : 'index.html';
 })();
+
+// A password-reset link lands here with type=recovery (query on PKCE, hash on
+// the implicit template). We must NOT bounce such a visit straight to the site:
+// this page is where they set the new password.
+const isRecovery = params.get('type') === 'recovery'
+  || /(?:^|[#&?])type=recovery(?:&|$)/.test(location.hash);
+
+// The bare URL opens on CREATE ACCOUNT — the site's job is to get new firms
+// onboarded, and everyone who already has an account signs in from the app.
+// `?mode=signin` (what the navbar's "Sign in" and the account-page bounce use)
+// opens the sign-in step instead; either step links to the other.
+const state = {
+  view: isRecovery ? 'recover' : (params.get('mode') === 'signin' ? 'signin' : 'signup'),
+  step: 0,                    // 0 account · 1 profile · 2 confirm
+  email: '', password: '', name: '', firm: '',
+  agree: false, news: true,
+  error: '', notice: '', busy: false,
+  confirmEmail: '', resent: false,
+};
+
+let leaving = false;
+function go() {
+  if (leaving) return;
+  leaving = true;
+  window.location.replace(NEXT);
+}
+
+// ── Markup helpers (mirror src/components/auth/authBits.jsx) ────────────────
+const GOOGLE_SVG =
+  '<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">' +
+  '<path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>' +
+  '<path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>' +
+  '<path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/>' +
+  '<path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>' +
+  '</svg>';
+const check = (size, width) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="${width}" ` +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function field({ key, label, type = 'text', placeholder, autocomplete, right = '' }) {
+  return (
+    '<div class="auv-field"><div class="auv-label-row">' +
+      `<label class="auv-label" for="f-${key}">${esc(label)}</label>${right}` +
+    '</div>' +
+    `<input class="auv-input" id="f-${key}" data-field="${key}" type="${type}" ` +
+    `placeholder="${esc(placeholder || '')}" autocomplete="${autocomplete || 'off'}"></div>`
+  );
+}
+function googleBtn(label) {
+  return `<button type="button" class="auv-google" data-act="google">${GOOGLE_SVG}${esc(label)}</button>`;
+}
+const msgSlot = '<div id="auMsg"></div>';
+const orRule = '<div class="auv-or"><span>or</span></div>';
+
+function strengthHTML() {
+  const s = passwordStrength(state.password);
+  const on = (n) => (s >= n ? ' class="is-on"' : '');
+  return (
+    '<div class="auv-strength-wrap"><div class="auv-strength" id="auStrength">' +
+    `<span${on(1)}></span><span${on(2)}></span><span${on(3)}></span></div>` +
+    `<p class="auv-strength-label" id="auStrengthLabel">${STRENGTH_LABELS[s]}</p></div>`
+  );
+}
+function stepper() {
+  const dot = (i) => `auv-cab-dot${state.step > i ? ' is-done' : state.step === i ? ' is-active' : ''}`;
+  return '<div class="auv-cab-stepper">' + ['Account', 'Profile', 'Confirm'].map((label, i) =>
+    (i > 0 ? '<span class="auv-cab-stepline"></span>' : '') +
+    `<div class="auv-cab-step"><span class="${dot(i)}">${state.step > i ? check(14, 3) : i + 1}</span>` +
+    `<span class="auv-cab-step-label">${label}</span></div>`).join('') + '</div>';
+}
+
+// ── Views ──────────────────────────────────────────────────────────────────
+function viewSignin() {
+  return '<div class="auv-fade">' +
+    '<h3 class="auv-h3">Welcome back</h3>' +
+    '<p class="auv-sub">Sign in to your DocVex workspace.</p>' +
+    field({ key: 'email', label: 'Email', type: 'email', placeholder: 'you@firm.law', autocomplete: 'email' }) +
+    field({ key: 'password', label: 'Password', type: 'password', placeholder: '••••••••', autocomplete: 'current-password',
+      right: '<button type="button" class="auv-link" data-act="forgot">Forgot?</button>' }) +
+    msgSlot +
+    `<button class="auv-btn auv-btn--cognac" data-act="signin"${state.busy ? ' disabled' : ''}>` +
+    `${state.busy ? 'Signing in…' : 'Sign in'}</button>` +
+    orRule + googleBtn('Continue with Google') +
+    '<p class="auv-foot">New to DocVex? <button type="button" class="auv-link" data-act="toSignup">Create an account</button></p>' +
+  '</div>';
+}
+
+function viewSignup() {
+  let body = '';
+  if (state.step === 0) {
+    body =
+      '<h3 class="auv-h3 sm">Create your account</h3>' +
+      '<p class="auv-sub">Start with your work email.</p>' +
+      field({ key: 'email', label: 'Email', type: 'email', placeholder: 'you@firm.law', autocomplete: 'email' }) +
+      field({ key: 'password', label: 'Password', type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' }) +
+      strengthHTML() + msgSlot +
+      '<button class="auv-btn auv-btn--cognac" data-act="next">Continue</button>' +
+      orRule + googleBtn('Sign up with Google') +
+      '<p class="auv-foot">Already a member? <button type="button" class="auv-link" data-act="toSignin">Sign in</button></p>';
+  } else if (state.step === 1) {
+    body =
+      '<h3 class="auv-h3 sm">Tell us about you</h3>' +
+      '<p class="auv-sub">This personalises your workspace.</p>' +
+      field({ key: 'name', label: 'Full name', placeholder: 'Ana Popescu', autocomplete: 'name' }) +
+      field({ key: 'firm', label: 'Firm / organization', placeholder: 'Popescu & Asociații', autocomplete: 'organization' }) +
+      msgSlot +
+      '<div class="auv-btn-row"><button class="auv-btn auv-btn--ghost" data-act="back">Back</button>' +
+      '<button class="auv-btn auv-btn--cognac is-grow" data-act="next">Continue</button></div>';
+  } else {
+    body =
+      '<h3 class="auv-h3 sm">Almost there</h3>' +
+      '<p class="auv-sub">Review and accept to finish.</p>' +
+      '<div class="auv-summary">' +
+        `<div class="auv-summary-row"><span>Name</span><strong>${esc(state.name || '—')}</strong></div>` +
+        '<div class="auv-summary-rule"></div>' +
+        `<div class="auv-summary-row"><span>Firm</span><strong>${esc(state.firm || '—')}</strong></div>` +
+        '<div class="auv-summary-rule"></div>' +
+        `<div class="auv-summary-row"><span>Email</span><strong>${esc(state.email || 'your email')}</strong></div>` +
+      '</div>' +
+      '<label class="auv-check"><input type="checkbox" data-check="agree">' +
+        '<span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a> ' +
+        'and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>' +
+      '<label class="auv-check" style="margin-top:13px"><input type="checkbox" data-check="news">' +
+        '<span>Send me the <strong>Legal Newsfeed</strong> — a weekly briefing on Romanian legislation.</span></label>' +
+      msgSlot +
+      '<div class="auv-btn-row"><button class="auv-btn auv-btn--ghost" data-act="back">Back</button>' +
+      `<button class="auv-btn auv-btn--cognac is-grow" data-act="finish"${state.busy ? ' disabled' : ''}>` +
+      `${state.busy ? 'Creating…' : 'Create account'}</button></div>`;
+  }
+  return `<div class="auv-fade">${stepper()}<div class="auv-fade">${body}</div></div>`;
+}
+
+function viewDone() {
+  return '<div class="auv-done auv-fade">' +
+    `<div class="auv-done-mark">${check(30, 2.5)}</div>` +
+    '<h3 class="auv-h3">Confirm your email</h3>' +
+    `<p class="auv-sub center">We've sent a confirmation link to <strong>${esc(state.confirmEmail)}</strong>. ` +
+    'Open it to enter your workspace.</p>' + msgSlot +
+    '<button class="auv-btn auv-btn--cognac is-auto" data-act="toSignin">Back to sign in</button>' +
+    '<p class="auv-foot">Didn\'t get it? <button type="button" class="auv-link" data-act="resend"' +
+    `${state.resent ? ' disabled' : ''}>${state.resent ? 'Sent again' : 'Resend email'}</button></p>` +
+  '</div>';
+}
+
+// The app can't host this step — a docvex:// redirect can't carry Supabase's
+// recovery token — so useAuthFlow points "Forgot?" at this page. Landing here
+// with type=recovery means the link already exchanged a session; updateUser()
+// sets the new password on it.
+function viewRecover() {
+  return '<div class="auv-fade">' +
+    '<h3 class="auv-h3">Set a new password</h3>' +
+    '<p class="auv-sub">Choose a new password for your DocVex account.</p>' +
+    field({ key: 'password', label: 'New password', type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' }) +
+    strengthHTML() + msgSlot +
+    `<button class="auv-btn auv-btn--cognac" data-act="setPassword"${state.busy ? ' disabled' : ''}>` +
+    `${state.busy ? 'Saving…' : 'Update password'}</button>` +
+  '</div>';
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+const VIEWS = { signin: viewSignin, signup: viewSignup, done: viewDone, recover: viewRecover };
+let lastKey = '';   // view+step — focus the first field only when it changes
+
+function renderMsg() {
+  const el = document.getElementById('auMsg');
+  if (!el) return;
+  el.innerHTML = state.error ? `<p class="auv-err">${esc(state.error)}</p>`
+    : state.notice ? `<p class="auv-notice">${esc(state.notice)}</p>` : '';
+}
+
+function render() {
+  form.innerHTML = VIEWS[state.view]();
+  renderMsg();
+
+  // Restore typed values (the markup ships empty so nothing sensitive sits in
+  // the HTML), and keep state in sync as the visitor types.
+  form.querySelectorAll('[data-field]').forEach((input) => {
+    const key = input.dataset.field;
+    input.value = state[key] || '';
+    input.addEventListener('input', () => {
+      state[key] = input.value;
+      if (state.error || state.notice) { state.error = ''; state.notice = ''; renderMsg(); }
+      if (key === 'password') refreshStrength();
+    });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCurrent(); });
+  });
+  form.querySelectorAll('[data-check]').forEach((box) => {
+    const key = box.dataset.check;
+    box.checked = !!state[key];
+    box.addEventListener('change', () => {
+      state[key] = box.checked;
+      if (state.error) { state.error = ''; renderMsg(); }
+    });
+  });
+  form.querySelectorAll('[data-act]').forEach((btn) => {
+    btn.addEventListener('click', () => actions[btn.dataset.act]());
+  });
+
+  const key = `${state.view}:${state.step}`;
+  if (key !== lastKey) {
+    lastKey = key;
+    const first = form.querySelector('[data-field]');
+    if (first && !first.value) first.focus();
+  }
+}
+
+// Strength meter updates in place — re-rendering on every keystroke would drop
+// focus out of the password field.
+function refreshStrength() {
+  const bars = document.getElementById('auStrength');
+  if (!bars) return;
+  const s = passwordStrength(state.password);
+  [...bars.children].forEach((b, i) => b.classList.toggle('is-on', s >= i + 1));
+  document.getElementById('auStrengthLabel').textContent = STRENGTH_LABELS[s];
+}
+
+function fail(message) { state.error = message; state.notice = ''; renderMsg(); }
+function note(message) { state.notice = message; state.error = ''; renderMsg(); }
+
+// Enter submits whatever the current view's primary action is.
+function submitCurrent() {
+  if (state.view === 'signin') return actions.signin();
+  if (state.view === 'recover') return actions.setPassword();
+  if (state.view === 'signup') return state.step === 2 ? actions.finish() : actions.next();
+}
+
+// ── Actions (mirror useAuthFlow) ───────────────────────────────────────────
+const actions = {
+  toSignup() { state.view = 'signup'; state.step = 0; state.error = ''; state.notice = ''; render(); },
+  toSignin() { state.view = 'signin'; state.step = 0; state.error = ''; state.notice = ''; render(); },
+  back() { state.error = ''; state.step = Math.max(0, state.step - 1); render(); },
+
+  next() {
+    if (state.step === 0) {
+      if (!EMAIL_RE.test(state.email.trim())) return fail('Enter a valid email address.');
+      if ((state.password || '').length < 8) return fail('Password must be at least 8 characters.');
+    } else if (state.step === 1) {
+      if (!state.name.trim()) return fail('Please enter your full name.');
+      if (!state.firm.trim()) return fail('Please enter your firm or organization.');
+    }
+    state.error = '';
+    state.step = Math.min(2, state.step + 1);
+    render();
+  },
+
+  async signin() {
+    if (!EMAIL_RE.test(state.email.trim())) return fail('Enter a valid email address.');
+    if (!state.password) return fail('Please enter your password.');
+    state.error = ''; state.notice = ''; state.busy = true; render();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: state.email.trim(), password: state.password,
+    });
+    state.busy = false;
+    if (error) { render(); return fail(error.message || 'Could not sign in.'); }
+    go();   // the auth-state listener usually beats us here; go() is idempotent
+  },
+
+  async finish() {
+    if (!state.agree) return fail('Please accept the Terms and Privacy Policy to continue.');
+    state.error = ''; state.busy = true; render();
+    const { data, error } = await supabase.auth.signUp({
+      email: state.email.trim(),
+      password: state.password,
+      options: {
+        data: {
+          full_name: state.name.trim() || null,
+          firm: state.firm.trim() || null,
+          newsletter_opt_in: !!state.news,
+        },
+        // If the link is stale the exchange fails and they land here with no
+        // session — on the sign-in step, not back on a blank sign-up form.
+        emailRedirectTo: `${location.origin}/auth.html?mode=signin&next=${encodeURIComponent(NEXT)}`,
+      },
+    });
+    state.busy = false;
+    if (error) { render(); return fail(error.message || 'Could not create your account.'); }
+    // No session back means the project requires email confirmation first.
+    if (!data || !data.session) {
+      state.confirmEmail = state.email.trim();
+      state.view = 'done';
+      render();
+      return;
+    }
+    go();
+  },
+
+  async google() {
+    state.error = ''; state.notice = '';
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      // Come back to THIS page carrying `next`, so the post-exchange redirect
+      // lands where the visitor started.
+      options: { redirectTo: `${location.origin}/auth.html?mode=signin&next=${encodeURIComponent(NEXT)}` },
+    });
+    if (error) fail(error.message || 'Google sign-in failed.');
+  },
+
+  async forgot() {
+    if (!EMAIL_RE.test(state.email.trim())) {
+      return fail('Enter your email above first, then tap Forgot.');
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(state.email.trim(), {
+      redirectTo: `${location.origin}/auth.html?mode=signin`,
+    });
+    if (error) fail(error.message || 'Could not send the reset email.');
+    else note('Password reset link sent — check your email.');
+  },
+
+  async resend() {
+    if (!state.confirmEmail) return;
+    const { error } = await supabase.auth.resend({ type: 'signup', email: state.confirmEmail });
+    if (error) return fail(error.message || 'Could not resend the email.');
+    state.resent = true;
+    render();
+    note('Confirmation email re-sent — check your inbox.');
+  },
+
+  async setPassword() {
+    if ((state.password || '').length < 8) return fail('Password must be at least 8 characters.');
+    state.error = ''; state.busy = true; render();
+    const { error } = await supabase.auth.updateUser({ password: state.password });
+    state.busy = false;
+    if (error) { render(); return fail(error.message || 'Could not update your password.'); }
+    go();
+  },
+};
+
+render();
+
+// ── Session ────────────────────────────────────────────────────────────────
+// Already signed in — or just back from the Google round trip: the client runs
+// with detectSessionInUrl, so the ?code= is exchanged during load and the
+// listener below forwards on. A recovery landing stays put; the visitor has a
+// session but is here precisely to replace their password.
+if (!isRecovery) {
+  supabase.auth.getSession().then(({ data }) => { if (data && data.session) go(); }).catch(() => {});
+}
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    state.view = 'recover'; state.password = ''; render();
+    return;
+  }
+  if (isRecovery) return;
+  if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) go();
+});
+
+// No cursor-spotlight wiring here — the brand panel's grid is static, and the
+// site's own page-wide spotlight comes from chrome.js. See the note by
+// .auv-cab-brand::before in the stylesheet.
 </script>
+<!-- Shared site chrome: the homepage's navbar + footer, the ambient dot grid
+     and the cursor spotlight. The cabinet card sits on top of all of it. -->
 <script type="module" src="chrome.js"></script>
 </body>
 </html>

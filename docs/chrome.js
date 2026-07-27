@@ -21,6 +21,12 @@ const ICON_OUT = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" st
 // ── Theme (shared via localStorage with the homepage) ──
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
+  // Every page's pre-paint <head> script writes the theme colour as an INLINE
+  // style on <html> (so the first frame isn't the wrong colour). An inline
+  // style beats chrome.css's `html { background: var(--bg-page) }`, so without
+  // re-writing it here the page keeps the old theme's backdrop and the toggle
+  // looks like it did nothing wherever the body doesn't cover the viewport.
+  document.documentElement.style.backgroundColor = t === 'cream' ? '#F5F2EA' : '#0F172A';
   const root = document.getElementById('dv-root');
   if (root) root.setAttribute('data-theme', t);
   document.querySelectorAll('[data-theme-icon]').forEach((el) => {
@@ -29,7 +35,7 @@ function applyTheme(t) {
   try { localStorage.setItem('docvex.site.theme', t); } catch (e) {}
 }
 function currentTheme() {
-  try { return localStorage.getItem('docvex.site.theme') || 'cream'; } catch (e) { return 'cream'; }
+  try { return localStorage.getItem('docvex.site.theme') || 'ink'; } catch (e) { return 'ink'; }
 }
 
 // ── Session read (same logic as the homepage chip) ──
@@ -45,44 +51,62 @@ function readUser() {
   return user;
 }
 
+var ICON_ARROW = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg>';
+
+// Same navbar as the homepage (the "main tab"): round logo + DOCVEX wordmark,
+// the homepage's link set (section anchors resolve back to index.html), theme
+// toggle, and Sign in + Get Started (or the signed-in account chip).
 function navbarHTML() {
   return (
     '<header class="dvx-header"><div class="dvx-header-inner">' +
-      '<a class="dvx-logo" href="index.html"><img class="dvx-lockup" src="assets/logo-lockup.png" alt="DocVex — Intelligent Legal Workflows"></a>' +
+      '<a class="dvx-logo" href="index.html">' +
+        '<span class="dvx-logo-ring dvx-logo-app"><img src="assets/appicon.png" alt="DocVex"></span>' +
+        '<span class="dvx-logo-word">DOCVEX</span>' +
+      '</a>' +
       '<nav class="dvx-nav">' +
         '<a href="index.html">Home</a>' +
         '<a href="company.html">Company</a>' +
         '<a href="legal.html">Legal</a>' +
         '<a href="installers.html">Download</a>' +
-        '<a href="enroll.html">Enroll</a>' +
       '</nav>' +
       '<div class="dvx-actions">' +
         '<button type="button" class="dvx-theme" id="dvxTheme" title="Toggle theme" aria-label="Toggle theme">' + ICON_THEME + '</button>' +
         '<span id="dvxAuthButtons" style="display:contents;">' +
-          '<a class="dvx-signin" href="auth.html">Sign in</a>' +
-          '<a class="dvx-signup" href="auth.html?mode=signup">Sign up</a>' +
+          '<a class="dvx-signin" href="auth.html?mode=signin">Sign in</a>' +
+          '<a class="dvx-signup" href="auth.html?mode=signup">Get Started<span class="dvx-signup-arrow">' + ICON_ARROW + '</span></a>' +
         '</span>' +
         '<div class="dvx-chip" id="dvxChip" hidden>' +
           '<button class="dvx-chip-trigger" id="dvxChipTrigger" type="button" title="Account">' +
             '<span class="dvx-chip-avatarwrap"><span class="dvx-chip-avatar" id="dvxAvatar"></span><span class="dvx-chip-status" id="dvxStatus" hidden></span></span>' +
-            '<span class="dvx-chip-text"><span class="dvx-chip-name" id="dvxName"></span><span class="dvx-chip-email" id="dvxEmail"></span></span>' +
+            '<span class="dvx-chip-name" id="dvxName"></span>' +
             ICON_CARET +
           '</button>' +
+          '<div class="dvx-chip-menu" id="dvxChipMenu" hidden>' +
+            '<a class="dvx-chip-item" href="account.html">' + ICON_USER + 'Account</a>' +
+            '<button class="dvx-chip-item dvx-chip-danger" id="dvxSignOut" type="button">' + ICON_OUT + 'Sign out</button>' +
+          '</div>' +
         '</div>' +
       '</div>' +
     '</div></header>'
   );
 }
 
-// Scroll-aware header: transparent + taller at the very top, compact + bordered
-// on scroll — identical to the homepage's inline .dv-header behaviour.
+// Scroll-aware header: transparent + taller at the very top (the CSS default),
+// compact glass on scroll. The compact state lives on html too so the body's
+// CSS-reserved padding compacts in lockstep.
 function wireScrollHeader() {
   var hdr = document.querySelector('.dvx-header');
   if (!hdr) return;
+  // Hysteresis: compacting shrinks the reserved space by 24px, which shifts
+  // the scroll position — a single threshold would flip-flop near the top.
+  // The 36px gap between the two thresholds exceeds that layout delta.
+  var compact = false;
   function onScroll() {
-    var atTop = window.scrollY < 8;
-    hdr.classList.toggle('at-top', atTop);
-    document.documentElement.classList.toggle('dvx-attop', atTop);
+    var y = window.scrollY;
+    if (compact) { if (y < 4) compact = false; }
+    else if (y > 40) { compact = true; }
+    hdr.classList.toggle('is-compact', compact);
+    document.documentElement.classList.toggle('dvx-scrolled', compact);
   }
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
@@ -105,32 +129,55 @@ function markActiveNav() {
   }
 }
 
+// Same footer as the homepage (the "main tab"): brand + Quick Links + Contact
+// Info + Newsletter, bottom bar with Terms/Privacy, outlined DOCVEX watermark.
 function footerHTML() {
-  const col = (title, links) =>
-    '<div class="dvx-footer-col"><p class="dvx-footer-coltitle">' + title + '</p><ul>' +
-    links.map((l) => '<li><a href="' + l[1] + '">' + l[0] + '</a></li>').join('') + '</ul></div>';
   return (
-    '<footer class="dvx-footer"><div class="dvx-footer-inner">' +
+    '<footer class="dvx-footer">' +
       '<div class="dvx-footer-grid">' +
         '<div>' +
-          '<div class="dvx-footer-brandrow"><img class="dvx-footer-lockup" src="assets/logo-lockup.png" alt="DocVex — Intelligent Legal Workflows"></div>' +
-          '<p class="dvx-footer-tag">Intelligent legal workflows for modern law firms.</p>' +
-          '<div class="dvx-footer-contact"><p><a href="mailto:docvexteam@docvex.ro">docvexteam@docvex.ro</a></p><p><a href="https://docvex.ro">docvex.ro</a></p></div>' +
-          '<div class="dvx-footer-news">' +
-            '<p class="dvx-footer-newstitle">Legal Newsfeed — weekly briefing</p>' +
-            '<form class="dvx-footer-newsform" id="dvxNewsForm">' +
-              '<input class="dvx-footer-newsinput" id="dvxNewsEmail" type="email" placeholder="you@firm.law" autocomplete="email" aria-label="Email for the newsletter">' +
-              '<button class="dvx-footer-newsbtn" type="submit">Subscribe</button>' +
-            '</form>' +
-            '<p class="dvx-footer-newsmsg" id="dvxNewsMsg" hidden></p>' +
+          '<a class="dvx-logo" href="index.html">' +
+            '<span class="dvx-logo-ring"><img src="assets/logo.png" alt="DocVex"></span>' +
+            '<span class="dvx-logo-word">DOCVEX</span>' +
+          '</a>' +
+          '<p class="dvx-footer-tag">Intelligent legal workflows for modern law firms. Privacy-first local file storage and focused AI tooling.</p>' +
+        '</div>' +
+        '<div>' +
+          '<p class="dvx-footer-coltitle">Quick Links</p>' +
+          '<div class="dvx-footer-links">' +
+            '<a href="index.html">Home</a>' +
+            '<a href="company.html">Company</a>' +
+            '<a href="index.html#services">Services</a>' +
+            '<a href="index.html#updates">Updates</a>' +
+            '<a href="installers.html">Download</a>' +
+            '<a href="enroll.html">Enroll</a>' +
+            '<a href="legal.html">Legal</a>' +
           '</div>' +
         '</div>' +
-        col('Product', [['Features','index.html#features'],['Security','index.html#security'],['Updates','index.html#updates'],['Pricing','index.html#pricing'],['FAQ','index.html#faq'],['Download','installers.html']]) +
-        col('Company', [['About','company.html#about'],['Customers','company.html#customers'],['Careers','company.html#careers'],['Contact','company.html#contact']]) +
-        col('Legal', [['Terms &amp; Conditions','terms.html'],['Privacy Policy','privacy.html'],['Cookie Policy','cookies.html'],['GDPR Compliance','gdpr.html'],['Security Policy','security.html'],['Data Processing Agreement','dpa.html']]) +
+        '<div>' +
+          '<p class="dvx-footer-coltitle">Contact Info</p>' +
+          '<div class="dvx-footer-links">' +
+            '<a href="mailto:docvexteam@docvex.ro">docvexteam@docvex.ro</a>' +
+            '<a href="https://docvex.ro">docvex.ro</a>' +
+            '<span>Bucharest, Romania</span>' +
+          '</div>' +
+        '</div>' +
+        '<div>' +
+          '<p class="dvx-footer-coltitle">Newsletter</p>' +
+          '<form class="dvx-footer-newsform" id="dvxNewsForm">' +
+            '<input class="dvx-footer-newsinput" id="dvxNewsEmail" type="email" placeholder="Your Email" autocomplete="email" aria-label="Email for the newsletter">' +
+            '<button class="dvx-footer-newsbtn" type="submit">Subscribe</button>' +
+          '</form>' +
+          '<p class="dvx-footer-newsmsg" id="dvxNewsMsg" hidden></p>' +
+          '<p class="dvx-footer-newsnote">Legal updates, summarized for your practice.</p>' +
+        '</div>' +
       '</div>' +
-      '<div class="dvx-footer-bottom"><p>© 2026 DOCVEX. All rights reserved.</p><p style="text-transform:uppercase; letter-spacing:0.22em;">Intelligent Legal Workflows</p></div>' +
-    '</div></footer>'
+      '<div class="dvx-footer-bottom">' +
+        '<p>© 2026 DocVex. All rights reserved.</p>' +
+        '<div class="dvx-footer-bottomlinks"><a href="terms.html">Terms &amp; Conditions</a><a href="privacy.html">Privacy Policy</a></div>' +
+      '</div>' +
+      '<div class="dvx-footer-wm" aria-hidden="true"><span>DOCVEX</span></div>' +
+    '</footer>'
   );
 }
 
@@ -168,7 +215,6 @@ function renderChip() {
   const meta = user.user_metadata || {};
   const name = meta.full_name || meta.name || user.email || 'Account';
   document.getElementById('dvxName').textContent = name;
-  document.getElementById('dvxEmail').textContent = user.email || '';
 
   const av = document.getElementById('dvxAvatar');
   if (meta.avatar_url) {
@@ -191,134 +237,22 @@ function renderChip() {
   chip.hidden = false;
 }
 
-function wireChipMorph() {
+// Chip dropdown (Account / Sign out) — identical to the homepage chip: a
+// simple menu anchored under the trigger (the old cursor-morph pill is gone
+// so the account section reads the same on every page).
+function wireChipMenu() {
   var trigger = document.getElementById('dvxChipTrigger');
-  if (!trigger) return;
-
-  var pill = null;   // current portalled pill (tooltip or menu)
-  var curX = 0, curY = 0;
-  var isMenu = false;
-  var oldRect = null;
-  var onKey = null, onDown = null;
-
-  function getName() {
-    var el = document.getElementById('dvxName');
-    return (el && el.textContent) || 'Account';
-  }
-
-  function clamp(el) {
-    var w = el.offsetWidth, h = el.offsetHeight;
-    var vw = window.innerWidth, vh = window.innerHeight;
-    // left-placed: grow leftward from cursor, matching the app's 'placement: left'
-    var x = Math.max(8, Math.min(curX - 8 - w, vw - 8 - w));
-    var y = Math.max(8, Math.min(curY + 8, vh - 8 - h));
-    return { x: x, y: y };
-  }
-
-  function removePill() {
-    if (pill) { pill.remove(); pill = null; }
-  }
-
-  function doSignOut() {
-    import('./supabase.js').then(function(m) { return m.supabase.auth.signOut(); })
-      .catch(function() { try { localStorage.removeItem(SUPABASE_AUTH_KEY); } catch(e) {} })
-      .then(function() { renderChip(); });
-  }
-
-  function addDismiss() {
-    onKey = function(e) { if (e.key === 'Escape') closeMenu(); };
-    onDown = function(e) {
-      if (pill && pill.contains(e.target)) return;
-      if (trigger.contains(e.target)) return;
-      closeMenu();
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('mousedown', onDown, true);
-  }
-  function removeDismiss() {
-    if (onKey) { window.removeEventListener('keydown', onKey); onKey = null; }
-    if (onDown) { window.removeEventListener('mousedown', onDown, true); onDown = null; }
-  }
-
-  function openMenu() {
-    // Snapshot tooltip rect for FLIP before removing it
-    if (pill) { oldRect = pill.getBoundingClientRect(); removePill(); }
-    isMenu = true;
-
-    pill = document.createElement('div');
-    pill.className = 'dvx-morph-pill is-menu';
-    pill.setAttribute('role', 'menu');
-    pill.innerHTML =
-      '<ul class="dvx-morph-list" role="none">' +
-        '<li role="none"><a class="dvx-morph-item" href="account.html" role="menuitem">' + ICON_USER + 'Account</a></li>' +
-        '<li role="none"><button class="dvx-morph-item dvx-morph-danger" type="button" role="menuitem">' + ICON_OUT + 'Sign out</button></li>' +
-      '</ul>';
-    document.body.appendChild(pill);
-
-    pill.querySelector('.dvx-morph-danger').addEventListener('click', function() {
-      closeMenu(); doSignOut();
-    });
-
-    // Snap to position, then FLIP from tooltip size → menu size
-    var pos = clamp(pill);
-    pill.style.transition = 'none';
-    pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
-    void pill.offsetWidth;
-
-    if (oldRect) {
-      var newRect = pill.getBoundingClientRect();
-      var sx = oldRect.width / newRect.width;
-      var sy = oldRect.height / newRect.height;
-      pill.style.transformOrigin = 'top right';
-      pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px) scale(' + sx + ',' + sy + ')';
-      void pill.offsetWidth;
-      pill.style.transition = 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1)';
-      pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px) scale(1,1)';
-      oldRect = null;
-    } else {
-      pill.style.transition = '';
-    }
-
-    addDismiss();
-  }
-
-  function closeMenu() {
-    isMenu = false;
-    removeDismiss();
-    removePill();
-  }
-
-  // Cursor-following tooltip
-  trigger.addEventListener('mousemove', function(e) {
-    curX = e.clientX; curY = e.clientY;
-    if (isMenu) return;
-    if (!pill) {
-      pill = document.createElement('div');
-      pill.className = 'dvx-morph-pill';
-      pill.setAttribute('role', 'tooltip');
-      document.body.appendChild(pill);
-    }
-    pill.textContent = getName();
-    var pos = clamp(pill);
-    var first = !pill._placed;
-    pill._placed = true;
-    if (first) {
-      pill.style.transition = 'none';
-      pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
-      void pill.offsetWidth;
-      pill.style.transition = '';
-    } else {
-      pill.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
-    }
+  var menu = document.getElementById('dvxChipMenu');
+  if (!trigger || !menu) return;
+  trigger.addEventListener('click', function (e) { e.stopPropagation(); menu.hidden = !menu.hidden; });
+  window.addEventListener('mousedown', function (e) {
+    if (!menu.hidden && !menu.contains(e.target) && !trigger.contains(e.target)) menu.hidden = true;
   });
-
-  trigger.addEventListener('mouseleave', function() {
-    if (!isMenu) removePill();
-  });
-
-  trigger.addEventListener('click', function(e) {
-    e.stopPropagation();
-    if (isMenu) closeMenu(); else openMenu();
+  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') menu.hidden = true; });
+  document.getElementById('dvxSignOut').addEventListener('click', function () {
+    import('./supabase.js').then(function (m) { return m.supabase.auth.signOut(); })
+      .catch(function () { try { localStorage.removeItem(SUPABASE_AUTH_KEY); } catch (e) {} })
+      .then(function () { menu.hidden = true; renderChip(); });
   });
 }
 
@@ -335,7 +269,65 @@ function wire() {
   // app's "Open account" hands one across in the URL) updates the chip without a reload.
   import('./supabase.js').then((m) => { m.supabase.auth.onAuthStateChange(() => renderChip()); }).catch(() => {});
 
-  wireChipMorph();
+  wireChipMenu();
+}
+
+// Cursor-following spotlight (matches the app / homepage): move ONE small box
+// via transform each frame and counter-shift its dot grid so the brighter dots
+// stay pinned to the viewport grid.
+function wireSpotlight() {
+  var el = document.querySelector('.cursor-spotlight');
+  if (!el) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { el.style.display = 'none'; return; }
+  var R = 215, frame = null;
+  // Restore the cursor position from the previous page so the spotlight is
+  // already in place after a tab change (the view transition holds it frozen).
+  var saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem('dvx.spot') || 'null'); } catch (e) {}
+  var x = saved ? saved.x : window.innerWidth / 2;
+  var y = saved ? saved.y : window.innerHeight / 2;
+  function apply() {
+    frame = null;
+    var px = Math.round(x), py = Math.round(y);
+    el.style.transform = 'translate3d(' + (px - R) + 'px,' + (py - R) + 'px,0)';
+    el.style.backgroundPosition = (R - px) + 'px ' + (R - py) + 'px';
+    try { sessionStorage.setItem('dvx.spot', JSON.stringify({ x: px, y: py })); } catch (e) {}
+  }
+  function onMove(e) {
+    x = e.clientX; y = e.clientY;
+    if (frame == null) frame = requestAnimationFrame(apply);
+  }
+  apply();
+  window.addEventListener('pointermove', onMove, { passive: true });
+}
+
+// Prerender likely navigation targets (nav tabs, footer links) on hover so tab
+// changes are instant; the view-transition cross-fade in chrome.css then makes
+// them feel like in-app tab switches.
+// it would boot the whole React app in the background.
+function wirePrerender() {
+  if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('speculationrules'))) return;
+  var sr = document.createElement('script');
+  sr.type = 'speculationrules';
+  sr.textContent = JSON.stringify({
+    prerender: [{ where: { href_matches: '/*' }, eagerness: 'moderate' }],
+  });
+  document.head.appendChild(sr);
+}
+
+// Floating scroll-to-top button, shown once the page is scrolled past 400px.
+function wireToTop() {
+  var btn = document.createElement('button');
+  btn.className = 'dvx-totop';
+  btn.type = 'button';
+  btn.title = 'Back to top';
+  btn.setAttribute('aria-label', 'Back to top');
+  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  btn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  document.body.appendChild(btn);
+  function onScroll() { btn.classList.toggle('is-visible', window.scrollY > 400); }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
 }
 
 function mount() {
@@ -343,6 +335,17 @@ function mount() {
   // <html data-dvx-no-navbar> — the footer + theme still apply.
   var noNav = document.documentElement.hasAttribute('data-dvx-no-navbar');
   document.documentElement.classList.add('dvx-has-chrome');
+  wireToTop();
+  wirePrerender();
+  // Ambient dot grid + cursor spotlight (the homepage background). Skip the
+  // grid on pages that already paint their own (en-/acc-/inst-dotgrid divs).
+  if (!document.querySelector('[class*="dotgrid"]') && !noNav) {
+    document.body.insertAdjacentHTML('afterbegin', '<div class="dvx-dotgrid" aria-hidden="true"></div>');
+  }
+  if (!document.querySelector('.cursor-spotlight')) {
+    document.body.insertAdjacentHTML('afterbegin', '<div class="cursor-spotlight" aria-hidden="true"></div>');
+    wireSpotlight();
+  }
   if (!noNav) {
     document.documentElement.classList.add('dvx-has-navbar');
     document.body.insertAdjacentHTML('afterbegin', navbarHTML());

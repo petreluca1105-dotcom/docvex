@@ -63,3 +63,8 @@ body {
 .lg-hub-card h2 { margin: 2px 0 0; font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -0.01em; color: var(--text-primary); }
 .lg-hub-card p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-secondary); }
 .lg-hub-open { margin-top: auto; padding-top: 10px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.lg-hub-card.is-active { border-color: var(--accent); }
+
+/* Combined legal center (legal.html): the selected document renders inline
+   below the hub cards. */
+.lg-dochost { margin-top: 48px; border-top: 1px solid var(--border); padding-top: 40px; scroll-margin-top: 84px; }
