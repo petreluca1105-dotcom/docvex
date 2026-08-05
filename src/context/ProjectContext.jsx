@@ -13,6 +13,7 @@ import { getProject, listMembers } from '../lib/projects';
 import { listCustomRoles, subscribeForProjectRoles } from '../lib/customRoles';
 import { markProjectAccessed } from '../lib/recentProjects';
 import { useAuth } from './AuthContext';
+import { DEMO_PROJECT, DEMO_PROJECT_ID } from '../lib/demoWorkspace';
 
 // Scoped to a single /projects/:projectId subtree. Mounted by App.jsx only
 // inside the project routes so unrelated pages (Dashboard, Account, Updates)
@@ -105,6 +106,18 @@ export function ProjectProvider({ children }) {
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    // Web demo: the Demo Workspace has no Supabase row — resolve it locally
+    // (owner role so every surface is explorable) instead of letting the
+    // fetch fail and blank the subtree to an error page.
+    if (projectId === DEMO_PROJECT_ID) {
+      setProject({ ...DEMO_PROJECT, role: 'owner' });
+      setRole('owner');
+      setMembers([]);
+      setCustomRoles([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     const myRun = ++loadSeqRef.current;
 
     const [
@@ -195,7 +208,7 @@ export function ProjectProvider({ children }) {
   // for a user we never had in the array yet). The debounce coalesces a
   // batch of events into a single network call.
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || projectId === DEMO_PROJECT_ID) return;
     // Per-run flag: a debounced refetch that already fired and is awaiting when
     // this effect tears down (projectId change) must not write into the next
     // project's state.
@@ -273,7 +286,7 @@ export function ProjectProvider({ children }) {
   // debounced refetch; and (b) keeping it isolated means a custom-role
   // refresh doesn't churn the members list query.
   useEffect(() => {
-    if (!projectId) return undefined;
+    if (!projectId || projectId === DEMO_PROJECT_ID) return undefined;
 
     let cancelled = false;
     const refreshRolesDebounced = () => {

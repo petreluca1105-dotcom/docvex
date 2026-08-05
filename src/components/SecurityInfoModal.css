@@ -1,0 +1,117 @@
+/* ── Privacy & security notice ──────────────────────────────────────────
+   Opened from the ⓘ item at the foot of the rail. Reads as a document rather
+   than a dialog — it's the answer a firm gives its clients, so it's meant to
+   be readable end to end, not skimmed past. */
+.sec-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: var(--overlay-scrim);
+  display: grid;
+  place-items: center;
+  padding: 19.2px;
+}
+.sec-modal {
+  width: 520px;
+  max-width: 100%;
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 20px 24px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12.8px;
+  box-shadow: var(--shadow-elev);
+}
+
+.sec-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12.8px; }
+.sec-eyebrow {
+  margin: 0 0 3.2px;
+  font-size: 8.8px; letter-spacing: 0.14em; text-transform: uppercase;
+  font-weight: 700; color: var(--accent);
+}
+.sec-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 700; line-height: 1.25;
+  color: var(--text-primary);
+}
+.sec-close {
+  flex: none;
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 6.4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px; line-height: 1;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.sec-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+.sec-section { margin-top: 16px; }
+.sec-h3 {
+  margin: 0 0 6.4px;
+  font-size: 11.2px; font-weight: 700;
+  color: var(--text-primary);
+}
+.sec-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex; flex-direction: column; gap: 5.6px;
+  font-size: 10.4px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+.sec-list strong { color: var(--text-primary); font-weight: 600; }
+.sec-list code {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 9.6px;
+  padding: 0 3.2px;
+  border-radius: 3.2px;
+  background: var(--bg-elevated);
+}
+.sec-note {
+  margin: 0 0 9.6px;
+  font-size: 10.4px; line-height: 1.55;
+  color: var(--text-secondary);
+}
+.sec-note strong { color: var(--text-primary); font-weight: 600; }
+
+/* One card per model — name + vendor, what it's for, and what reaches it. */
+.sec-models { display: flex; flex-direction: column; gap: 6.4px; }
+.sec-model {
+  padding: 8px 11.2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.sec-model.is-optional { opacity: 0.82; border-style: dashed; }
+.sec-model-head { display: flex; align-items: center; gap: 6.4px; flex-wrap: wrap; }
+.sec-model-name { font-size: 10.4px; font-weight: 700; color: var(--text-primary); }
+.sec-model-by { font-size: 9.2px; color: var(--text-muted); }
+.sec-model-tag {
+  font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1.6px 6.4px;
+}
+.sec-model-used { margin: 3.2px 0 0; font-size: 9.6px; line-height: 1.45; color: var(--text-secondary); }
+.sec-model-sees { margin: 1.6px 0 0; font-size: 9.6px; line-height: 1.45; color: var(--text-muted); }
+
+.sec-actions {
+  margin-top: 18px;
+  padding-top: 12.8px;
+  border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.sec-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-family: inherit; font-size: 10.4px; font-weight: 600;
+  cursor: pointer;
+}
+.sec-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* Hairline between the link CTAs so they read as a row, not one long sentence. */
+.sec-link + .sec-link { border-left: 1px solid var(--border); padding-left: 8px; }

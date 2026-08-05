@@ -16,7 +16,7 @@ import App from './App';
 
 // Web entry. Parallel to src/renderer.jsx (the Electron renderer entry).
 // The two differ in exactly one place: this file uses BrowserRouter with
-// basename="/app" so the deployed app lives under docvex.ro/app, while the
+// basename="/demo" so the deployed app lives under docvex.ro/demo, while the
 // Electron build uses MemoryRouter because Electron renderers run from
 // file:// with no real URL bar.
 //
@@ -31,7 +31,7 @@ import App from './App';
 // component via useLocation.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter basename="/app">
+    <BrowserRouter basename="/demo">
       <AuthProvider>
         <ThemeProvider>
           <AppPrefsProvider>

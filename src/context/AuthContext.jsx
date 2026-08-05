@@ -22,13 +22,37 @@ import {
 // origin at the time of the OAuth click rather than module-eval time.
 //
 // Web: we redirect to `/app/` (the SPA's root, which is a real file:
-// docs/app/index.html). Avoids needing GitHub Pages SPA-fallback magic
+// docs/demo/index.html). Avoids needing GitHub Pages SPA-fallback magic
 // just for OAuth — the page loads, supabase-js's detectSessionInUrl
 // auto-exchanges the `?code=…` query param, then strips it from the URL
 // via history.replaceState. React Router then routes `/` → Dashboard.
 function getOAuthRedirectUrl() {
   if (isElectron) return 'docvex://auth/callback';
-  return `${window.location.origin}/app/`;
+  return `${window.location.origin}/demo/`;
+}
+
+// Which window started an OAuth flow. sessionStorage is per-window in Electron
+// (localStorage is shared), so this is exactly "did I open the browser?" —
+// the question that decides who gets to spend the single-use auth code.
+const OAUTH_INITIATOR_KEY = 'docvex.oauth.initiator';
+// How long a non-initiating window waits before assuming nobody is coming.
+// Long enough to cover the exchange round-trip, short enough that a cold-start
+// deep link doesn't feel stuck.
+const OAUTH_BACKSTOP_MS = 1500;
+
+function markOAuthInitiator() {
+  try { sessionStorage.setItem(OAUTH_INITIATOR_KEY, '1'); } catch { /* ignore */ }
+}
+// One-shot: reading it clears it, so a second callback can't be claimed by a
+// window that already spent its turn.
+function consumeOAuthInitiator() {
+  try {
+    if (sessionStorage.getItem(OAUTH_INITIATOR_KEY) !== '1') return false;
+    sessionStorage.removeItem(OAUTH_INITIATOR_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // A safe, fully-shaped fallback so consumers never crash on a null context.
@@ -193,10 +217,29 @@ export function AuthProvider({ children }) {
       }
 
       // OAuth callback (default / legacy path).
+      //
+      // Main sends the callback to EVERY app window, because it can't know
+      // which one started the flow (see sendDeepLink in main.js). An auth code
+      // is single-use, though, so if two windows exchange it at once one of
+      // them loses — and the loser is left with no session, which is the whole
+      // sign-in silently failing about half the time.
+      //
+      // So exactly one window acts: the one that started the flow. It marks
+      // itself in sessionStorage, which in Electron is per-window (unlike
+      // localStorage, which every window shares).
       const code = parsed.searchParams.get('code');
-      if (code) {
+      if (!code) return;
+      if (consumeOAuthInitiator()) {
         await supabase.auth.exchangeCodeForSession(code);
+        return;
       }
+      // Not the initiator. Stand down — but not forever: on a cold start the
+      // OS hands the callback to an app that was never running, so NO window
+      // initiated it and somebody has to. Give the real initiator a beat, then
+      // exchange only if no session has appeared.
+      await new Promise((r) => setTimeout(r, OAUTH_BACKSTOP_MS));
+      const { data } = await supabase.auth.getSession();
+      if (!data?.session) await supabase.auth.exchangeCodeForSession(code);
     };
 
     // Subscribe to deep-link URLs the OS routes back to the app. On web
@@ -273,7 +316,7 @@ export function AuthProvider({ children }) {
         // OAuth tab doesn't open inside the BrowserWindow.
         // Web: let supabase-js do the full-page redirect — that's the
         // standard browser OAuth flow and lets detectSessionInUrl pick
-        // up the response on /app/auth/callback.
+        // up the response on /demo/auth/callback.
         skipBrowserRedirect: isElectron,
       },
     });
@@ -281,6 +324,10 @@ export function AuthProvider({ children }) {
     // On Electron we get a URL back to open externally. On web supabase-js
     // has already navigated by this point.
     if (data?.url && isElectron) {
+      // Claim the callback before the browser opens: this window holds the
+      // PKCE verifier and is the one that should spend the auth code when it
+      // comes back (see handleDeepLinkUrl).
+      markOAuthInitiator();
       openOAuthUrl(data.url);
     }
   };
@@ -306,6 +353,8 @@ export function AuthProvider({ children }) {
     });
     if (error) throw error;
     if (data?.url && isElectron) {
+      // Same claim as sign-in: this window holds the verifier, so it exchanges.
+      markOAuthInitiator();
       openOAuthUrl(data.url);
     }
   };

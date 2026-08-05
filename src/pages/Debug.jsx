@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useNotifications } from '../context/NotificationsContext';
 import { useUpdates } from '../context/UpdatesContext';
-import { clearThumbnailCache } from '../lib/thumbnailResolver';
+import { clearThumbnailCache } from '../lib/thumbnailEngine';
 import { clearPdfCache } from '../lib/pdfCache';
+import { clearAiFileIndex } from '../lib/aiFileIndex';
+import { clearAiSearchAnswers } from '../lib/aiSearchCache';
 import { sendInviteDebug } from '../lib/projects';
 import { sendSupportReport } from '../lib/support';
 import { sendWelcomeEmail } from '../lib/sendWelcome';
@@ -22,18 +24,22 @@ import './Debug.css';
 // Functions) is already renderer-side.
 
 // Wipes the renderer's module-level caches (resolved thumbnails in
-// thumbnailResolver.js, parsed pdf.js docs in pdfCache.js) and toasts so
+// thumbnailEngine.js, parsed pdf.js docs in pdfCache.js) and toasts so
 // there's feedback.
 function clearAllCaches(notify) {
   clearThumbnailCache();
   clearPdfCache();
+  // The AI caches are on disk, not in memory — dropping them means the next AI
+  // search re-describes the folder, so this costs real money to undo.
+  clearAiFileIndex();
+  clearAiSearchAnswers();
   notify?.({
     category: 'system',
     variant: 'info',
     priority: 'low',
     icon: 'sparkles',
     title: 'Cache cleared',
-    body: 'Thumbnails + PDF documents dropped. Reopen any file to refetch.',
+    body: 'Thumbnails, PDF documents and the AI file index dropped. The next AI search re-reads the folder.',
     dedupeKey: 'debug-cache-cleared',
   });
 }

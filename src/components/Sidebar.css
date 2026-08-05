@@ -1,12 +1,16 @@
 ﻿.sidebar {
-  /* Vertical app-nav rail, always displayed (no hover-collapse). In-flow as
-     the left column of the app chrome (AppShell's .app-chrome flex row), in its
-     OWN bordered/rounded frame separate from the content frame beside it. */
-  position: relative;
+  /* Vertical app-nav rail, always displayed (no hover-collapse). It fills
+     `.sidebar-slot` (AppShell.css) — the slot is the flex item that owns the
+     column's width in the chrome row, the rail is painted inside it in its
+     OWN bordered/rounded frame separate from the content frame beside it.
+     Taking the rail out of flow is what lets the Hub transition move it
+     without re-laying-out the content column on every frame. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
   z-index: 1;
-  flex: 0 0 var(--sidebar-width, 192px);
   width: var(--sidebar-width, 192px);
-  height: 100%;
   /* Same frosted-glass fill as the Files / Chat / AI footers (.fx-bottombar /
      .sv-footer / .dvx-composer) so the rail reads as the same surface. */
   background: color-mix(in srgb, var(--bg-page) 66%, transparent);
@@ -24,13 +28,51 @@
   /* Own stacking context so the cursor-spotlight glow (::before, z 0) sits
      behind the nav content (lifted to z 1 below) instead of over it. */
   isolation: isolate;
-  /* Hub slide — .app-shell.on-hub / .hub-leaving (AppShell.css) pull the rail
-     off-window with a negative margin-left + translateX; this transition
-     animates the ride both ways. */
-  transition: margin-left 320ms cubic-bezier(0.22, 1, 0.36, 1),
-              transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Hub slide, BOTH directions — .app-shell.on-hub (AppShell.css) rides the
+     rail off-window on a transform; dropping the class rides it back in.
+
+     Transform + opacity ONLY: no layout property is in here, so the ride costs
+     the compositor a matrix and the content column beside it never reflows
+     mid-flight. That matters more than it looks: the same click that starts
+     this also mounts the Hub, so the main thread is busy for part of the ride.
+     A composited transform/opacity transition keeps running through that; a
+     main-thread one just skips to the end, which is exactly what "it doesn't
+     animate, it vanishes" looks like.
+
+     `will-change` keeps the layer up front rather than letting the browser
+     discover it needs one after the transition has already started. */
+  will-change: transform, opacity;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 200ms ease;
 }
 [data-reduce-motion='true'] .sidebar { transition: none; }
+
+/* Strip the rail down to a flat, static layer for the ride.
+   ────────────────────────────────────────────────────────────────────────
+   A composited transform is only free if the layer's CONTENTS don't change.
+   Two things on the rail break that, and both did:
+
+   - `backdrop-filter` re-samples and re-blurs whatever is behind the element
+     every frame. The rail spends this animation traversing the content area
+     while the outgoing tab is fading and the Hub is mounting, so the backdrop
+     is different on every single frame — the blur is recomputed each time and
+     the "composited" transform degenerates into a full repaint per frame.
+   - The two cursor-glow pseudos (a radial gradient, and a masked border shine)
+     repaint whenever --spot-x / --spot-y move, and the pointer is by
+     definition sitting on the rail at the moment of the click.
+
+   Both are dropped in one style change at the start of the ride: a single
+   repaint, then a stable flat layer the compositor can fly around for free.
+   None of it is missed — the rail is fading to zero opacity as it goes. */
+.app-shell.on-hub .sidebar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.app-shell.on-hub .sidebar::before,
+.app-shell.on-hub .sidebar::after {
+  display: none;
+}
 
 /* Cursor-following spotlight — a soft accent glow that tracks the pointer via
    the --spot-x / --spot-y vars written in Sidebar.jsx. Kept subtle; fades in
@@ -649,6 +691,9 @@
 }
 .doc-tab-thumb .project-files-icon svg,
 .doc-tab-thumb > svg { width: 17px; height: 17px; }
+/* The file glyph is now the Files-tab <ExtGlyph/> (a sized .fx-glyph box with
+   the artwork filling it), so the row's icon size is set on the box. */
+.doc-tab-thumb .project-files-icon .fx-glyph { width: 17px; height: 17px; }
 /* WhatsApp conversation — brand green. */
 .doc-tab-thumb.is-wa { color: #25D366; }
 .doc-tab-ai-dot {
@@ -1085,14 +1130,19 @@
 .project-picker-trigger::before {
   content: '';
   position: absolute;
-  /* Default = maximized: fill the button. Border-radius matches the
-     button's own 7px so the rect looks like a normal button surface. */
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  /* One form in BOTH states: the 2px centered line the collapsed rail used to
+     morph down to. The expanded rail used to fill this rect with a solid
+     surface, which made the project row the loudest thing in the sidebar — a
+     filled block among plain nav rows. It's a divider now either way, tinting
+     to the accent when a project is selected. Geometry is locked to the
+     nav-icon column (8px inset + the <li>'s 8px padding → 16px from the
+     sidebar edge) so it sits under the icons above and below it. */
+  top: calc(50% - 1px);
+  bottom: calc(50% - 1px);
+  left: 8px;
+  right: 8px;
   background: var(--border);
-  border-radius: 5.6px;
+  border-radius: 1px;
   /* Sits behind the label (which is given an explicit z-index below) so
      text/spinner paint on top of the surface. */
   z-index: 0;
@@ -1178,7 +1228,7 @@
      property. "Pressed = sustained hover" â€” while the picker is open,
      the ::before stays at var(--accent-hover) regardless of cursor
      position so the "I'm in the active interaction" state is visible. */
-  color: var(--text-on-accent);
+  color: var(--text-primary);
 }
 
 .sidebar.picker-open .project-picker-trigger::before {
@@ -1208,11 +1258,11 @@
 }
 
 .project-picker-trigger.has-selection {
-  /* Surface (gold accent fill) is painted by the ::before below so it
-     can morph with the rest of the divider. Text flips to
-     var(--text-on-accent) since solid accent is too dark for
-     var(--text-primary) on the cream theme and too bright on ink. */
-  color: var(--text-on-accent);
+  /* The accent now tints a 2px rule rather than filling a block behind the
+     label, so the text can't use --text-on-accent (which is only legible ON a
+     solid accent surface). It takes the accent itself instead — the name reads
+     as the selected thing, sitting above its accent underline. */
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1225,26 +1275,8 @@
    the gold fill darkens slightly on hover with no extra rule needed â€”
    matches the no-selection hover behavior. */
 
-/* Minimized-sidebar form: morph the ::before from full-bleed rect into a
-   centered 2px line. Geometry is locked to the nav-icon column (left 18px
-   â†’ right 42px) so the divider sits in the exact column the icons above
-   and below occupy.
-   top/bottom: calc(50% - 1px) collapses the rect to 2px tall, centered.
-   left/right: 10px insets the line from the button edges by 10px, which
-   â€” combined with the 8px li padding outside â€” lands the line's outer
-   edges at 18px and 42px from the sidebar's outer edge.
-   border-radius eases from 7px (full button) to 1px (line).
-   Color states (hover, has-selection, has-selection:hover) inherit from
-   the base rules above â€” they paint the same ::before, so the divider
-   line tints gold for an active selection and brightens on hover with
-   no additional rules needed here. */
-.sidebar:not(:hover):not(.locked):not(.picker-open) .project-picker-trigger::before {
-  top: calc(50% - 1px);
-  bottom: calc(50% - 1px);
-  left: 8px;
-  right: 8px;
-  border-radius: 1px;
-}
+/* (The collapsed-rail override that used to shrink this ::before into a line
+   is gone — the line IS the base form now, in both states.) */
 
 /* Spinner shown inside the trigger while a project switch is in progress.
    Sized smaller (16px vs 38px) than the full-screen SwitchProjectLoader
@@ -1667,55 +1699,27 @@
    `.sidebar-collapsed` on `.app-shell`, set from the same AppShell state).
    ════════════════════════════════════════════════════════════════════════ */
 
-/* Minimize/expand toggle — lives in the Personal section header, pushed to the
-   far right by the divider hairline so it sits in line with the "Personal"
-   label. A quiet icon button; the chevron flips to point right when collapsed
-   so it reads as an "expand" affordance. */
-.sidebar-collapse-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  box-sizing: border-box;
-  /* Symmetric vertical margins so the row's align-items:center keeps the
-     button's middle on the divider hairline's centerline; the negatives pull
-     it back into the short label row so it doesn't grow the header height.
-     Flush to the row's right edge. (Breathing room below the toggle is added
-     as bottom padding on the Personal header itself — see :has() rule below.) */
-  margin: -4px -3.2px -4px 0;
-  padding: 0;
-  /* Styled like a selected tab (.nav-item.active): accent-tint fill, accent
-     ring, accent glyph — so the toggle reads as a sibling of the active rail
-     item rather than a quiet utility button. */
-  border: 1.5px solid color-mix(in srgb, var(--accent) 65%, transparent);
-  border-radius: 5.6px;
-  background: var(--accent-tint);
-  color: var(--accent);
-  cursor: pointer;
-  transition:
-    background 150ms ease,
-    color 150ms ease,
-    border-color 150ms ease,
-    transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+/* Collapse/expand toggle — the last row in the rail, under Privacy & security
+   and behind its own hairline. It's an ordinary .nav-item so it lines up with
+   every row above it (same icon inset, same label fade on collapse); only the
+   chevron is special, flipping to point right when the rail is collapsed. */
+.sidebar-rail-rule {
+  display: block;
+  height: 1px;
+  margin: 6.4px 6.4px 2.4px;
+  background: var(--border);
 }
-.sidebar-collapse-btn:hover {
-  /* Matches .nav-item.active:hover — the ring goes full-accent. */
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+.sidebar.is-collapsed .sidebar-rail-rule { margin-left: 3.2px; margin-right: 3.2px; }
+
+.sidebar-collapse-item .icon {
+  /* The glyph alone flips — transforming the whole row would take the label
+     with it. 250ms matches the rail's own width transition. */
+  transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.sidebar-collapse-btn svg { width: 15px; height: 15px; }
-.sidebar.is-collapsed .sidebar-collapse-btn { transform: rotate(180deg); }
-/* Breathing room below the toggle — applied to the (only) header that holds it,
-   so the button stays vertically centered on the divider while the gap to the
-   nav items below still grows. */
-.sidebar-cat-label:has(.sidebar-collapse-btn) { padding-bottom: 11.2px; }
-/* Sit AFTER the divider hairline (which is the ::after, normally the last flex
-   item): order:1 pushes the button past it so the row reads
-   "Personal ———— ⟨" rather than "Personal ⟨ ————". */
-.sidebar-collapse-btn { order: 1; }
+/* Mirrored, not rotated: rotating would turn the panel upside down. Flipping
+   moves the filled rail to the right edge, so the glyph reads as "the panel
+   opens back out from this side". */
+.sidebar.is-collapsed .sidebar-collapse-item .icon { transform: scaleX(-1); }
 
 /* Category header text — wrapped in its own span so it can fade + collapse to
    zero width independently of the toggle button beside it. */
@@ -1774,7 +1778,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-collapse-btn,
+  .sidebar-collapse-item .icon,
   .sidebar .label,
   .sidebar-cat-text,
   .sidebar-account-id,

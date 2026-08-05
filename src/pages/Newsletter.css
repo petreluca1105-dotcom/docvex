@@ -46,6 +46,23 @@
   .ed-page { width: min(100%, var(--content-max-width, 1280px)); }
 }
 
+/* Mini header flush against the sidebar rail (Newsletter only) — drop the
+   --content-left-gap term from the shared .pmh-compact left inset so the
+   bar's surface starts at the rail's edge; its title then lands at the
+   content edge, matching the Activity toolbar. */
+.ed-page .pmh-compact {
+  left: calc(var(--sidebar-width, 0px) + var(--chrome-inset, 6.4px));
+}
+/* ...and grown 11.2px past the content column's right edge on wide screens
+   (clamped at one --chrome-inset from the window edge), overriding the
+   shared .main-content--flush cap in AppShell.css — the extra .main-content
+   ancestor in the selector outweighs that rule regardless of load order. */
+@media (min-width: 1024px) {
+  .main-content--flush .ed-page .pmh-compact {
+    right: max(6.4px, 100vw - var(--sidebar-width, 192px) - var(--chrome-inset, 6.4px) - var(--content-left-gap, 0px) - var(--content-max-width, 1280px) - 11.2px);
+  }
+}
+
 /* ── Masthead — shared page-header spec (identical to Activity / Projects):
        left title-block (eyebrow + 22px display title, 6px gap) + right meta. */
 .ed-masthead {

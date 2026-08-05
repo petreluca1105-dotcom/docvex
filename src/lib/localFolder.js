@@ -18,9 +18,15 @@
 // active (for path persistence, input editability, etc.) read
 // `isElectronBranch` / `isWebBranch`.
 
+import { DEMO_PROJECT_ID, ensureDemoFolder } from './demoWorkspace';
+
 const electronApi = typeof window !== 'undefined' ? window.electronAPI?.localFolder : null;
 const hasElectron = Boolean(electronApi);
 const hasWebFs    = typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
+// OPFS backs the web demo workspace — a real FileSystemDirectoryHandle with
+// no permission prompts, available in every modern engine (not just the
+// Chromium-only showDirectoryPicker).
+const hasOpfs     = typeof navigator !== 'undefined' && Boolean(navigator.storage?.getDirectory);
 
 // ── IndexedDB persistence for the web's FileSystemDirectoryHandle ───────
 // The File System Access API hands back an opaque handle each pick,
@@ -248,7 +254,7 @@ function stopWebPolling() {
 
 export const isElectronBranch = hasElectron;
 export const isWebBranch      = !hasElectron && hasWebFs;
-export const hasLocalFolderApi = hasElectron || hasWebFs;
+export const hasLocalFolderApi = hasElectron || hasWebFs || hasOpfs;
 
 export const localFolderApi = {
   // Resolve the fixed per-project directory (Electron only). Web has no
@@ -283,6 +289,37 @@ export const localFolderApi = {
     // single flat directory handle), so it never surfaces subfolders.
     const res = await listWeb();
     return { ...res, dirs: [] };
+  },
+
+  // Filesystem facts for ONE file (size + created / modified / accessed +
+  // permission bits) — the Doc Viewer's Metadata tab. The web backend has no
+  // paths: the File System Access API only exposes `lastModified` + size on
+  // the File object, so the web shape carries what it can and leaves the
+  // rest null.
+  stat: async (pathOrName) => {
+    if (hasElectron) return electronApi.stat(pathOrName);
+    try {
+      const dir = webState.dirHandle;
+      if (!dir) return { error: 'No folder connected' };
+      const handle = await dir.getFileHandle(pathOrName);
+      const f = await handle.getFile();
+      return {
+        path: null,
+        name: f.name,
+        dir: null,
+        sizeBytes: f.size,
+        isFile: true,
+        isDirectory: false,
+        mtimeIso: f.lastModified ? new Date(f.lastModified).toISOString() : null,
+        birthtimeIso: null,
+        ctimeIso: null,
+        atimeIso: null,
+        mode: null,
+        error: null,
+      };
+    } catch (err) {
+      return { error: err?.message || 'Could not read file info' };
+    }
   },
 
   // Recursive listing — the SYNC source. Every file under `dir` tagged
@@ -574,6 +611,7 @@ export const localFolderApi = {
   // the user just has to pick again next time.
   persistPickedHandle: async (projectId) => {
     if (hasElectron) return;
+    if (projectId === DEMO_PROJECT_ID) return; // OPFS folder needs no IDB row
     if (!hasWebFs || !projectId || !webState.dirHandle) return;
     await idbPut(projectId, {
       handle: webState.dirHandle,
@@ -599,6 +637,17 @@ export const localFolderApi = {
   //             `reconnectHandle()` below.
   restorePersistedHandle: async (projectId) => {
     if (hasElectron) return null;
+    // Demo workspace: the folder lives in OPFS (seeded with starter files on
+    // first visit) — a real directory handle the rest of this backend works
+    // on unchanged, and one that never needs a permission grant.
+    if (projectId === DEMO_PROJECT_ID) {
+      const dir = await ensureDemoFolder();
+      if (!dir) return null;
+      webState.dirHandle = dir;
+      webState.sidecarHandle = null;
+      webState.lastSnapshot = null;
+      return { name: 'Demo files', needsPermission: false };
+    }
     if (!hasWebFs || !projectId) return null;
     const stored = await idbGet(projectId);
     if (!stored?.handle) return null;

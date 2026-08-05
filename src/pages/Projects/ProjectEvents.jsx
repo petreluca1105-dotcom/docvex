@@ -552,6 +552,7 @@ function UploadFileTile({ file, onRemove, view = 'grid', selected, onSelect }) {
   const thumb = (
     <FileThumbnail
       mimeType={mime}
+      name={file.name}
       sourceUrl={objectUrlFor(file)}
       glyph={glyphForFile(mime, file.name)}
     />
@@ -678,18 +679,20 @@ function UploadStep({ files, addFiles, removeFile, onAnalyze, analyzing }) {
           <div className="cto-drop-title">Drop case files here</div>
           <div className="cto-drop-sub">
             {files.length > 0
-              ? 'PDF, DOCX, images, audio & video — read securely on your machine.'
-              : 'PDF, DOCX, images, audio & video. DocVex runs OCR on scans and transcribes recordings automatically — nothing leaves your machine unencrypted.'}
+              ? 'Any file type — read securely on your machine.'
+              : 'Any file type. DocVex reads documents, runs OCR on scans and transcribes recordings automatically — files it can’t read still anchor the story by name. Nothing leaves your machine unencrypted.'}
           </div>
         </div>
         <button type="button" className="cto-btn-accent" onClick={() => inputRef.current?.click()}>
           Import
         </button>
+        {/* No `accept` filter — every file type is pickable (matching the
+            drop path). The scan pipeline handles unknown formats honestly:
+            unreadable files fall back to filename-as-context. */}
         <input
           ref={inputRef}
           type="file"
           multiple
-          accept=".pdf,.doc,.docx,.txt,image/*,audio/*,video/*"
           className="cto-file-input"
           onChange={(e) => {
             addFiles(e.target.files);
@@ -972,6 +975,10 @@ function CouncilStep({ items, progress, council, paused, user, error, onAnswer, 
             storyCta={storyCta}
             onReadStory={onReadStory}
             onRedo={onRedo}
+            // The sim keeps its ambient wave motion while a question is up
+            // (the engine's prompted state already eases it to a slow idle);
+            // NEW packets are suppressed at the source instead — see the
+            // sendPacket guard.
             paused={paused}
           />
 
@@ -1034,7 +1041,9 @@ function CouncilStep({ items, progress, council, paused, user, error, onAnswer, 
                   </button>
                 </>
               )}
-              {/* free_text — typed answer + submit. */}
+              {/* free_text — typed answer + submit. Flag questions add the
+                  "Dismiss" (not-an-issue) action on the same row, with
+                  Submit pushed to the right edge. */}
               {council.ask.kind === 'text' && (
                 <>
                   <textarea
@@ -1045,14 +1054,68 @@ function CouncilStep({ items, progress, council, paused, user, error, onAnswer, 
                     disabled={!!picked}
                     onChange={(e) => setTextVal(e.target.value)}
                   />
-                  <button
-                    type="button"
-                    className="cc-ask-submit"
-                    disabled={!textVal.trim() || !!picked}
-                    onClick={() => pickOption({ id: 'text', label: textVal.trim().slice(0, 140) })}
-                  >
-                    Submit
-                  </button>
+                  {council.ask.flag ? (
+                    <div className="cc-ask-actions">
+                      <button
+                        type="button"
+                        className="cc-ask-dismiss"
+                        disabled={!!picked}
+                        onClick={() => pickOption({ id: 'flag-dismiss', label: 'Not an issue', dismissed: true })}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        type="button"
+                        className="cc-ask-submit"
+                        disabled={!textVal.trim() || !!picked}
+                        onClick={() => pickOption({ id: 'text', label: textVal.trim().slice(0, 140) })}
+                      >
+                        Submit
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cc-ask-submit"
+                      disabled={!textVal.trim() || !!picked}
+                      onClick={() => pickOption({ id: 'text', label: textVal.trim().slice(0, 140) })}
+                    >
+                      Submit
+                    </button>
+                  )}
+                </>
+              )}
+              {/* Flag questions with options ALSO take a custom answer —
+                  the suggested picks above are shortcuts, not the only way.
+                  Dismiss (left) + Submit (right) share one action row. */}
+              {council.ask.flag && council.ask.kind === 'options' && (
+                <>
+                  <textarea
+                    className="cc-ask-text"
+                    rows={2}
+                    placeholder="Or type your own answer…"
+                    value={textVal}
+                    disabled={!!picked}
+                    onChange={(e) => setTextVal(e.target.value)}
+                  />
+                  <div className="cc-ask-actions">
+                    <button
+                      type="button"
+                      className="cc-ask-dismiss"
+                      disabled={!!picked}
+                      onClick={() => pickOption({ id: 'flag-dismiss', label: 'Not an issue', dismissed: true })}
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      type="button"
+                      className="cc-ask-submit"
+                      disabled={!textVal.trim() || !!picked}
+                      onClick={() => pickOption({ id: 'text', label: textVal.trim().slice(0, 140) })}
+                    >
+                      Submit
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -1231,6 +1294,7 @@ function EventFileChip({ name, fileRef }) {
       <span className="fx-tile-thumb">
         <FileThumbnail
           mimeType={mime}
+          name={name}
           sourceUrl={localFileUrl(fileRef?.path) || undefined}
           glyph={glyphForFile(mime, name)}
         />
@@ -1412,20 +1476,32 @@ function TimelineStep({ timeline, draftPending, goReview, onRegenerate }) {
 // final story" sends story + answers back to the chair for ONE refinement
 // pass (lib/timelineCouncil's refineTimelineWithClarifications) and the
 // finalised timeline replaces the draft.
-function ReviewStep({ timeline, goTimeline, onFinalize, finalizing, finalizeError, asks, asksLoading }) {
+function ReviewStep({ timeline, goTimeline, onFinalize, finalizing, finalizeError, asks, asksLoading, earlyAnswers }) {
   const flags = timeline?.flags || [];
   // One answer slot per flag: { text, dismissed, submitted } — `submitted`
   // flips on the explicit "Submit answer" press and drives the strip's
   // verified (✓) badge state; editing the text again un-verifies it.
-  const [answers, setAnswers] = useState(() => flags.map(() => ({ text: '', dismissed: false, submitted: false })));
+  // Flags the author already resolved in the chamber's flags notice arrive
+  // pre-filled (best-effort match by flag title — see earlyFlagAnswersRef).
+  const seedAnswer = (f) => {
+    const early = earlyAnswers?.[f?.title];
+    if (!early) return { text: '', dismissed: false, submitted: false };
+    return {
+      text: early.text || '',
+      dismissed: !!early.dismissed,
+      submitted: !!(early.dismissed || (early.text || '').trim()),
+    };
+  };
+  const [answers, setAnswers] = useState(() => flags.map(seedAnswer));
   // The questions show ONE at a time — `cur` is the flag on deck; the top
   // strip doubles as the navigator.
   const [cur, setCur] = useState(0);
   // A different flag set can land while this step is mounted (the debug
   // variations seeder) — re-seat the answer slots and reset the deck.
   useEffect(() => {
-    setAnswers((prev) => (prev.length === flags.length ? prev : flags.map(() => ({ text: '', dismissed: false, submitted: false }))));
+    setAnswers((prev) => (prev.length === flags.length ? prev : flags.map(seedAnswer)));
     setCur((c) => (c < flags.length ? c : 0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flags.length]);
   if (!timeline) {
     return (
@@ -1833,6 +1909,10 @@ export default function ProjectEvents() {
     members: { ...c.members, [id]: { ...c.members[id], [field]: (c.members[id]?.[field] || 0) + 1 } },
   }));
   const sendPacket = (from, to, icon = 'doc', dur = 1900) => {
+    // No new packets while a question is up — the sphere holds still until
+    // the author answers (real-run events that arrive mid-question simply
+    // skip their packet theatre; the log still records them).
+    if (councilStateRef.current?.ask) return;
     patchCouncil((c) => ({
       packets: [...(c.packets || []).slice(-11), { id: (packetSeq.current += 1), from, to, icon, dur }],
       // The sender reacts as the packet departs…
@@ -1889,6 +1969,68 @@ export default function ProjectEvents() {
     }
   };
 
+  // ── Ask hold (debug sim) — the scripted session BLOCKS while the "We have
+  // a question…" panel is open instead of auto-dismissing it: pending script
+  // timers freeze (same mechanics as the pause toggle, without the visual
+  // paused state or stopping shuttles), and answering/dismissing releases
+  // them. Real runs never hold — the pipeline itself awaits the dispute
+  // resolver, and flags notices are informational while the AI keeps going.
+  const askHoldRef = useRef(false);
+  const holdForAsk = () => {
+    if (askHoldRef.current || pausedRef.current) return;
+    askHoldRef.current = true;
+    timersRef.current.forEach((t) => {
+      if (t.id == null) return;
+      clearTimeout(t.id);
+      t.id = null;
+      t.remaining = Math.max(0, t.remaining - (Date.now() - t.startedAt));
+    });
+  };
+  const releaseAskHold = () => {
+    if (!askHoldRef.current) return;
+    askHoldRef.current = false;
+    if (pausedRef.current) return; // manual pause owns the timers now
+    timersRef.current.forEach((t) => {
+      if (t.id != null) return;
+      t.startedAt = Date.now();
+      t.id = setTimeout(() => fireTimer(t), t.remaining);
+    });
+  };
+
+  // ── Early flag answers — what the author resolves in the flags notice
+  // ("We hit a problem…") DURING the run, keyed by flag title. The Review
+  // round seeds its answer slots from this map (best-effort title match), so
+  // a flag answered in the chamber arrives at Review already addressed.
+  // Cleared at the start of every run.
+  const earlyFlagAnswersRef = useRef({});
+  const answerFlagEarly = (flag, ans) => {
+    if (!flag?.title) return;
+    earlyFlagAnswersRef.current[flag.title] = ans;
+    addDecision('user', 'You decided', ans.dismissed
+      ? `— dismissed “${flag.title}” as a non-issue.`
+      : `— answered “${flag.title}”.`);
+  };
+  // Turn a raised flag into a STANDARD ask (the same panel + styling as the
+  // dispute question): before the AI's designed question arrives it's a
+  // free-text ask carrying the flag's title/detail; once draftFlagAsks
+  // returns, the panel upgrades to the designed question + tappable options.
+  // The `flag` tag routes the answer to answerFlagEarly instead of the
+  // dispute resolver.
+  const flagAskFrom = (fl, designed) => ({
+    // Any designed options → the tappable-options shape (a flag question
+    // always also offers the custom-answer field — see the panel markup);
+    // no options → plain free text.
+    kind: (designed?.options || []).length > 0 ? 'options' : 'text',
+    question: designed?.question || fl.title,
+    context: `${fl.sev} · ${fl.type} — ${fl.detail || ''}${fl.sources ? ` (${fl.sources})` : ''}`,
+    options: (designed?.options || []).map((o, i) => ({ id: `fl${i}`, label: o.label, desc: o.desc })),
+    flag: fl,
+  });
+  // Latest council state, readable from event callbacks whose closures are
+  // stale (the pipeline captures handleCouncilEvent once at run start).
+  const councilStateRef = useRef(null);
+  useEffect(() => { councilStateRef.current = council; }, [council]);
+
   // Map the council pipeline's event stream onto chamber state.
   const handleCouncilEvent = (e) => {
     switch (e.type) {
@@ -1932,6 +2074,30 @@ export default function ProjectEvents() {
           }
           if (e.flags > 0) {
             schedule(1000, () => sendPacket(e.member.id, 'chair', 'flag', 2000));
+          }
+          // Surface the flags as they occur — each flag opens as a STANDARD
+          // "We have a question…" ask (one at a time; extras queue behind
+          // the open panel). The panel only opens once draftFlagAsks (the
+          // same designer the Review round uses) has returned, so the
+          // AI-suggested answers are ALREADY displaying when it appears —
+          // never a bare panel that upgrades later. If the designer fails,
+          // the plain free-text ask opens instead. Answers pre-fill the
+          // Review round; anything left unanswered returns there.
+          if (e.flags > 0 && Array.isArray(e.flagDetails) && e.flagDetails.length > 0) {
+            const openFlagAsks = (designedList) => {
+              const asks = e.flagDetails.map((fl, fi) => flagAskFrom(fl, designedList?.[fi] || null));
+              if (councilStateRef.current?.ask) {
+                // A panel is already open (another member's flag, or the
+                // dispute) — queue behind it.
+                askQueueRef.current.push(...asks);
+              } else {
+                askQueueRef.current.push(...asks.slice(1));
+                patchCouncil({ ask: asks[0] });
+              }
+            };
+            draftFlagAsks({ projectName: selectedProject?.name, timeline: { flags: e.flagDetails } })
+              .then((asks) => openFlagAsks(Array.isArray(asks) ? asks : null))
+              .catch(() => openFlagAsks(null));
           }
           addDecision(
             e.member.id,
@@ -2043,7 +2209,26 @@ export default function ProjectEvents() {
   // Dispute panel resolution — resolves the pipeline's awaited promise on a
   // real run; on debug runs just logs the steer locally.
   const answerCouncil = (option) => {
+    const ask = council?.ask;
     patchCouncil({ ask: null });
+    // A held debug script (see holdForAsk) resumes the moment the panel is
+    // answered or dismissed.
+    releaseAskHold();
+    if (option?.silent) return;
+    // Flag question (see flagAskFrom) — record the author's early answer
+    // (it pre-fills the Review round) and surface the next queued flag
+    // question, if any.
+    if (ask?.flag) {
+      answerFlagEarly(ask.flag, option?.dismissed ? { dismissed: true } : { text: option.label });
+      const next = askQueueRef.current.shift();
+      if (next) {
+        schedule(700, () => {
+          patchCouncil({ ask: next });
+          if (debugRun) holdForAsk();
+        });
+      }
+      return;
+    }
     const resolve = askResolverRef.current;
     if (resolve) {
       askResolverRef.current = null;
@@ -2261,6 +2446,8 @@ export default function ProjectEvents() {
     pendingFactsRef.current = {};
     askQueueRef.current = [];
     askResolverRef.current = null;
+    askHoldRef.current = false;
+    earlyFlagAnswersRef.current = {};
     const items = files.map((f) => ({ name: f.name, mime: f.type || '', url: objectUrlFor(f), path: pathForFile(f) }));
     setScanItems(items);
     setScanProgress(items.map(() => 0));
@@ -2495,6 +2682,8 @@ export default function ProjectEvents() {
     pendingFactsRef.current = {};
     askQueueRef.current = [];
     askResolverRef.current = null;
+    askHoldRef.current = false;
+    earlyFlagAnswersRef.current = {};
     const items = files.length > 0
       ? files.map((f) => ({ name: f.name, mime: f.type || '', url: objectUrlFor(f), path: pathForFile(f) }))
       : FALLBACK_SCAN_FILES;
@@ -2507,11 +2696,12 @@ export default function ProjectEvents() {
     setScanView('chamber');
     decisionSeq.current = 0;
     setCouncil({ ...freshCouncil(), phase: 'Reading sources' });
-    // Every mechanic the chamber has, in one scripted session: read facts +
-    // an unreadable file, three draft filings, TWO proposal rounds (one
-    // accepted, one rejected), objection ✕ / question ? / verdict ✓ packets,
-    // a dispute with the ask panel, a contradiction re-check, the merge and
-    // the full end sequence — the maximal path, for debugging the UI.
+    // The maximal path, in one scripted session: an intake showing every
+    // per-file shape (plain reads, a cached recall, AI vision, audio
+    // captions, video key sections, an unreadable file), three draft
+    // filings with the flags notice, two proposal rounds (one accepted, one
+    // rejected), objection ✕ / ? / ✓ packets, the dispute ask panel, a
+    // contradiction re-check, the merge and the full end sequence.
     const fname = (i) => items[i % items.length].name;
     const vote = (by, verb, conf, packet) => {
       sendPacket(by, packet, verb === 'agrees' ? 'ok' : 'no', 1800);
@@ -2520,7 +2710,13 @@ export default function ProjectEvents() {
       }));
       addDecision(by, `${COUNCIL_BY_ID[by].name} ${verb}`, `— confidence ${conf}%.`);
     };
-    const script = [
+    // Shared end-of-session beat: hold the finale until the packets land,
+    // then the gavel (with the stuck-packet fallback).
+    const gavelEnd = [700, () => {
+      patchCouncil({ endStage: 'wait' });
+      schedule(4300, () => patchCouncil((c) => (c.endStage === 'wait' ? { endStage: 'gavel' } : {})));
+    }];
+    const intake = [
       [400, () => {
         setTask('read', 'working');
         setTask('extract', 'working');
@@ -2571,8 +2767,34 @@ export default function ProjectEvents() {
           const [member, text] = EXTRA_FACTS[i % EXTRA_FACTS.length];
           queueFact(i, text, COUNCIL_COLORS[member]);
         }
+        // Media + cache intake outcomes — one of each real-run shape, so the
+        // log shows every decision/fact the intake loop can produce: a cached
+        // recall, an AI-vision image, audio captions, and a video's
+        // key-section captions (each finding riding back as a fact packet).
+        schedule(3000, () => say('chair', `Studying ${fname(5)} with AI vision…`));
+        schedule(3300, () => {
+          addDecision(LOG_INFO, fname(1), '— recalled from the previous scan (cached, AI captions).');
+          addFact(fname(1), 'Recalled from the last scan', SPHERE_PACKET_COLORS.fact);
+        });
+        schedule(3900, () => {
+          addDecision(LOG_INFO, fname(5), '— image understood with AI vision (2.4k characters).');
+          addFact(fname(5), 'Understood with AI vision', SPHERE_PACKET_COLORS.fact);
+          sendPacket('narrator', 'chair', 'fact', 1800);
+        });
+        schedule(4700, () => say('chair', `Listening to ${fname(6)}…`));
+        schedule(5400, () => {
+          addDecision(LOG_INFO, fname(6), '— AI captions generated (14 timed segments).');
+          addFact(fname(6), 'Captions generated by AI', SPHERE_PACKET_COLORS.fact);
+          sendPacket('chronologist', 'chair', 'fact', 1800);
+        });
+        schedule(5900, () => say('chair', `Watching ${fname(7)} — extracting key sections…`));
+        schedule(6600, () => {
+          addDecision(LOG_INFO, fname(7), '— AI captions generated (9 timed segments); key sections extracted.');
+          addFact(fname(7), 'Key sections captioned by AI', SPHERE_PACKET_COLORS.fact);
+          sendPacket('auditor', 'chair', 'fact', 1800);
+        });
       }],
-      [5600, () => {
+      [7600, () => {
         setTask('read', 'done');
         setTask('extract', 'done');
         setActive('chair', false);
@@ -2587,6 +2809,10 @@ export default function ProjectEvents() {
           schedule(300 + i * 250, () => addDecision(m.id, `${m.name} began drafting`, '— reading the record through their lens.'));
         });
       }],
+    ];
+
+    // ── 'full' — the maximal dispute path (the original script).
+    const fullTail = [
       // ── Round 1: Chronologist's opening proposal — ACCEPTED unanimously.
       [2600, () => {
         setActive('chronologist', false);
@@ -2594,6 +2820,34 @@ export default function ProjectEvents() {
         sendPacket('chronologist', 'chair', 'pen', 1600);
         say('chronologist', 'Draft ready — 12 events, 1 flag.', '12 events · 1 flag');
         schedule(600, () => sendPacket('chronologist', 'chair', 'flag', 2000));
+        // The flag question — same as a real member-done with flagDetails:
+        // the flag opens as a standard "We have a question…" ask as it
+        // occurs, and the script HOLDS until it's answered or dismissed.
+        // The flag title matches the seeded Review flag so an answer given
+        // here arrives at the Review round already filled in.
+        schedule(1400, () => {
+          // Opens fully formed — designed question + suggested answers
+          // already in place, exactly like a real run (which waits for
+          // draftFlagAsks before opening the panel).
+          patchCouncil({
+            ask: flagAskFrom({
+              sev: 'High',
+              type: 'Contradiction',
+              title: 'Transfer date conflict: 14 Oct (WhatsApp) vs 15 Oct (bank screenshot)',
+              detail: 'The WhatsApp thread reads as if the transfer happened on 14 Oct, but the bank screenshot shows a value date of 15 Oct.',
+              sources: `${fname(1)} · ${fname(2)}`,
+            }, {
+              kind: 'options',
+              question: 'Which transfer date should the story carry?',
+              options: [
+                { label: '14 Oct — WhatsApp', desc: 'The money left when the chat says it did' },
+                { label: '15 Oct — bank record', desc: 'The value date on the statement governs' },
+                { label: 'Both are right', desc: 'Sent on the 14th, settled on the 15th' },
+              ],
+            }),
+          });
+          holdForAsk();
+        });
         setTask('vote', 'working');
         addDecision('chronologist', 'Chronologist filed a draft', `— 12 events, 1 flag; leans on ${fname(0)} (5 citations).`);
         patchCouncil({
@@ -2665,19 +2919,21 @@ export default function ProjectEvents() {
         sendPacket('auditor', 'chair', 'no', 2200);
         sendPacket('chronologist', 'chair', 'no', 2200);
         schedule(1300, () => patchCouncil({ askMark: true }));
-        schedule(2600, () => patchCouncil({
-          askMark: false,
-          ask: {
-            question: 'The analysts disagree on the record.',
-            context: 'Chronologist drafted 12 events (1 flag) · Narrator drafted 8 events (0 flags) · Auditor drafted 13 events (4 flags). How should the Chair weigh the drafts?',
-            options: DISPUTE_OPTIONS,
-          },
-        }));
+        schedule(2600, () => {
+          patchCouncil({
+            askMark: false,
+            ask: {
+              question: 'The analysts disagree on the record.',
+              context: 'Chronologist drafted 12 events (1 flag) · Narrator drafted 8 events (0 flags) · Auditor drafted 13 events (4 flags). How should the Chair weigh the drafts?',
+              options: DISPUTE_OPTIONS,
+            },
+          });
+          // The script HOLDS here — the session only proceeds once the
+          // author answers (answerCouncil releases the hold).
+          holdForAsk();
+        });
       }],
-      // The simulator doesn't wait for an answer — an unanswered panel is
-      // dismissed as the chair proceeds (answering earlier logs the steer).
       [6200, () => {
-        patchCouncil({ ask: null });
         setTask('dispute', 'done');
         say('chair', 'Rejected for now — the dates get verified before this beat lands.');
         sendPacket('chair', 'narrator', 'no', 1800);
@@ -2763,46 +3019,11 @@ export default function ProjectEvents() {
       // The gavel waits for the last packet to land ('wait' stage + gating
       // effects), with a stuck-packet fallback; the story follows the slam's
       // half mark automatically.
-      [700, () => {
-        patchCouncil({ endStage: 'wait' });
-        schedule(4300, () => patchCouncil((c) => (c.endStage === 'wait' ? { endStage: 'gavel' } : {})));
-      }],
+      gavelEnd,
     ];
+    const script = [...intake, ...fullTail];
     let at = 0;
     script.forEach(([d, fn]) => { at += d; schedule(at, fn); });
-  };
-
-  // ── Debug finale (third button): skip the council thinking entirely and
-  // jump straight to the end sequence — gavel slam (cut at its half mark),
-  // then the ruling card. Same fake-data rules as the simulator.
-  const startDebugGavel = () => {
-    if (analyzing) return;
-    clearTimers();
-    resetCouncilPause();
-    pendingFactsRef.current = {};
-    askQueueRef.current = [];
-    askResolverRef.current = null;
-    const items = files.length > 0
-      ? files.map((f) => ({ name: f.name, mime: f.type || '', url: objectUrlFor(f), path: pathForFile(f) }))
-      : FALLBACK_SCAN_FILES;
-    setScanItems(items);
-    setScanProgress(items.map(() => 100));
-    setScanning(false);
-    setDebugRun(true);
-    setScanError(null);
-    setStep('scan');
-    setScanView('chamber');
-    decisionSeq.current = 0;
-    setCouncil({
-      ...freshCouncil(),
-      phase: 'Story complete',
-      tasks: Object.fromEntries(COUNCIL_TASKS.map((t) => [t.id, 'done'])),
-      ruling: 'unanimous',
-      lede: 'A €120k framework deal signed in March 2023 unravels when payments stop and invoice #204 goes unanswered; a June escalation turns delay into dispute — until a scope change closes the loop in a revised deal.',
-    });
-    // No packets in this shortcut — 'wait' falls straight through to the
-    // gavel via the gating effects, and the story follows automatically.
-    schedule(200, () => patchCouncil({ endStage: 'wait' }));
   };
 
   // ── Debug ask variations (fourth button): step through every shape the
@@ -2815,17 +3036,10 @@ export default function ProjectEvents() {
   // back restores the real story + its AI-designed asks untouched.
   const debugReviewBackupRef = useRef(null);
   const debugReviewOn = !!timeline?.meta?.debugFlags;
-  const startDebugReviewFlags = () => {
-    if (debugReviewOn) {
-      // Toggle OFF — restore the real flags + asks.
-      const backup = debugReviewBackupRef.current;
-      debugReviewBackupRef.current = null;
-      setTimeline(backup?.timeline || null);
-      setFlagAsks(backup?.flagAsks || null);
-      setScanView('review');
-      setStep('scan');
-      return;
-    }
+  // Seed the Review face with the flag/ask variations (backing up the real
+  // story + asks so the toggle can restore them). Shared by the Review-tab
+  // debug toggle AND the simulator's 'review' outcome.
+  const seedDebugReviewFlags = () => {
     debugReviewBackupRef.current = { timeline, flagAsks };
     const mk = (sev, tone, bars, type, title, detail, sources) => ({ type, sev, tone, bars, title, detail, sources });
     setTimeline({
@@ -2887,6 +3101,19 @@ export default function ProjectEvents() {
         ],
       },
     ]);
+  };
+  const startDebugReviewFlags = () => {
+    if (debugReviewOn) {
+      // Toggle OFF — restore the real flags + asks.
+      const backup = debugReviewBackupRef.current;
+      debugReviewBackupRef.current = null;
+      setTimeline(backup?.timeline || null);
+      setFlagAsks(backup?.flagAsks || null);
+      setScanView('review');
+      setStep('scan');
+      return;
+    }
+    seedDebugReviewFlags();
     setScanView('review');
     setStep('scan');
   };
@@ -2906,6 +3133,8 @@ export default function ProjectEvents() {
     pendingFactsRef.current = {};
     askQueueRef.current = [];
     askResolverRef.current = null;
+    askHoldRef.current = false;
+    earlyFlagAnswersRef.current = {};
     const items = files.length > 0
       ? files.map((f) => ({ name: f.name, mime: f.type || '', url: objectUrlFor(f), path: pathForFile(f) }))
       : FALLBACK_SCAN_FILES;
@@ -3058,9 +3287,6 @@ export default function ProjectEvents() {
             >
               {paused ? 'Debug · resume council' : 'Debug · pause council'}
             </button>
-            <button type="button" className="cto-debug-btn" onClick={startDebugGavel}>
-              Debug · gavel finale
-            </button>
             <button type="button" className="cto-debug-btn" onClick={startDebugAsks}>
               Debug · ask variations
             </button>
@@ -3152,6 +3378,7 @@ export default function ProjectEvents() {
           finalizeError={finalizeError}
           asks={flagAsks}
           asksLoading={asksLoading}
+          earlyAnswers={earlyFlagAnswersRef.current}
         />
       )}
       {step === 'timeline' && (

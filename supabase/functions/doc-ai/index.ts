@@ -24,11 +24,13 @@
 //        Claude has no audio input, so this calls OpenAI's Whisper API
 //        instead (DOC_AI_TRANSCRIBE_MODEL, default "whisper-1"). Requires
 //        the OPENAI_API_KEY secret — independent of ANTHROPIC_API_KEY.
-//        Optional speaker diarization: when DEEPGRAM_API_KEY is set, the audio
-//        is also run through Deepgram purely for speaker turns, and each Whisper
-//        segment gets a `speaker` index grafted on (Whisper keeps the text —
-//        stronger on Romanian). Without the key, segments ship speaker-less and
-//        the client falls back to a silence-gap heuristic.
+//        Optional speaker diarization: when DOC_AI_ALLOW_DEEPGRAM=1 AND
+//        DEEPGRAM_API_KEY are both set, the audio is also run through Deepgram
+//        purely for speaker turns, and each Whisper segment gets a `speaker`
+//        index grafted on (Whisper keeps the text — stronger on Romanian).
+//        Otherwise segments ship speaker-less and the client falls back to a
+//        silence-gap heuristic. The double opt-in is deliberate — see the
+//        training-posture note by DEEPGRAM_ALLOWED below.
 //
 // Claude is called over raw REST (x-api-key), same shape as legal-ai —
 // no SDK to bundle. Model defaults to claude-opus-4-7 (override via
@@ -66,7 +68,20 @@ const TRANSCRIBE_MODEL = Deno.env.get("DOC_AI_TRANSCRIBE_MODEL") ?? "whisper-1";
 // Optional speaker diarization (Deepgram) — only speaker turns are used; the
 // transcript text still comes from Whisper. Absent the key, transcription works
 // exactly as before with no speaker labels.
-const DEEPGRAM_API_KEY = Deno.env.get("DEEPGRAM_API_KEY") ?? "";
+//
+// TRAINING POSTURE — why this needs a SECOND opt-in beyond the key.
+// Anthropic and OpenAI both contractually exclude API traffic from model
+// training by default, so the rest of this file can send client material and
+// know it isn't learned from. Deepgram's standard (non-Enterprise) terms do
+// NOT make that promise — usage data may be used to improve their models
+// unless the account is on a plan/contract that opts out. This app handles
+// privileged legal material, including recorded client and witness audio, so
+// a key sitting in the environment must not be enough on its own to start
+// shipping that audio to a provider that may learn from it. Diarization stays
+// OFF until an operator sets DOC_AI_ALLOW_DEEPGRAM=1, which is the point at
+// which they've confirmed their Deepgram contract forbids training.
+const DEEPGRAM_ALLOWED = (Deno.env.get("DOC_AI_ALLOW_DEEPGRAM") ?? "") === "1";
+const DEEPGRAM_API_KEY = DEEPGRAM_ALLOWED ? (Deno.env.get("DEEPGRAM_API_KEY") ?? "") : "";
 const DEEPGRAM_MODEL = Deno.env.get("DOC_AI_DIARIZE_MODEL") ?? "nova-2";
 
 const MAX_DOC_CHARS = 40000;

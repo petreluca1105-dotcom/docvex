@@ -53,7 +53,14 @@ export const SPHERE_MEMBERS = [
 // sphere's centre keeps its screen position because the wrap is anchored at
 // left: 0 and CX carries the pad.
 export const SPHERE_LEFT_PAD = 520;
-export const SPHERE_W = 720 + SPHERE_LEFT_PAD;
+// SPHERE_RIGHT_PAD extends the canvas across the stage's RIGHT run too, so
+// packets and glow use all the space to the right of the sphere without
+// clipping at a hard edge. The layer is anchored at left: 0 and CX is
+// measured from the left, so widening rightward NEVER moves the sphere;
+// ancestor overflow clipping (.sv-single-scroll / .main-content) absorbs
+// whatever a narrow window can't show.
+export const SPHERE_RIGHT_PAD = 480;
+export const SPHERE_W = 720 + SPHERE_LEFT_PAD + SPHERE_RIGHT_PAD;
 export const SPHERE_H = 860;
 export const SPHERE_TOP_PAD = 80;
 const CW = SPHERE_W, CH = SPHERE_H, CX = SPHERE_LEFT_PAD + 360, CY = 288 + SPHERE_TOP_PAD;
@@ -620,6 +627,26 @@ export default class CouncilSphere extends React.Component {
         this.waveTimer = finished ? 500 + Math.random() * 1000 : 1200 + Math.random() * 2800;
       }
       this.waves = this.waves.filter((w) => this.simTime - w.born < w.dur);
+      // A SECOND wave layer that rides only the PACKETS (their chords,
+      // trails and in-flight chips) — same ripple maths as the sphere's
+      // surface waves, but with its OWN spawn clock, axes, durations and a
+      // different phase velocity, so the packet undulation always moves out
+      // of step (async) with the original wave above.
+      this.packetWaves = this.packetWaves || [];
+      this.packetWaveTimer = (this.packetWaveTimer ?? 500) - dt;
+      if (this.packetWaveTimer <= 0) {
+        if (this.packetWaves.length < 2) {
+          this.packetWaves.push({
+            born: this.simTime,
+            dur: 1400 + Math.random() * 1800,
+            amp: 0.02 + Math.random() * 0.05,
+            axis: this.norm([Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1]),
+            freq: 4 + Math.random() * 6,
+          });
+        }
+        this.packetWaveTimer = 900 + Math.random() * 2200;
+      }
+      this.packetWaves = this.packetWaves.filter((w) => this.simTime - w.born < w.dur);
       // debate web — wire existing points together; junctions born at the
       // intersections become new start points. Rests while the council is
       // prompting the author — no new connections until the answer lands.
@@ -691,7 +718,10 @@ export default class CouncilSphere extends React.Component {
     // constellation graph (hub bursts, colored strands, cyan nodes)
     // Open-question swell: the WHOLE shape grows while the council is
     // prompting the author (eased both ways; also drives the core's "?").
-    this.askEase = (this.askEase || 0) + ((this.props.prompted ? 1 : 0) - (this.askEase || 0)) * 0.08;
+    // Slow, deliberate breath — 0.02/frame (was 0.08), so the swell in and
+    // the settle back take ~4× longer and read as a gradual grow/shrink
+    // rather than a pop.
+    this.askEase = (this.askEase || 0) + ((this.props.prompted ? 1 : 0) - (this.askEase || 0)) * 0.02;
     const shrink = (1 + con * 0.22) * (1 + this.askEase * 0.14);
     // The source sphere FORMS FROM THE CORE: every projected radius scales by
     // formE (0→1, ease-out across the dispense window), so the dust shell and
@@ -730,6 +760,21 @@ export default class CouncilSphere extends React.Component {
         const env = Math.sin(Math.PI * wt); // ramp in, peak, ramp out
         const ph = p[0] * w.axis[0] + p[1] * w.axis[1] + p[2] * w.axis[2];
         s += w.amp * env * Math.sin(ph * w.freq - (this.simTime - w.born) * 0.006);
+      }
+      return s;
+    };
+    // Packet-only wave displacement — the second wave layer (own spawn
+    // clock/axes) with a FASTER phase velocity (0.009 vs 0.006), so even a
+    // near-identical axis pair visibly drifts out of step with the sphere's
+    // surface wave.
+    const packetWaveAt = (p) => {
+      let s = 1;
+      for (const w of this.packetWaves || []) {
+        const wt = (this.simTime - w.born) / w.dur;
+        if (wt < 0 || wt > 1) continue;
+        const env = Math.sin(Math.PI * wt);
+        const ph = p[0] * w.axis[0] + p[1] * w.axis[1] + p[2] * w.axis[2];
+        s += w.amp * env * Math.sin(ph * w.freq - (this.simTime - w.born) * 0.009);
       }
       return s;
     };
@@ -853,7 +898,9 @@ export default class CouncilSphere extends React.Component {
       V3[0] = a[0] + (b[0] - a[0]) * f;
       V3[1] = a[1] + (b[1] - a[1]) * f;
       V3[2] = a[2] + (b[2] - a[2]) * f;
-      return this.projectInto(out || S1, V3, RS);
+      // The packet wave rides every sampled point, so chords + kept trails
+      // undulate independently of the sphere's surface wave.
+      return this.projectInto(out || S1, V3, RS * packetWaveAt(V3));
     };
     const bezStroke = (o, tEnd) => {
       const segs = 9;
@@ -870,7 +917,7 @@ export default class CouncilSphere extends React.Component {
       V3[0] = o.pa[0] + (o.pb[0] - o.pa[0]) * t;
       V3[1] = o.pa[1] + (o.pb[1] - o.pa[1]) * t;
       V3[2] = o.pa[2] + (o.pb[2] - o.pa[2]) * t;
-      return this.projectInto(out || S1, V3, RS);
+      return this.projectInto(out || S1, V3, RS * packetWaveAt(V3));
     };
     const lineStroke = (o, tEnd) => {
       const a = linePos(o, 0, S1); const b = linePos(o, tEnd, S2);

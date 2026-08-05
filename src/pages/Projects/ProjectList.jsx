@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSelectedProject } from '../../context/SelectedProjectContext';
 import { useNotifications } from '../../context/NotificationsContext';
-import { listMyProjects, updateProject, deleteProject } from '../../lib/projects';
+import { updateProject, deleteProject } from '../../lib/projects';
 import {
   sortProjectsByRecent,
   getMostRecentProjectId,
@@ -12,6 +12,8 @@ import {
   RECENT_PROJECTS_CHANGED_EVENT,
 } from '../../lib/recentProjects';
 import { readProjectsDir } from '../../lib/projectsDir';
+import { readCachedProjects, writeCachedProjects } from '../../lib/projectListCache';
+import { fetchProjects, peekProjects, invalidateProjects } from '../../lib/projectListPrefetch';
 import { localFolderApi, isElectronBranch } from '../../lib/localFolder';
 import {
   openExternal,
@@ -334,8 +336,14 @@ export default function ProjectList() {
   const { selectProject, beginSwitch } = useSelectedProject();
   const { notify } = useNotifications();
 
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Seed synchronously so the very FIRST painted frame has rows: the session's
+  // prefetch snapshot if the sidebar hover warmed one, otherwise the last list
+  // written to localStorage. Doing this in an effect (as it was) meant one
+  // guaranteed empty frame — the blank flash on every Hub open.
+  const seed = useRef(null);
+  if (seed.current === null) seed.current = peekProjects() || readCachedProjects(userId);
+  const [projects, setProjects] = useState(seed.current);
+  const [loading, setLoading] = useState(seed.current.length === 0);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
   const [openMsg, setOpenMsg] = useState('');
@@ -348,15 +356,37 @@ export default function ProjectList() {
 
   useEffect(() => { setProjectsDir(readProjectsDir(userId)); }, [userId]);
 
+  // The synchronous seed above runs before `session` has necessarily hydrated,
+  // so it may have read the anonymous cache key. Once the real user id lands,
+  // fill in from that user's cache — but only into an empty list, so a fetch
+  // that already produced live rows is never overwritten by the cache.
+  useEffect(() => {
+    if (!userId) return;
+    const cached = readCachedProjects(userId);
+    if (!cached.length) return;
+    setProjects((prev) => (prev.length ? prev : cached));
+    setLoading(false);
+  }, [userId]);
+
+  // No setLoading(true) here: with cached rows already on screen, flipping back
+  // to the skeleton would make a background refresh look like a reload.
+  // Routed through the prefetch module so a hover-warmed request is adopted
+  // rather than duplicated.
   const loadProjects = useCallback(async () => {
-    setLoading(true);
-    const { data, error: err } = await listMyProjects();
-    setProjects(data || []);
+    const { data, error: err } = await fetchProjects();
+    if (data) setProjects(data);
     setError(err);
     setLoading(false);
   }, []);
 
   useEffect(() => { if (session) loadProjects(); }, [session, loadProjects]);
+
+  // Mirror whatever is on screen back to the cache — this catches the fetch
+  // AND the local mutations (rename, delete), so the next open doesn't flash
+  // a name the user already changed.
+  useEffect(() => {
+    if (userId && projects.length) writeCachedProjects(userId, projects);
+  }, [userId, projects]);
 
   useEffect(() => {
     const onRecent = () => setRecencyTick((t) => t + 1);
@@ -436,6 +466,9 @@ export default function ProjectList() {
       return false;
     }
     const finalName = data?.name || newName;
+    // The session snapshot still holds the old name; drop it so a later Hub
+    // open doesn't paint the pre-rename row for a beat.
+    invalidateProjects();
     setProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, name: finalName } : p)));
     notify?.({ category: 'project', variant: 'success', icon: 'folder', title: `Renamed to “${finalName}”`, dedupeKey: `rename-${project.id}` });
     return true;
@@ -453,6 +486,7 @@ export default function ProjectList() {
       return;
     }
     const name = deleteTarget.name;
+    invalidateProjects();
     setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
     setDeleteTarget(null);
     notify?.({ category: 'project', variant: 'warning', icon: 'trash', title: `Deleted “${name}”`, dedupeKey: `project-deleted-${name}` });

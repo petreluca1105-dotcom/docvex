@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { isElectron, setAuthWindowState } from '../lib/platform';
+import { isElectron, isAuthWindow, authCompleted, authRequired } from '../lib/platform';
 import { useAuthFlow } from './auth/useAuthFlow';
 import AuthCabinet from './auth/AuthCabinet';
-import CursorSpotlight from './CursorSpotlight';
 import './AuthPage.css';
 import './auth/authCabinet.css';
 
@@ -40,29 +39,51 @@ export default function AuthPage() {
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  // The signed-out screen pins the window to the default app size and disables
-  // resizing. On leaving: if a session now exists the user just signed in →
-  // restore resizing and fill the screen; otherwise they navigated back to a
-  // public page → just restore resizing. No-op on web.
+  const signedIn = !!session && !session.user?.is_anonymous;
+
+  // In the dedicated sign-in window, a session means the job is done: tell the
+  // main process to bring the app window forward and close this one. (This page
+  // used to reshape the APP window into a login box and back again — which is
+  // why every launch through sign-in came back at the wrong size. Two surfaces,
+  // two windows now.)
   useEffect(() => {
-    if (!isElectron) return undefined;
-    setAuthWindowState('locked');
-    return () => setAuthWindowState(sessionRef.current ? 'app' : 'unlock');
-  }, []);
+    if (isAuthWindow && signedIn) authCompleted();
+  }, [signedIn]);
+
+  // Reached inside the APP window while signed out — normally invisible, since
+  // the app window stays hidden until there's a session. It's the fallback for
+  // anyone who does get here (a stray navigation, a window shown by the tray):
+  // point them at the real sign-in window rather than drawing a second copy of
+  // the Cabinet in a window that isn't meant to be showing one.
+  if (isElectron && !isAuthWindow && !signedIn) {
+    return (
+      <div className="auth-page auth-handoff">
+        <p className="auth-handoff-text">Sign in to continue.</p>
+        <button type="button" className="auth-handoff-btn" onClick={authRequired}>
+          Open sign-in
+        </button>
+      </div>
+    );
+  }
 
   // Once AuthContext has a session (email sign-in resolves, or the OAuth
   // callback completes exchangeCodeForSession), bounce out of /auth onto the
   // Hub — the app's default landing (matches the cold-launch route).
-  if (session) {
+  // An ANONYMOUS session (the web build's demo sign-in) does NOT bounce:
+  // this page is exactly where an anonymous visitor upgrades to a real
+  // account, so it must stay reachable while one is active. The sign-in window
+  // doesn't navigate at all — it's closing.
+  if (signedIn && !isAuthWindow) {
     return <Navigate to="/projects" replace />;
   }
 
   return (
     <div className="auth-page">
-      {/* Ambient dot grid (.auth-page::before) + this cursor-following spotlight
-          — the same backdrop the main app shell paints, shown through the
-          Cabinet's transparent form side. */}
-      <CursorSpotlight />
+      {/* Ambient dot grid only (.auth-page::before). The window-wide cursor
+          spotlight that used to sit here was removed: the Cabinet already
+          paints a contained one on its brand panel, and running two
+          pointer-driven radial gradients over the whole window made the
+          sign-in screen feel heavy. */}
       <AuthCabinet flow={flow} />
     </div>
   );

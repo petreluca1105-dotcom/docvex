@@ -827,6 +827,14 @@
 /* Active: accent-tinted chip + the icon fills with the accent (folder colour)
    via the `filled` prop on the glyph. */
 .fx-cat-btn.is-active { background: var(--accent-tint); color: var(--accent); }
+/* The view switch is always "on" (it shows the view you'd get), so it carries
+   the accent permanently — the same colour the file glyphs use in the thumbs
+   below, so the two read as one icon family. `filled` on the glyph does the
+   rest; the list icon's rules have no area to fill, so give them the accent
+   as a stroke too. */
+.fx-view-btn { color: var(--accent); }
+.fx-view-btn:hover { color: var(--accent); background: var(--accent-tint); }
+.fx-view-btn svg { fill: currentColor; stroke: currentColor; }
 
 /* ── Categorize sections ──────────────────────────────────────────────────
    Vertical stack of labelled category sections; each holds its own grid (tile
@@ -851,6 +859,183 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   border-radius: 999px;
   padding: 1.6px 6.4px;
+}
+/* ── Content-search hits ────────────────────────────────────────────────
+   Always a vertical list, whatever the tile/list view is set to: each row
+   pairs the file with the snippet explaining WHY it matched (the text around
+   the match, or the model's reason in AI mode), and a tile grid has nowhere
+   to put that. */
+.fx-hits { display: flex; flex-direction: column; }
+.fx-hit {
+  display: grid;
+  grid-template-columns: 28px minmax(96px, 0.9fr) 2fr;
+  align-items: center;
+  gap: 11.2px;
+  padding: 6.4px 11.2px 6.4px 0;
+  border-radius: 7.2px;
+  cursor: default;
+  transition: background 120ms;
+}
+.fx-hit:hover { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+.fx-hit.is-selected { background: var(--accent-tint); }
+.fx-hit-thumb {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  overflow: hidden;
+  border-radius: 5.6px;
+  color: var(--accent);
+}
+.fx-hit-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fx-hit-thumb .project-files-icon { width: 100%; height: 100%; display: grid; place-items: center; }
+.fx-hit-thumb .fx-glyph { width: 22px; height: 22px; }
+.fx-hit-name {
+  font-size: 10.4px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The snippet is evidence, not a heading — quieter than the name, and clipped
+   to one line so a long extract can't push the row out of rhythm. */
+.fx-hit-snippet {
+  min-width: 0;
+  font-size: 9.6px; line-height: 1.4; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fx-hit-error { margin: 4.8px 0 0; font-size: 9.6px; color: var(--danger); }
+/* The searched text inside a snippet. Tinted rather than the browser's yellow
+   default, which fights every theme. */
+.fx-hit-mark {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text-primary);
+  border-radius: 2.4px;
+  padding: 0 1.6px;
+}
+
+/* ── AI section ─────────────────────────────────────────────────────────
+   Runs on demand, so the section leads with its button and a line saying what
+   pressing it actually does (including that pictures are looked at). */
+/* Centred pitch: title, description, then the action beneath both. */
+.fx-ai-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6.4px;
+  padding: 16px 16px 20px;
+}
+.fx-ai-cta-title {
+  margin: 0;
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-display);
+  font-size: 18.4px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+/* Accent, so the mark reads as the AI cue while the words stay primary text —
+   the same split the sparkles glyph gets everywhere else in the app. */
+.fx-ai-cta-ico { flex: none; color: var(--accent); }
+.fx-ai-cta-desc {
+  margin: 0;
+  max-width: 520px;
+  font-size: 13.6px; line-height: 1.55; color: var(--text-muted);
+}
+.fx-ai-cta-desc strong { color: var(--text-secondary); font-weight: 600; }
+/* The SELECTED sidebar tab's look (.nav-item.active): accent-tint fill, accent
+   ring, accent text — a ghost/outline treatment rather than a solid button.
+   Same 6.4px radius and 1.5px ring as the rail so the two read as siblings;
+   auto-width here since this is an action, not a full-width rail row. */
+.fx-ai-run {
+  margin-top: 4.8px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6.4px 16px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  border-radius: 6.4px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-family: inherit; font-size: 0.68rem; font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+}
+.fx-ai-run:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: var(--accent);
+}
+.fx-ai-hint {
+  margin: 0;
+  max-width: 460px;
+  font-size: 9.6px; line-height: 1.5; color: var(--text-muted);
+}
+.fx-ai-hint strong { color: var(--text-secondary); font-weight: 600; }
+
+/* ── AI consent notice ──────────────────────────────────────────────────
+   Shown before the first AI search. Reads as a document, not a toast: this is
+   the moment a firm decides whether client material may go to a processor. */
+.fx-consent-scrim {
+  position: fixed; inset: 0; z-index: 1300;
+  background: var(--overlay-scrim);
+  display: grid; place-items: center;
+  padding: 19.2px;
+}
+.fx-consent {
+  width: 420px; max-width: 100%;
+  max-height: 88vh; overflow-y: auto;
+  padding: 20px 22px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 11.2px;
+  box-shadow: var(--shadow-elev);
+}
+.fx-consent-title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 14.4px; font-weight: 700; line-height: 1.3;
+  color: var(--text-primary);
+}
+.fx-consent-lead {
+  margin: 0 0 11.2px;
+  font-size: 10.8px; line-height: 1.55; color: var(--text-secondary);
+}
+.fx-consent-list {
+  margin: 0 0 11.2px;
+  padding-left: 16px;
+  display: flex; flex-direction: column; gap: 5.6px;
+  font-size: 10.4px; line-height: 1.5; color: var(--text-secondary);
+}
+.fx-consent-list strong { color: var(--text-primary); font-weight: 600; }
+.fx-consent-note {
+  margin: 0 0 9.6px;
+  font-size: 9.6px; line-height: 1.55; color: var(--text-muted);
+}
+.fx-consent-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4.8px; }
+.fx-consent-btn {
+  height: 30px; padding: 0 14.4px;
+  border: 1px solid var(--border);
+  border-radius: 7.2px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: inherit; font-size: 10.8px; font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.fx-consent-btn:hover { border-color: var(--border-strong); }
+.fx-consent-btn.is-primary {
+  background: var(--accent); border-color: var(--accent); color: var(--text-on-accent);
+}
+.fx-consent-btn.is-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Content search runs in the background (files have to be read), so its
+   section head carries a small spinner while the scan is still going —
+   without it an empty or short-looking list reads as "that's all of them". */
+.fx-cat-head-spinner {
+  flex: none;
+  width: 11.2px;
+  height: 11.2px;
+  border-radius: 50%;
+  border: 1.6px solid color-mix(in srgb, var(--text-primary) 14%, transparent);
+  border-top-color: var(--accent);
+  animation: fxCatSpin 700ms linear infinite;
+}
+@keyframes fxCatSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .fx-cat-head-spinner { animation-duration: 2s; }
 }
 /* Hairline filling the rest of the row to the right of the label + count, so
    the header reads as a section divider. */
@@ -1202,11 +1387,6 @@
 
 /* Trash entry glyph — a trash icon where a folder glyph would sit. */
 .fx-bin-glyph { display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
-/* Timeline entry glyph — the sidebar's timeline icon where a folder glyph
-   would sit (stacked on .fx-bin-glyph for the shared sizing). Accent-tinted
-   once the timeline actually references files, muted while empty. */
-.fx-timeline-glyph { display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
-.fx-timeline-glyph.is-full { color: var(--accent); }
 .fx-list-thumb .fx-bin-glyph { color: var(--text-secondary); width: 90%; height: 90%; }
 /* Match the folder glyph's box (folder fills 100%), pulled to 90% so the
    taller bin shape reads the same visual size as a folder. */
@@ -1245,16 +1425,10 @@
 
 /* Colored ext-label glyph (from the design) — shown when a file has no
    real preview. Centered in the thumb. */
-.fx-glyph {
-  display: grid;
-  place-items: center;
-  border-radius: 7.2px;
-  color: #fff;
-  font-family: var(--font-display);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-align: center;
-}
+/* The `.fx-glyph` base + every per-type rule now live in fileGlyph.css, next
+   to the component that emits them — they're the app's one file-icon style and
+   the sidebar / Activity / project list paint them too. Only the rules below,
+   which are about how THIS page hosts a glyph, stayed. */
 /* Match the folder glyph's footprint so file icons read at the same size as
    folders and scale with the tile zoom. The folder is 112% of the thumb height
    (thumb height = --fx-tile × 0.58), i.e. ~0.65 × --fx-tile. Sized off the zoom
@@ -1265,25 +1439,6 @@
   font-size: 8.8px;
 }
 
-/* Filled type icons (document / picture / slide) — an accent shape with darker
-   accent details, filling the glyph like the other type icons. */
-.fx-glyph-icon { background: transparent; color: var(--accent); }
-.fx-glyph-icon .fx-type-icon { width: 100%; height: 100%; display: block; }
-.fx-type-base { fill: currentColor; }
-.fx-type-detail { fill: color-mix(in srgb, var(--accent) 52%, #000); }
-
-.fx-glyph-pdf { background: var(--danger); }
-/* Microsoft Office files (Word / Excel / PowerPoint) render the authentic
-   full-colour Office file icon via <OfficeFileIcon> on a transparent thumb
-   (.fx-glyph-icon) — no coloured tile, see fileGlyph.jsx. */
-/* Zipped-folder archive icon — the zipper teeth are a thick dashed line in a
-   darker accent down the folder's middle. */
-.fx-zip-teeth {
-  stroke: color-mix(in srgb, var(--accent) 52%, #000);
-  stroke-width: 3;
-  stroke-dasharray: 1 1.3;
-}
-.fx-glyph-img { background: linear-gradient(135deg, #14B8A6, #0EA5E9); }
 /* Recognised WhatsApp export zip — the WhatsApp logo on its brand green. */
 .fx-glyph-whatsapp { background: linear-gradient(135deg, #25D366 0%, #128C7E 100%); border-radius: 26%; }
 .fx-glyph-whatsapp .fx-glyph-wa-logo {
@@ -1405,28 +1560,7 @@
    black with "MP4" text, which barely read on the Ink theme). The format tag
    sits in the corner; the triangle scales with the badge so it works at both
    the 46px tile size and the 24px list size. */
-.fx-glyph-vid {
-  position: relative;
-  background: linear-gradient(135deg, #6D28D9 0%, #DB2777 100%);
-  overflow: hidden;
-}
-.fx-glyph-vid .fx-glyph-play {
-  width: 100%;
-  height: 100%;
-  color: #fff;
-  filter: drop-shadow(0 1px 2.4px rgba(0, 0, 0, 0.45));
-}
-.fx-glyph-vid-tag {
-  position: absolute;
-  bottom: 1.6px;
-  right: 2.4px;
-  font-size: 0.55em;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.92);
-  text-shadow: 0 1px 1.6px rgba(0, 0, 0, 0.5);
-}
+/* (.fx-glyph-vid / -vid-tag themselves live in fileGlyph.css.) */
 /* List view is tiny (24px) — drop the corner tag, the triangle carries it. */
 .fx-list-thumb .fx-glyph-vid-tag { display: none; }
 
@@ -1472,41 +1606,7 @@
 /* Audio badge — a decibel line (equalizer bars) on a media gradient, mirroring
    the video badge. Reuses .fx-glyph-vid-tag for the corner format tag (so it
    also hides in the tiny list view). */
-.fx-glyph-aud {
-  position: relative;
-  background: linear-gradient(135deg, #0EA5E9 0%, #6D28D9 100%);
-  overflow: hidden;
-}
-.fx-glyph-aud .fx-glyph-audio {
-  width: 100%;
-  height: 100%;
-  color: #fff;
-  filter: drop-shadow(0 1px 2.4px rgba(0, 0, 0, 0.45));
-}
-/* Plain-text badge reads as a sheet of paper: white fill, black label, with a
-   border so it stays visible on the (now background-less) thumb + light page. */
-.fx-glyph-txt { background: #fff; color: #111; border: 1px solid var(--border); }
-.fx-glyph-psd { background: #001E36; color: #31A8FF; }
-.fx-glyph-ai  { background: #1A0A00; color: #FF9A00; }
-.fx-glyph-gen { background: var(--text-muted); }
-
-/* ── Unified file-type glyphs ──────────────────────────────────────────
-   Every type glyph shares one style: NO badge fill — just the label / inner
-   glyph drawn in the theme accent straight on the (transparent) thumb, so the
-   thumbnails read as a consistent set that re-tints with the selected theme.
-   The WhatsApp badge (green), the ZIP/WinRAR books (brand colours), and the
-   Microsoft Office tiles (Word / Excel / PowerPoint — their own brand-matched
-   app-colour tiles, defined above) are intentionally excluded. */
-.fx-glyph-pdf,
-.fx-glyph-img, .fx-glyph-vid, .fx-glyph-aud, .fx-glyph-txt, .fx-glyph-psd,
-.fx-glyph-ai, .fx-glyph-gen {
-  background: transparent;
-  color: var(--accent);
-  border: none;
-}
-.fx-glyph-vid .fx-glyph-play,
-.fx-glyph-aud .fx-glyph-audio,
-.fx-glyph-vid-tag { color: var(--accent); }
+/* (.fx-glyph-aud and the per-type colour reset live in fileGlyph.css.) */
 
 .fx-tile-name {
   font-size: 10.4px;
@@ -1945,9 +2045,12 @@
   justify-content: space-between;
   gap: 9.6px;
   padding: 8px 17.6px;
-  /* The actions/status content is inset to the shared content start.
+  /* Tighter on the left than the right: the first control is the icon-only
+     Undo button, whose own 5.6px padding already sits inside its hit area, so
+     the shared 17.6px content inset left it visibly adrift from the bar's
+     edge. The right side keeps the full inset — it ends in text, not a button.
      Identity off the Files main window (var unset). */
-  padding-left: var(--fx-rail-pad, 17.6px);
+  padding-left: max(8px, calc(var(--fx-rail-pad, 17.6px) - 9.6px));
   font-size: 9.2px;
   color: var(--text-muted);
   border: 1.5px solid var(--border-flat, var(--border));
@@ -2331,10 +2434,78 @@
   color: var(--text-secondary);
 }
 
+/* ── Compressed-file prompt ─────────────────────────────────────────────
+   Pinned to the pointer (JS writes left/top) instead of centred, so the
+   question lands on the file you just double-clicked. The scrim is only
+   lightly tinted: it's there to catch the click-away and to say "answer me",
+   not to black out the workspace the card is pointing at. */
+.fx-arch-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;   /* above the properties dialog (1200) */
+  background: color-mix(in srgb, var(--overlay-scrim) 32%, transparent);
+}
+.fx-arch {
+  position: fixed;
+  width: 268px;
+  padding: 13px 14px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 11.2px;
+  box-shadow: var(--shadow-elev);
+  animation: fxArchIn 120ms ease-out;
+}
+/* One frame between mount and placement: the card must be measured before it
+   can be flipped off a screen edge, and a visible jump would be worse. */
+.fx-arch.is-measuring { visibility: hidden; }
+.fx-arch.is-centered {
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  animation: none;   /* the keyframe's transform would undo the centring */
+}
+@keyframes fxArchIn { from { opacity: 0; } to { opacity: 1; } }
+
+.fx-arch-head { display: flex; align-items: center; gap: 10px; }
+.fx-arch-glyph { flex-shrink: 0; display: grid; place-items: center; }
+/* .fx-glyph only gets a size from its tile/row host — give it one here. */
+.fx-arch-glyph .fx-glyph { width: 38px; height: 38px; font-size: 9px; }
+.fx-arch-heading { min-width: 0; }
+.fx-arch-heading h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 12.8px; font-weight: 700;
+  color: var(--text-primary);
+}
+.fx-arch-name {
+  margin: 2px 0 0;
+  font-size: 10.4px; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fx-arch-body {
+  margin: 10px 0 12px;
+  font-size: 10.8px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+.fx-arch-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.fx-arch-btn {
+  height: 28px; padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: inherit; font-size: 10.8px; font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.fx-arch-btn:hover { border-color: var(--border-strong); }
+.fx-arch-btn.is-primary {
+  background: var(--accent); border-color: var(--accent); color: var(--text-on-accent);
+}
+.fx-arch-btn.is-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
 @media (prefers-reduced-motion: reduce) {
   .fx-sb-pill, .fx-branch-inline, .fx-sb-pill.is-waiting .fx-dot, .fx-branch-inline.is-waiting .fx-dot { animation: none; }
   .fx-drawer { transition: none; }
-  .fx-props { animation: none; }
+  .fx-props, .fx-arch { animation: none; }
   /* Keep the resting position; just skip the entrance slide + dot pulse. */
   .fx-editmode-pill,
   .fx-editmode-row.is-closing .fx-editmode-pill { animation: none; }
@@ -2348,3 +2519,35 @@
   .fx-bottombar { transition: none; }
   .fx-editmode-pill { transition: none; }
 }
+
+/* ── Extension pill ───────────────────────────────────────────────────────
+   Corner label naming the format, for files that have neither a thumbnail nor
+   a type icon of their own (.dwg, .json, .bin…). Rendered by every file tile
+   but revealed only when the GENERIC document glyph is what's painted — the
+   :has() test means no JS has to know whether a thumbnail resolved. */
+.fx-ext-pill {
+  display: none;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
+  max-width: 62%;
+  padding: 1.6px 5px;
+  border-radius: 999px;
+  /* Brand black, so the label reads the same in Cream and Ink. */
+  background: var(--color-ink);
+  color: var(--color-cream);
+  font-size: 7.2px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fx-tile-thumb:has(.fx-glyph-generic) .fx-ext-pill { display: block; }
+/* List rows are ~20px tall — no room for a pill, and the Type column already
+   spells the extension out. */
+.fx-list-thumb .fx-ext-pill { display: none !important; }

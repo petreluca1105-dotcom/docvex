@@ -699,6 +699,8 @@
   color: var(--accent);
 }
 .lh-extopen-ico svg { width: 22px; height: 22px; }
+/* File glyphs are the Files-tab <ExtGlyph/> — a sized box the artwork fills. */
+.lh-extopen-ico .fx-glyph { width: 22px; height: 22px; }
 .lh-extopen-main {
   flex: 1;
   min-width: 0;

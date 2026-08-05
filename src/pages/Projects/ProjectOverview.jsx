@@ -18,7 +18,9 @@ import {
 import { deleteCustomRole } from '../../lib/customRoles';
 import { localFolderApi, isElectronBranch } from '../../lib/localFolder';
 import { readProjectsDir } from '../../lib/projectsDir';
+import { wipeProjectFiles, wipeProjectAiMemory, wipeProjectFileData } from '../../lib/projectDataWipe';
 import { miniHeaderSpot } from '../../lib/miniHeaderSpot';
+import { readAiTokens, resetAiTokens, AI_TOKENS_CHANGED_EVENT } from '../../lib/aiTokenMeter';
 import MiniHeaderFade from '../../components/MiniHeaderFade';
 import { useHasCapability } from '../../hooks/useHasCapability';
 import DeleteProjectModal from '../../components/DeleteProjectModal';
@@ -29,6 +31,7 @@ import RoleLocked from '../../components/RoleLocked';
 import RoleBadge, { builtInLabel } from '../../components/RoleBadge';
 import CustomRoleEditor from '../../components/CustomRoleEditor';
 import ConfirmModal from '../../components/ConfirmModal';
+import FilterTabs from '../../components/FilterTabs';
 import DangerZone, { DangerRow } from '../../components/DangerZone';
 import Tooltip from '../../components/Tooltip';
 import StatusBadge from '../../components/StatusBadge';
@@ -81,14 +84,17 @@ const CheckIcon = (
 );
 
 // Small generic usage gauge for the dossier Overview. Most gauges are
-// static placeholders (no data source yet); "Active members" is real.
-function UsageGauge({ label, used, total, unit, tint, hint }) {
+// static placeholders (no data source yet); "Active members" and "AI tokens"
+// are real. `fmt` compacts large numbers (token counts run to six digits, which
+// would blow the row's layout unformatted).
+function UsageGauge({ label, used, total, unit, tint, hint, fmt }) {
   const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const show = fmt || ((v) => v);
   return (
     <div className="pjd-usage-row">
       <div className="pjd-usage-head">
         <span className="pjd-usage-label">{label}</span>
-        <span className="pjd-usage-value">{used}<span className="pjd-usage-of"> / {total} {unit}</span></span>
+        <span className="pjd-usage-value">{show(used)}<span className="pjd-usage-of"> / {show(total)} {unit}</span></span>
       </div>
       <div className="pjd-usage-bar"><span className="pjd-usage-fill" style={{ width: pct + '%', background: tint }} /></div>
       <div className="pjd-usage-hint">{hint}</div>
@@ -100,7 +106,10 @@ function UsageGauge({ label, used, total, unit, tint, hint }) {
 // denominators ("418 / 1,000"); the numerators are real values from
 // get_project_ai_usage. When real plan tiers land (lib/plan.js), source these
 // from the active plan instead.
-const AI_MONTHLY_CAPS = { requests: 1000, inputTokens: 500000, outputTokens: 250000, sessions: 50 };
+// `tokens` is the combined allowance the merged "AI tokens" gauge on the
+// Overview fills against — input + output, since that's the single number the
+// gauge reports. The split caps stay for the AI tab's per-direction cells.
+const AI_MONTHLY_CAPS = { requests: 1000, tokens: 750000, inputTokens: 500000, outputTokens: 250000, sessions: 50 };
 
 // "1,240" for small counts, "214K" / "2.1M" for large ones — keeps the stat
 // values compact without losing the order of magnitude.
@@ -197,6 +206,38 @@ function formatExpiry(isoString) {
   return 'Expires soon';
 }
 
+// The page's sections, in the order they read: what the project IS, who's on
+// it, what the AI knows, and what can be destroyed. Same shape FilterTabs takes
+// on the Activity feed.
+const SETTINGS_SECTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'members', label: 'Members' },
+  { id: 'ai', label: 'AI' },
+  { id: 'danger', label: 'Danger zone' },
+];
+
+// Confirm copy for the danger zone's three wipes. Each says plainly what goes,
+// what stays, and — where it matters — that this machine is the only one
+// affected. A destructive confirm that just says "Are you sure?" makes the
+// user guess at the blast radius.
+const WIPE_COPY = {
+  files: {
+    title: 'Delete every file in this project?',
+    message: 'Every file and folder inside this project\'s folder on this computer will be permanently deleted. This is not the recycle bin — they do not come back. The project, its members and its chat are unaffected, and a teammate\'s copy of the folder is untouched.',
+    confirm: 'Delete all files',
+  },
+  aiMemory: {
+    title: 'Wipe this project\'s AI memory?',
+    message: 'Clears the project\'s standing AI instructions — which are shared with your team, so this affects everyone — along with every AI file description, cached search answer, and per-document advisor conversation on this computer. Your files are not touched, but the next AI search has to read the folder again, which costs requests.',
+    confirm: 'Wipe AI memory',
+  },
+  fileData: {
+    title: 'Clear derived file data?',
+    message: 'Deletes the transcripts, extracted text, metadata snapshots and audio waveforms DocVex built from your documents, plus this project\'s cached chat — all on this computer only. Your files are not touched. Anything you need again is re-read on demand; transcripts have to be generated again, which costs a request.',
+    confirm: 'Clear file data',
+  },
+};
+
 export default function ProjectOverview() {
   const {
     project, role, members, customRoles, loading, error,
@@ -235,6 +276,14 @@ export default function ProjectOverview() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  // Danger-zone wipes: which one is awaiting confirmation, which is running,
+  // and the folder they operate on.
+  // Which section the tab strip is showing.
+  const [section, setSection] = useState('overview');
+  const [wipe, setWipe] = useState(null);        // 'files' | 'aiMemory' | 'fileData' | null
+  const [wiping, setWiping] = useState(null);
+  const [wipeError, setWipeError] = useState(null);
+  const [localFolderPath, setLocalFolderPath] = useState('');
 
   // Kick-member state — `removeTarget` holds the member row whose kick
   // modal is open (null when closed). Splitting target / pending / error
@@ -318,6 +367,17 @@ export default function ProjectOverview() {
   // project-scoped AI feature logs its first request via logProjectAiUsage.
   const [aiUsage, setAiUsage] = useState(null);
   const [aiUsageLoading, setAiUsageLoading] = useState(true);
+
+  // Locally-tracked per-project token total (lib/aiTokenMeter). Read
+  // synchronously and refreshed on the meter's change event, so the gauge
+  // moves the moment an AI request finishes anywhere in the app.
+  const [aiTokenMeter, setAiTokenMeter] = useState(() => readAiTokens(project?.id));
+  useEffect(() => {
+    const sync = () => setAiTokenMeter(readAiTokens(project?.id));
+    sync();
+    window.addEventListener(AI_TOKENS_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(AI_TOKENS_CHANGED_EVENT, sync);
+  }, [project?.id]);
 
   // File count + total bytes for the hero kicker. Files are local-only now (no
   // cloud file store since migration 031), so these come from the project's
@@ -532,12 +592,15 @@ export default function ProjectOverview() {
   // File count + total size for the hero kicker — read from the project's local
   // folder and summed locally. Electron only (web has no ambient folder path);
   // re-fetched per project; falls back to zeros on error or when unresolved.
+  // The resolved path is kept: the danger zone's wipes need it, and it's the
+  // same lookup.
   useEffect(() => {
     if (!project?.id || !isElectronBranch) { setFileStats({ count: 0, bytes: 0 }); return undefined; }
     let cancelled = false;
     (async () => {
       try {
         const { path } = await localFolderApi.projectDir(project.id, project.name, readProjectsDir(currentUserId) || undefined);
+        if (!cancelled) setLocalFolderPath(path || '');
         if (!path) { if (!cancelled) setFileStats({ count: 0, bytes: 0 }); return; }
         const { files, error: fErr } = await localFolderApi.listAll(path);
         if (cancelled) return;
@@ -548,6 +611,58 @@ export default function ProjectOverview() {
     })();
     return () => { cancelled = true; };
   }, [project?.id, project?.name, currentUserId]);
+
+  // ── Danger-zone wipes ─────────────────────────────────────────────────
+  // `wipe` names the pending action (and drives the confirm dialog); `wiping`
+  // is the one in flight. Nothing runs without passing through ConfirmModal.
+  const runWipe = async () => {
+    const action = wipe;
+    if (!action) return;
+    setWipeError(null);
+    setWiping(action);
+    try {
+      if (action === 'files') {
+        const { deleted, failed } = await wipeProjectFiles(localFolderPath);
+        setFileStats({ count: 0, bytes: 0 });
+        notify({
+          category: 'file',
+          variant: failed ? 'warning' : 'info',
+          icon: 'trash',
+          title: failed ? 'Some files could not be deleted' : 'Project files deleted',
+          body: failed
+            ? `${deleted} removed, ${failed} could not be — they may be open in another program.`
+            : `${deleted} item${deleted === 1 ? '' : 's'} deleted from this computer.`,
+          dedupeKey: `wipe-files:${project.id}`,
+        });
+      } else if (action === 'aiMemory') {
+        await wipeProjectAiMemory(project.id, localFolderPath);
+        setAiContext('');
+        notify({
+          category: 'project',
+          variant: 'info',
+          icon: 'sparkles',
+          title: 'AI memory wiped',
+          body: 'Instructions, file descriptions, cached answers and advisor threads cleared.',
+          dedupeKey: `wipe-ai:${project.id}`,
+        });
+      } else {
+        const { cleared } = wipeProjectFileData(project.id, localFolderPath);
+        notify({
+          category: 'file',
+          variant: 'info',
+          icon: 'sparkles',
+          title: 'File data cleared',
+          body: `${cleared} cached result${cleared === 1 ? '' : 's'} removed from this computer.`,
+          dedupeKey: `wipe-data:${project.id}`,
+        });
+      }
+      setWipe(null);
+    } catch (err) {
+      setWipeError(err?.message || 'That didn’t finish. Nothing else was changed.');
+    } finally {
+      setWiping(null);
+    }
+  };
 
   const handleInviteSent = (newInvitation) => {
     // Prepend so the freshest invite reads first (matches the API's order-by
@@ -790,6 +905,13 @@ export default function ProjectOverview() {
   ];
   const aiHasUsage = aiUsageStats.some((s) => s.used > 0);
 
+  // Total tokens this project has spent, as tracked on this device by
+  // lib/aiTokenMeter (every project-ai turn adds to it). Distinct from the
+  // `usage` aggregate above, which is the server-side monthly roll-up across
+  // the whole team — this one is all-time, instant, and is what the AI tab's
+  // debug Reset clears.
+  const aiTokenTotal = aiTokenMeter.total;
+
 
   return (
     <div className="project-dashboard pjd-page" ref={pageRef}>
@@ -869,17 +991,44 @@ export default function ProjectOverview() {
         </div>
       </header>
 
-      {/* Overview detail — Usage gauges (left) + Team (right). Always shown
-          beneath the band; Overview is no longer a tab. */}
-      <div className="pjd-grid" style={{ marginBottom: 24 }}>
+      {/* Section tabs. The page used to stack every section in one long
+          scroll inside rounded cards; it's one section at a time now, chosen
+          from the same sliding-underline strip the Activity feed uses — the
+          literal component (components/FilterTabs), not a lookalike. */}
+      <div className="pjd-tabstrip">
+        <FilterTabs
+          tabs={SETTINGS_SECTIONS}
+          active={section}
+          onSelect={setSection}
+          underlineCat="project"
+          ariaLabel="Project sections"
+        />
+      </div>
+
+      {/* Overview — Usage gauges (left) + Team (right). */}
+      <div className="pjd-grid" style={{ marginBottom: 24, display: section === 'overview' ? undefined : 'none' }}>
         <section className="pjd-panel">
           <div className="pjd-panel-head">
             <div className="pjd-panel-title">Usage</div>
           </div>
           <div className="pjd-usage-grid">
             <UsageGauge label="Project memory" used={2.4} total={5} unit="GB" tint="var(--accent)" hint="Files, thumbnails, and version snapshots." />
-            <UsageGauge label="AI requests" used={Number(usage.requests) || 0} total={AI_MONTHLY_CAPS.requests} unit="this month" tint="var(--cat-update)" hint="Resets on the 1st of each month." />
-            <UsageGauge label="AI context tokens" used={Number((aiTokens / 1000).toFixed(1))} total={12} unit="K tokens" tint="var(--cat-member)" hint="Configure context in the AI tab →" />
+            {/* One gauge for AI spend. The old pair ("AI requests" and "AI
+                context tokens") measured two different things in two different
+                units, neither of which was what a user wants to know — this is
+                the actual total the project has sent to and received from the
+                model. */}
+            <UsageGauge
+              label="AI tokens"
+              used={aiTokenTotal}
+              total={AI_MONTHLY_CAPS.tokens}
+              unit="tokens"
+              fmt={fmtTokens}
+              tint="var(--cat-update)"
+              hint={aiTokenMeter.requests
+                ? `${fmtCount(aiTokenMeter.requests)} AI ${aiTokenMeter.requests === 1 ? 'request' : 'requests'} tracked for this project.`
+                : 'Counts every AI request made in this project.'}
+            />
             <UsageGauge label="Active members" used={members.length} total={10} unit="seats" tint="var(--cat-file)" hint={`${members.length} of 10 seats on the Free plan.`} />
           </div>
         </section>
@@ -908,12 +1057,13 @@ export default function ProjectOverview() {
         </div>
       </div>
 
-      {/* No tab bar — every section is stacked vertically. Project renaming now
-          lives in the hero title (click to edit, owner-only), so the old
-          "Project details" settings form is gone; Members, then AI, then the
-          Danger zone follow. */}
+      {/* Project renaming lives in the hero title (click to edit, owner-only),
+          so the old "Project details" settings form is gone. Sections are
+          hidden with display:none rather than unmounted — the members and
+          invitations lists carry fetched state and in-flight role changes that
+          shouldn't be thrown away by switching tabs and back. */}
       <div className="pjd-stack">
-        <>
+        <div style={{ display: section === 'members' ? undefined : 'none' }}>
           <section className="project-dashboard-card">
             <div className="project-dashboard-card-header">
               <h2 className="project-dashboard-card-title">Members</h2>
@@ -1110,18 +1260,18 @@ export default function ProjectOverview() {
               </ul>
             </section>
           )}
-        </>
+        </div>
 
       {/* Roles tab removed from this surface per the Dossier design — the
           RolesDossier component stays on disk (unrouted here). Custom roles can
           still be assigned via the per-member "Change role" flow (the editor
           modals below remain mounted, just not opened from this page). */}
 
-      {/* AI tab — dossier layout. Usage stats are real monthly aggregates from
-          get_project_ai_usage (zero until a project-scoped AI feature logs a
-          request); the project-context textarea persists to projects.ai_context
-          (admin-gated write). */}
-        <div className="pjd-ai-grid">
+      {/* AI — usage stats are real monthly aggregates from get_project_ai_usage
+          (zero until a project-scoped AI feature logs a request); the
+          project-context textarea persists to projects.ai_context (admin-gated
+          write). */}
+        <div className="pjd-ai-grid" style={{ display: section === 'ai' ? undefined : 'none' }}>
           <section className="pjd-panel">
             <div className="pjd-panel-head">
               <div className="pjd-panel-title">AI usage</div>
@@ -1148,6 +1298,45 @@ export default function ProjectOverview() {
                 AI tools run their first request.
               </p>
             )}
+
+            {/* All-time token counter tracked on this device (lib/aiTokenMeter),
+                alongside the monthly server aggregate above. The Reset is a
+                debug affordance: it zeroes THIS counter only — the
+                project_ai_usage rows behind the monthly stats have no client
+                delete path, so the panel above is unaffected. */}
+            <div className="pjd-ai-meter">
+              <div className="pjd-ai-meter-main">
+                <span className="pjd-ai-meter-label">Tokens tracked for this project</span>
+                <span className="pjd-ai-meter-value">
+                  {fmtCount(aiTokenTotal)}
+                  <span className="pjd-ai-meter-split">
+                    {aiTokenMeter.total > 0
+                      ? ` · ${fmtTokens(aiTokenMeter.input)} in / ${fmtTokens(aiTokenMeter.output)} out`
+                      : ' · nothing recorded yet'}
+                  </span>
+                </span>
+              </div>
+              <Tooltip content="Debug: zero the locally-tracked token count for this project. Doesn't touch the monthly usage above.">
+                <button
+                  type="button"
+                  className="pjd-ai-meter-reset"
+                  onClick={() => {
+                    resetAiTokens(project.id);
+                    notify?.({
+                      category: 'system',
+                      variant: 'info',
+                      icon: 'settings',
+                      title: 'AI token count reset',
+                      body: `The tracked token total for “${project.name}” is back to zero.`,
+                      dedupeKey: `ai-tokens-reset-${project.id}`,
+                    });
+                  }}
+                  disabled={aiTokenTotal === 0}
+                >
+                  Reset count
+                </button>
+              </Tooltip>
+            </div>
           </section>
 
           <section className="pjd-panel pjd-ai-context-panel">
@@ -1204,8 +1393,44 @@ export default function ProjectOverview() {
 
         {/* Danger zone — shared component replicating the Developer Console
             (Admin) danger card, so every danger zone in the app matches. */}
+        {/* Wrapper carries the section visibility: RoleLocked renders its
+            children bare when unlocked, so a style prop on it would vanish for
+            owners. */}
+        <div style={{ display: section === 'danger' ? undefined : 'none' }}>
         <RoleLocked locked={!isOwner} requiredRole="owner">
           <DangerZone subtitle="Irreversible actions for this project.">
+            {/* Ordered least → most destructive, so the row that ends the
+                project sits at the bottom rather than next to the ones that
+                only clear caches. Each is separately confirmed: they destroy
+                different things and someone reaching for one shouldn't get
+                any of the others. */}
+            <DangerRow
+              title="Clear derived file data"
+              desc="Deletes what DocVex worked out from your documents on this computer — transcripts, extracted text, metadata snapshots, audio waveforms, and this project's cached chat. Your files are not touched; anything you need again is re-read (or re-transcribed) on demand."
+            >
+              <button type="button" className="dz-btn" onClick={() => setWipe('fileData')} disabled={!!wiping}>
+                {wiping === 'fileData' ? 'Clearing…' : 'Clear file data'}
+              </button>
+            </DangerRow>
+
+            <DangerRow
+              title="Wipe AI memory"
+              desc="Clears the project's standing AI instructions (shared with your team), every AI file description and cached search answer, and the per-document advisor conversations on this computer. The next AI search re-reads the folder, which costs requests."
+            >
+              <button type="button" className="dz-btn" onClick={() => setWipe('aiMemory')} disabled={!!wiping}>
+                {wiping === 'aiMemory' ? 'Wiping…' : 'Wipe AI memory'}
+              </button>
+            </DangerRow>
+
+            <DangerRow
+              title="Delete all uploaded files"
+              desc="Permanently deletes every file and folder inside this project's folder on this computer. The project, its members, and its chat stay. This does not touch a teammate's copy, and it is not the recycle bin — the files do not come back."
+            >
+              <button type="button" className="dz-btn" onClick={() => setWipe('files')} disabled={!!wiping || !localFolderPath}>
+                {wiping === 'files' ? 'Deleting…' : 'Delete all files'}
+              </button>
+            </DangerRow>
+
             <DangerRow
               title="Delete this project"
               desc="Once deleted, you can't recover it. All members, pending invites, and uploaded files will be removed."
@@ -1220,8 +1445,23 @@ export default function ProjectOverview() {
               </button>
             </DangerRow>
             {deleteError && <div className="dz-error" role="alert">{deleteError}</div>}
+            {wipeError && <div className="dz-error" role="alert">{wipeError}</div>}
           </DangerZone>
         </RoleLocked>
+        </div>
+
+        {/* One confirm for all three wipes — each carries its own copy so the
+            dialog states exactly what is about to be destroyed. */}
+        <ConfirmModal
+          open={!!wipe}
+          title={WIPE_COPY[wipe]?.title || ''}
+          message={WIPE_COPY[wipe]?.message || ''}
+          confirmLabel={wiping ? 'Working…' : (WIPE_COPY[wipe]?.confirm || 'Continue')}
+          cancelLabel="Cancel"
+          destructive
+          onConfirm={runWipe}
+          onCancel={() => { if (!wiping) setWipe(null); }}
+        />
       </div>
 
       <DeleteProjectModal

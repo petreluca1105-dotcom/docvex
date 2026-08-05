@@ -39,13 +39,16 @@ npm run publish           # make + upload artifacts to GitHub Releases as a draf
 
 # Web build (GitHub Pages target under docs/app/):
 npm run web:dev           # Vite dev server with web entry (src/web.jsx)
-npm run web:build         # vite build → dist-web/ (run scripts/web-deploy.mjs
-                          # separately to copy dist-web/ into docs/app/)
+npm run web:build         # vite build → dist-web/
+npm run web:deploy        # build + copy into landing/home/demo/ (gitignored).
+                          # NOTE: the website no longer publishes the web build —
+                          # the in-browser demo was removed from docvex.ro on
+                          # 2026-07-27, and landing-deploy now clears docs/demo.
+                          # The build still works for local/manual use.
 
-# Marketing site (separate workspace in landing/ — see landing/CLAUDE.md):
-npm run landing:dev       # landing dev server
-npm run landing:build     # build the marketing site
-npm run landing:deploy    # build + scripts/landing-deploy.mjs → docs/
+# Marketing site (static HTML in landing/home/, no build — see landing/CLAUDE.md):
+npm run site:dev          # serve landing/home with Vite → http://localhost:5175
+npm run site:deploy       # scripts/landing-deploy.mjs → copy landing/home into docs/
 
 # Release workflow (uses npm-version lifecycle hooks defined in package.json):
 npm run release:patch     # bump x.x.(x+1), commit, tag, push, publish, regenerate web
@@ -269,7 +272,8 @@ All under `src/context/`. Every hook returns plain objects; no Redux / Zustand. 
 | --- | --- |
 | `supabaseClient.js` | Singleton supabase-js client (PKCE, no auto-detect-in-URL). |
 | `projects.js` | Project CRUD + member listings + auth-user profile upsert. |
-| `thumbnails.js` | Offline thumbnail + video-frame extraction (canvas, pdf.js, ffmpeg.wasm where applicable). |
+| `thumbnails.js` | Byte-level thumbnail generators (canvas / pdf.js / PPTX preview / DOCX render). Only the *fallback* path — see `thumbnailEngine.js`. |
+| `thumbnailEngine.js` | The thumbnail system. Turns a file into an ordered list of candidate URLs (OS thumbnail via `localfile://…?thumb=N` → original bytes → renderer-generated blob) that `FileThumbnail` walks on error. Owns the bounded generation queue, single-flight, refcounted blob cache, and failure memo. |
 | `pdfCache.js` | Module-level cache of parsed pdf.js documents, keyed by content hash. Evicted from the "Debug → Clear all cached data" menu. |
 | `pdfWorker.js` | pdf.js worker entry point used by pdfCache. |
 | `localBranchMeta.js` | Per-(project, folder) `.docvex.json` sidecar — gives each local file a stable id that survives renames. `loadSidecar`, `saveSidecar`, `addEntry`, `removeEntry`, `removeByFilename`, `renameEntry`, `reconcileWithFilesystem`, `fileIdForFilename`, `entryForFileId`. |
@@ -304,8 +308,11 @@ Other notable `lib/` modules (read source for depth):
 | `extractFileText.js` | Best-effort text extraction (txt/PDF/DOCX/XLSX) for AI attachments. |
 | `useChatFind.js` | Find-in-conversation via the CSS Custom Highlight API (no DOM mutation). |
 | `fileDragBus.js` / `folderColors.js` / `projectsDir.js` / `projectFilesPrefetch.js` | Files-page support: rich drag-preview bus; per-folder colour tags; per-user "projects folder" pref; background Files warm-cache (Electron-only). |
-| `thumbnailDescriptor.js` / `thumbnailResolver.js` | Unified thumbnail descriptor builders + resolution hook (poster URL → docx render → MIME glyph fallback chain). |
+| `thumbnailDescriptor.js` | Descriptor builders (`describeLocalFile` / `describeLooseFile`) feeding `thumbnailEngine.js`. |
 | `whatsappChat.js` | WhatsApp `.txt` export parser/detector (Android + iOS layouts). |
+| `aiFileIndex.js` | One-time per-file AI description (Haiku, batched 8 text / 4 images), cached in `localStorage` (`docvex:ai-file-index:v1`) against size+mtime. Makes AI search cheap: a photo is decoded and uploaded once in its life, not once per search. |
+| `aiSearchCache.js` | AI-search answer cache — `(folder signature, normalised query) → hits` in `docvex:ai-search-answers:v1`. A repeat search costs nothing; any add/delete/rename/edit changes the signature and invalidates the folder's answers. |
+| `metadataPrefetch.js` | Background sweep that extracts + caches file metadata (`metadataHistory.js`) as files appear in a folder, so the Doc Viewer's Metadata tab is pre-filled. One file at a time, on idle, size-capped, cancelled by the next listing. |
 | `activityMetrics.js` | Personal Activity-page metrics (heatmap, streak, breakdown). |
 
 ## Supabase data model
@@ -362,6 +369,40 @@ Migrations continued **after** the branching drop (it is NOT the latest): the ad
 ### Storage
 
 Project files are local-only (`lib/localFolder.js`, `.docvex.json` sidecar via `lib/localBranchMeta.js`) — the app reads/writes no Supabase Storage bucket. The legacy `projects` / `projects-pending` buckets still exist in the project but are orphaned (see the data-model note above); the only live bucket is `email-assets` (public), used by the email Edge Functions.
+
+### AI providers + training posture
+
+Docvex handles privileged legal material, so **no provider in this stack may
+train on what users send.** That is a property of the *contract and endpoint*,
+not of the model id — there is no "trains" vs "doesn't train" variant of a
+model to switch between, and changing `claude-opus-4-7` to something else does
+nothing for it. What matters is which company receives the bytes and under
+which terms. The full list of third parties that ever see user content:
+
+| Endpoint | Reached from | Sees | Training posture |
+| --- | --- | --- | --- |
+| `api.anthropic.com/v1/messages` | `project-ai`, `doc-ai`, `legal-ai`, `legal-assist` | document text, chat, OCR images, AI-search file stills | Commercial API terms: inputs/outputs **not** used for training. ~30-day retention for trust & safety; ZDR negotiable. |
+| `api.anthropic.com/v1/files` + code-execution container | `project-ai` `office` action | generated Office files | Same commercial terms. |
+| `api.openai.com/v1/audio/transcriptions` | `doc-ai` `transcribe` | recorded audio / video audio tracks | API traffic **not** used for training by default (since 2023-03); 30-day retention. |
+| `api.deepgram.com/v1/listen` | `doc-ai` diarization | the same audio | **Weakest of the three.** Standard (non-Enterprise) terms allow using data to improve their models. Gated behind `DOC_AI_ALLOW_DEEPGRAM=1` on top of the key — see below. |
+
+Rules for anything added later:
+
+- **API endpoints only, never a consumer surface.** Consumer tiers (claude.ai,
+  chatgpt.com) *do* train on conversations. Everything here is `api.*` with a
+  server-held key, and it must stay that way.
+- **Deepgram needs two opt-ins.** `DEEPGRAM_API_KEY` alone no longer enables
+  diarization; `DOC_AI_ALLOW_DEEPGRAM=1` must be set too. A key sitting in the
+  environment must not be enough to start shipping client and witness audio to
+  the one provider whose default terms permit learning from it — that flag is
+  the operator confirming their Deepgram contract forbids training.
+- **New provider ⇒ check its default, not its marketing.** If the default is
+  "we may train unless you opt out", either don't use it or gate it the same
+  way Deepgram is gated, and add a row to the table above.
+- Zero-Data-Retention is the remaining upgrade for Anthropic + OpenAI: both
+  keep API payloads ~30 days for abuse monitoring unless a ZDR agreement is in
+  place. Not the same thing as training, but it's the next thing a firm's
+  security review will ask about.
 
 ### Edge Functions (`supabase/functions/`)
 
@@ -523,7 +564,7 @@ Dismissal: Escape, scroll (capture), outside `mousedown`, or mouseleave on the m
 - `.env` — `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (Vite inlines at build time). Gitignored.
 - **Supabase project `pntxlvhkqfryyyxlqytr`** (eu-west-1, organization `docvex.ro`). Modify schema via `claude_ai_Supabase` MCP tools.
 - **Supabase dashboard, not in code:** Google OAuth provider config (client id / secret), `docvex://auth/callback` and the web origin registered as redirect URLs, the SMTP for email Edge Functions.
-- **Edge Function secrets (Supabase dashboard → Edge Functions → Secrets), not in code:** `RESEND_API_KEY` (email functions); `ANTHROPIC_API_KEY` (`legal-ai` + `doc-ai` OCR — without it the Newsletter AI line falls back to a computed line, ingest 500s, and OCR fails); `OPENAI_API_KEY` (`doc-ai` Whisper transcription — **not yet configured**); `LEGAL_INGEST_SECRET` (optional — guards `legal-ai`'s `ingest` action; while unset, ingest returns 403); `LEGAL_AI_MODEL` (optional — overrides the default `claude-opus-4-7`, e.g. `claude-haiku-4-5` to cut digest cost).
+- **Edge Function secrets (Supabase dashboard → Edge Functions → Secrets), not in code:** `RESEND_API_KEY` (email functions); `ANTHROPIC_API_KEY` (`legal-ai` + `doc-ai` OCR — without it the Newsletter AI line falls back to a computed line, ingest 500s, and OCR fails); `OPENAI_API_KEY` (`doc-ai` Whisper transcription — **not yet configured**); `DOC_AI_ALLOW_DEEPGRAM` (must be `1` before `DEEPGRAM_API_KEY` does anything — see the training-posture table); `LEGAL_INGEST_SECRET` (optional — guards `legal-ai`'s `ingest` action; while unset, ingest returns 403); `LEGAL_AI_MODEL` (optional — overrides the default `claude-opus-4-7`, e.g. `claude-haiku-4-5` to cut digest cost).
 - **Google Cloud Console:** OAuth consent screen must be User Type **External** (Internal blocks `@gmail.com` testers with `org_internal` 403). Authorized redirect URI = `https://pntxlvhkqfryyyxlqytr.supabase.co/auth/v1/callback`.
 - **macOS signing env (release-time, not in code):** `APPLE_SIGNING_IDENTITY`
   (a `Developer ID Application: … (TEAMID)` cert in the login keychain) enables

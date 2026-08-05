@@ -91,9 +91,12 @@ typings/
 # Electron-Forge
 out/
 
-# Web build intermediate output — the deploy script copies the final
-# artifacts into docs/app/ (committed), so the staging dir is ignored.
+# Web build intermediate output — the deploy scripts copy the final
+# artifacts, so the staging dirs are ignored. landing/home/demo is where
+# web-deploy still places the SPA — the site no longer publishes it (the
+# in-browser demo was removed from the website), so it never reaches docs/.
 dist-web/
+landing/home/demo/
 
 # Landing site (Vite) intermediate output — scripts/landing-deploy.mjs copies
 # the final artifacts into docs/ (committed), so the staging dir is ignored.

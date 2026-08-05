@@ -51,7 +51,9 @@ body {
    opaque page fill would put a wall behind them. renderer.jsx stamps the
    classes before first paint. */
 html.is-snip-panel, html.is-snip-panel body,
-html.is-snip-countdown, html.is-snip-countdown body { background: transparent; }
+html.is-snip-countdown, html.is-snip-countdown body,
+/* Same for the app-drawn system-tray menu — only its card paints. */
+html.is-tray-menu, html.is-tray-menu body { background: transparent; }
 
 /* #root must be exactly the viewport — any overflow here scrolls the whole
    document, which would carry the sidebar up with everything else. The

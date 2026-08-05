@@ -416,6 +416,29 @@
 .pjd-ai-stat-bar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .pjd-ai-stat-hint { font-size: 8.8px; color: var(--text-muted); }
 
+/* All-time token meter + its debug reset, footing the AI usage panel. Sits
+   behind its own hairline so it reads as a separate register from the monthly
+   stats above it rather than a fifth stat. */
+.pjd-ai-meter {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 16px; padding-top: 12.8px; border-top: 1px solid var(--border);
+}
+.pjd-ai-meter-main { display: flex; flex-direction: column; gap: 3.2px; min-width: 0; }
+.pjd-ai-meter-label { font-size: 8px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
+.pjd-ai-meter-value {
+  font-family: var(--font-display); font-size: 14.4px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--text-primary); line-height: 1.2;
+}
+.pjd-ai-meter-split { font-family: var(--font-body); font-size: 8.8px; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+.pjd-ai-meter-reset {
+  flex: 0 0 auto; padding: 6.4px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  font-family: var(--font-body); font-size: 9.6px; font-weight: 600; color: var(--text-secondary);
+  cursor: pointer; transition: border-color 140ms, color 140ms, background 140ms;
+}
+.pjd-ai-meter-reset:hover:not(:disabled) { border-color: var(--danger); color: var(--danger-text); background: var(--danger-soft); }
+.pjd-ai-meter-reset:disabled { opacity: 0.45; cursor: default; }
+
 .pjd-ai-context-panel { padding: 17.6px 20.8px 14.4px; }
 .pjd-ai-token-count { font-size: 8.8px; font-weight: 500; color: var(--text-muted); display: inline-flex; align-items: center; gap: 5.6px; }
 .pjd-ai-token-dot { width: 5.6px; height: 5.6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2.4px color-mix(in srgb, var(--success) 22%, transparent); }
@@ -614,3 +637,27 @@
   .pjd-ov2-stat { border-right: none; border-bottom: 1px solid var(--border); }
   .pjd-ov2-stat:last-child { border-bottom: none; }
 }
+
+/* ── Section tabs ─────────────────────────────────────────────────────────
+   The page's sections are chosen from the same sliding-underline strip the
+   Activity feed uses (components/FilterTabs). It sits on its own rule so the
+   underline has an edge to ride, exactly like the mini header it came from. */
+.pjd-tabstrip {
+  height: 34px;
+  margin: 0 0 20px;
+  border-bottom: 1px solid var(--border);
+  overflow: visible;
+}
+.pjd-tabstrip .activity-filters { height: 100%; align-items: stretch; }
+/* First tab loses its leading inset so its label lines up with the hero title
+   and the section content below — same alignment rule as Activity's. */
+.pjd-tabstrip .activity-filter:first-child { padding-left: 0; }
+
+/* ── Square sections ──────────────────────────────────────────────────────
+   With one section on screen at a time there's nothing for a rounded card to
+   separate it FROM — the frame was drawing a box around the entire page. The
+   panels keep their hairline and padding (they still group content) but read
+   as flat sections rather than floating cards. */
+.pjd-page .pjd-panel,
+.pjd-page .project-dashboard-card,
+.pjd-page .dz-card { border-radius: 0; }

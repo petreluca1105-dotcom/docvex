@@ -1,14 +1,16 @@
-import React, { useEffect, useRef } from 'react';
-import { Outlet, useMatch } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { Outlet, useMatch, useNavigate } from 'react-router-dom';
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { useSelectedProject } from './context/SelectedProjectContext';
 import { useAuth } from './context/AuthContext';
-import { isElectron, isAuxWindow } from './lib/platform';
+import { isElectron, isAuxWindow, isLocalhostWeb, notifyFilesChanged } from './lib/platform';
+import { localFolderApi } from './lib/localFolder';
+import { DEMO_PROJECT_ID } from './lib/demoWorkspace';
 import { prefetchProjectFiles } from './lib/projectFilesPrefetch';
 import AppShell from './components/AppShell';
 import TitleBar from './components/TitleBar';
 import ReportProblemModal from './components/ReportProblemModal';
-import { ReportProblemProvider } from './context/ReportProblemContext';
+import { ReportProblemProvider, useReportProblem } from './context/ReportProblemContext';
 import AppRoutes from './AppRoutes';
 
 // Mirrors `useProject().project.id` into SelectedProjectContext when the
@@ -108,6 +110,115 @@ function ProjectPrefetch() {
   return null;
 }
 
+// Localhost-only (web build): floating debug control that uploads "starter
+// files" for the demo. Two writes per picked file:
+//   1. POST to the dev server's /__seed-demo-files endpoint (see
+//      scripts/seed-demo-middleware.mjs), which stages the file into
+//      landing/home/demo-files/ IN THE REPO and regenerates its manifest —
+//      so the next `npm run web:deploy` + push ships it and EVERY visitor's
+//      demo workspace seeds it (lib/demoWorkspace.js fetches the manifest).
+//   2. Into this browser's OPFS demo folder, so the local Files tab shows
+//      it immediately without waiting for a re-seed.
+// Dev tool, not a product surface — never rendered off localhost or in
+// Electron; the endpoint only exists on the Vite dev servers.
+function DemoSeedFiles() {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+  const onPick = async (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (picked.length === 0) return;
+    setBusy(true);
+    try {
+      // 1. Stage into the repo via the dev-server endpoint.
+      let staged = 0;
+      for (const f of picked) {
+        try {
+          const res = await fetch(`/__seed-demo-files?name=${encodeURIComponent(f.name)}`, {
+            method: 'POST',
+            body: f,
+          });
+          if (res.ok) staged += 1;
+        } catch { /* endpoint not running (static host) — local write below still happens */ }
+      }
+      // 2. Drop into this browser's demo folder so the grid updates now.
+      await localFolderApi.restorePersistedHandle(DEMO_PROJECT_ID);
+      await localFolderApi.writeFiles({
+        dir: 'demo',
+        files: picked.map((f) => ({ filename: f.name, blob: f })),
+      });
+      notifyFilesChanged();
+      setStatus(staged > 0
+        ? `${staged} staged for deploy`
+        : 'added locally only — seed endpoint not running');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 10000, display: 'flex', alignItems: 'center', gap: 8 }}>
+      {status && !busy && (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{status}</span>
+      )}
+      <input ref={inputRef} type="file" multiple hidden onChange={onPick} />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        style={{
+          padding: '9px 15px',
+          borderRadius: 999,
+          border: '1px solid var(--border-strong)',
+          background: 'var(--bg-elevated)',
+          color: 'var(--text-primary)',
+          fontFamily: 'var(--font-body)',
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: busy ? 'default' : 'pointer',
+          boxShadow: 'var(--shadow-elev)',
+          opacity: busy ? 0.6 : 1,
+        }}
+      >
+        {busy ? 'Adding…' : 'Seed demo files'}
+      </button>
+    </div>
+  );
+}
+
+// Tray-menu → main-window bridge (Electron, main window only). The system-tray
+// menu (src/pages/TrayMenu.jsx) has no router of its own: it sends an action to
+// main, main raises this window and forwards the destination here.
+//   '/settings', '/projects/:id', … — plain routes
+//   '@report'                       — open the Report-a-problem modal
+// Also owns the Ctrl+, accelerator the menu advertises for Settings (the app
+// runs with no native menu on Windows, so the shortcut lives here).
+function TrayNavigation() {
+  const navigate = useNavigate();
+  const { captureAndOpen } = useReportProblem();
+  useEffect(() => {
+    if (!isElectron || isAuxWindow) return undefined;
+    const go = (dest) => {
+      if (typeof dest !== 'string' || !dest) return;
+      if (dest === '@report') { captureAndOpen(); return; }
+      navigate(dest);
+    };
+    const off = window.electronAPI?.onAppNavigate?.(go);
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ',') {
+        e.preventDefault();
+        navigate('/settings');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      off?.();
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [navigate, captureAndOpen]);
+  return null;
+}
+
 export default function App() {
   // Guard against the window navigating to a file when an OS file drag is
   // dropped anywhere OUTSIDE an explicit drop target (the Files canvas calls
@@ -144,11 +255,13 @@ export default function App() {
           delayed-capture countdown badge (?snipCountdown=1) is a transparent
           click-through circle. */}
       {isElectron
-        && !['snip', 'snipPanel', 'snipCountdown'].some(
+        && !['snip', 'snipPanel', 'snipCountdown', 'trayMenu'].some(
           (k) => new URLSearchParams(window.location.search).get(k) === '1',
         )
         && <TitleBar />}
+      <TrayNavigation />
       <AppRoutes Shell={AppShell} ProjectShell={ProjectShell} />
+      {isLocalhostWeb && <DemoSeedFiles />}
       <ReportProblemModal />
     </ReportProblemProvider>
   );

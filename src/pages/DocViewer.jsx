@@ -7,7 +7,7 @@ import FilePreview from '../components/FilePreview';
 import CursorSpotlight from '../components/CursorSpotlight';
 import Tooltip from '../components/Tooltip';
 import { useMorphPill } from '../components/useMorphPill';
-import { localFolderApi } from '../lib/localFolder';
+import { localFolderApi, readLocalBlob } from '../lib/localFolder';
 import { getCachedPdf } from '../lib/pdfCache';
 // Cursor coords / innerWidth / DOMRects are viewport px; the left/top/width
 // CSS we set are layout px — under the app's CSS-zoom downscale the two
@@ -27,8 +27,11 @@ import TokenUsagePill from '../components/TokenUsagePill';
 import { docKindFromName, buildDocumentBlobSmart, mimeForKind, inferDocKind, withKindExtension, labelForKind } from '../lib/documentGen';
 import { renderedOfficeToPdfBlob } from '../lib/exportPdf';
 import { loadConversation, saveConversation, clearConversation } from '../lib/conversationHistory';
-import { extractDocText, openExternal, onFilesRemoved, notifyFilesChanged, setDocViewerAiStatus } from '../lib/platform';
+import { isElectron, extractDocText, openExternal, onFilesRemoved, notifyFilesChanged, setDocViewerAiStatus, onDocViewerOpenFile, notifyDocViewerWarmReady, notifyDocViewerFilePainted } from '../lib/platform';
+import { useSelectedProject } from '../context/SelectedProjectContext';
 import { extractFileText } from '../lib/extractFileText';
+import { extractFileMetadata } from '../lib/fileMetadata';
+import { loadMetadata, saveMetadata } from '../lib/metadataHistory';
 import { parseWhatsAppChat, splitTimestamp } from '../lib/whatsappChat';
 import gavelLoader from '../gavel-loader.svg';
 import './DocViewer.css';
@@ -53,6 +56,27 @@ function localUrlFor(path, thumb) {
   if (!path) return null;
   const base = `localfile://local/${encodeURIComponent(path)}`;
   return thumb ? `${base}?thumb=${thumb}` : base;
+}
+
+// Web build: the viewer opens in its OWN browser tab, so the folder backend
+// connected in the Files tab doesn't carry over — reconnect it here before
+// the first readLocalBlob. One shared connect per page-load; the demo
+// workspace's OPFS folder restores without any permission prompt (a real
+// picked folder restores only if the browser kept the grant).
+let webFolderReadyPromise = null;
+let webFolderReadyFor = null;
+function ensureWebFolder(projectId) {
+  // No project yet (selection still hydrating) — don't cache a failed
+  // connect; the caller re-runs once the id arrives.
+  if (!projectId) return Promise.resolve();
+  if (!webFolderReadyPromise || webFolderReadyFor !== projectId) {
+    webFolderReadyFor = projectId;
+    webFolderReadyPromise = (async () => {
+      await localFolderApi.restorePersistedHandle(projectId);
+      await localFolderApi.list(); // populates the by-name handle map readLocalBlob reads
+    })().catch(() => {});
+  }
+  return webFolderReadyPromise;
 }
 function extOf(name) {
   const m = /\.([a-z0-9]+)$/i.exec(name || '');
@@ -773,9 +797,9 @@ function ChatAttachment({ name, dir, sep, time, caption, pages }) {
     return <ImageAttachment url={url} name={name} fullPath={fullPath} onError={() => setFailed(true)} />;
   }
   if (url && !failed && kind === 'video') {
-    // The OS-thumb poster paints instantly; if the handler can't generate
-    // one it streams video bytes, the poster fails to decode, and the
-    // element falls back to its own metadata first-frame as before.
+    // The OS-thumb poster paints instantly; when the handler can't generate
+    // one it answers 415, the poster is simply dropped, and the element falls
+    // back to its own metadata first-frame.
     return <video className="dv-wa-media" src={url} poster={localUrlFor(fullPath, 640)} controls preload="metadata" onError={() => setFailed(true)} />;
   }
   if (url && !failed && kind === 'audio') {
@@ -2879,11 +2903,12 @@ function writeDvLayout(patch) {
 // sideTabsForKind: Text extraction is for images + video, AI captions for
 // audio + video, and the AI advisor is available for every file type. All three
 // live in ONE tabbed side panel (the "AI advisor" panel) beside the document.
-const SIDE_TAB_LABELS = { extract: 'Extract text', captions: 'Captions', advisor: 'Generate' };
+const SIDE_TAB_LABELS = { extract: 'Extract text', captions: 'Captions', advisor: 'Generate', metadata: 'Metadata' };
 // The Multitool always shows all three tools; each pane renders a graceful empty
-// state for a tool that doesn't apply to its file type.
+// state for a tool that doesn't apply to its file type. Metadata is last and
+// applies to everything — every file has facts to report.
 function sideTabsForKind() {
-  return ['extract', 'captions', 'advisor'];
+  return ['extract', 'captions', 'advisor', 'metadata'];
 }
 
 // Tab bar shared by every file type's side panel. `tabs` is the ordered list of
@@ -2907,6 +2932,167 @@ function SidePanelTabs({ tabs = ['extract', 'captions'], active, onChange, slot 
   // of inline above the panel content.
   return slot ? createPortal(el, slot) : el;
 }
+// ── Metadata panel ─────────────────────────────────────────────────────────
+// The side panel's "Metadata" tab: one button that reads everything the file
+// can tell us about itself — the filesystem's dates/size/permissions, the
+// format's own properties (EXIF, the PDF info dictionary, Word/Excel document
+// properties, media duration), and a SHA-256 of the bytes. Nothing runs until
+// the button is pressed: hashing and decoding cost real time on big files, and
+// a tab switch shouldn't spend it.
+const MetaGlyph = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+    <path d="M14 3v5h5" />
+    <path d="M9 13h6M9 17h4" />
+  </svg>
+);
+
+function MetadataPanel({ file }) {
+  const [status, setStatus] = useState('idle');   // idle | working | done
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  // A different file in the same panel starts over — metadata is per-file —
+  // but a file we've already read comes straight back from the cache, so the
+  // button only has to be pressed once per file. Extraction re-reads the whole
+  // file (SHA-256 over every byte, a ZIP walk, a pdf.js parse), which is slow
+  // enough on a large file to be worth never repeating unnecessarily.
+  // A cheap stat() guards it: a file edited since the snapshot was taken
+  // invalidates it rather than showing metadata that no longer describes it.
+  useEffect(() => {
+    let alive = true;
+    setStatus('idle');
+    setData(null);
+    setError(null);
+    const path = file.storage_path;
+    if (!path) return undefined;
+    (async () => {
+      let stamp = null;
+      try {
+        const st = await localFolderApi.stat(path);
+        if (st && !st.error) stamp = { size: st.sizeBytes, mtime: st.mtimeIso };
+      } catch { /* no stat — fall back to whatever was cached */ }
+      const cached = loadMetadata(path, stamp);
+      if (!alive || !cached) return;
+      setData(cached);
+      setStatus('done');
+    })();
+    return () => { alive = false; };
+  }, [file.storage_path]);
+
+  const run = useCallback(async () => {
+    setStatus('working');
+    setError(null);
+    try {
+      const result = await extractFileMetadata({
+        name: file.name,
+        path: file.storage_path,
+        mimeType: file.mime_type,
+      });
+      setData(result);
+      setStatus('done');
+      // Stamp the snapshot with the file's current size/mtime so the next open
+      // can tell whether it still applies.
+      let stamp = null;
+      try {
+        const st = await localFolderApi.stat(file.storage_path);
+        if (st && !st.error) stamp = { size: st.sizeBytes, mtime: st.mtimeIso };
+      } catch { /* store it unstamped — better cached than not */ }
+      saveMetadata(file.storage_path, result, stamp);
+    } catch (e) {
+      setError(String(e?.message || e));
+      setStatus('idle');
+    }
+  }, [file.name, file.storage_path, file.mime_type]);
+
+  const copyAll = async () => {
+    if (!data) return;
+    const text = data.groups
+      .map((g) => `${g.title}\n${g.rows.map((r) => `  ${r.label}: ${r.value}`).join('\n')}`)
+      .join('\n\n');
+    try {
+      await navigator.clipboard.writeText(`${file.name}\n\n${text}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  const rowCount = data ? data.groups.reduce((n, g) => n + g.rows.length, 0) : 0;
+
+  return (
+    <div className="dv-ocr-history-scroll">
+      <header className="dv-ocr-history-head">
+        <div className="dv-ocr-history-eyebrow">
+          <span>Metadata</span>
+          <span className="dv-ocr-history-eyebrow-muted">· from this file</span>
+        </div>
+        <h2 className="dv-ocr-history-title">File metadata</h2>
+        <div className="dv-ocr-history-meta">
+          <span className="dv-ocr-history-count">
+            {status === 'done'
+              ? <><strong>{rowCount}</strong> {rowCount === 1 ? 'property' : 'properties'}</>
+              : 'Not extracted yet'}
+          </span>
+          {status === 'done' && (
+            <button type="button" className="dv-ocr-history-clear" onClick={copyAll}>
+              {copied ? 'Copied' : 'Copy all'}
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="dv-meta-actions">
+        <button type="button" className="dv-doc-extract-btn" onClick={run} disabled={status === 'working'}>
+          {MetaGlyph}
+          <span>
+            {status === 'working' ? 'Reading file…' : status === 'done' ? 'Re-extract metadata' : 'Extract metadata'}
+          </span>
+        </button>
+      </div>
+
+      {error && <p className="dv-meta-error" role="alert">{error}</p>}
+
+      {status === 'idle' && !error && (
+        <p className="dv-ocr-history-empty">
+          Reads the file’s dates, size and permissions, whatever properties the format itself
+          carries (camera EXIF, PDF and Office document properties, media duration), and a
+          SHA-256 fingerprint of the bytes.
+        </p>
+      )}
+
+      {data && (
+        <div className="dv-meta-groups">
+          {data.groups.map((g) => (
+            <section className="dv-meta-group" key={g.id}>
+              <h3 className="dv-meta-group-title">{g.title}</h3>
+              <dl className="dv-meta-rows">
+                {g.rows.map((r) => (
+                  <div className="dv-meta-row" key={`${g.id}:${r.label}`}>
+                    <dt>{r.label}</dt>
+                    <dd>
+                      <span className={`dv-meta-value${String(r.value).length > 40 ? ' is-long' : ''}`}>{String(r.value)}</span>
+                      {r.hint && <span className="dv-meta-hint">{r.hint}</span>}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+          {data.warnings?.length > 0 && (
+            <section className="dv-meta-group">
+              <h3 className="dv-meta-group-title">Couldn’t read</h3>
+              <ul className="dv-meta-warnings">
+                {data.warnings.map((w) => <li key={w}>{w}</li>)}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Paper-plane send glyph for the advisor composer (mirrors the main app's
 // AI-tab composer send button).
 const AdvisorSendGlyph = (
@@ -5609,6 +5795,8 @@ function MediaOcrPane({ file, url, kind, sidePanelSlot = null, sideTabsSlot = nu
       <SidePanelTabs tabs={sideTabsForKind(kind)} active={rightTab} onChange={setRightTab} slot={sideTabsSlot} />
       {rightTab === 'advisor' ? (
         <AdvisorPanel file={file} />
+      ) : rightTab === 'metadata' ? (
+        <MetadataPanel file={file} />
       ) : rightTab === 'captions' ? (
         <CaptionsPanel file={file} url={url} currentTime={currentTime} onSeek={seekTo} onCaptionsChange={setCaptions} />
       ) : (
@@ -6762,6 +6950,8 @@ function AudioPlayerPane({ file, url, sidePanelSlot = null, sideTabsSlot = null 
         <SidePanelTabs tabs={sideTabsForKind('audio')} active={rightTab} onChange={setRightTab} slot={sideTabsSlot} />
         {rightTab === 'advisor' ? (
           <AdvisorPanel file={file} />
+        ) : rightTab === 'metadata' ? (
+          <MetadataPanel file={file} />
         ) : rightTab === 'extract' ? (
           <div className="dv-ocr-history-scroll"><p className="dv-ocr-history-empty">Text extraction isn’t available for audio files.</p></div>
         ) : (
@@ -6971,9 +7161,10 @@ function DocExtractPanel({ file, url, kind, width, fill = false, sideTabsSlot = 
 
   return (
     <aside className={`dv-ocr-history dv-doc-extract${fill ? ' dv-side-portal' : ''}`} style={fill ? undefined : { width: `${width}px` }}>
-      {/* Tabs removed — the document side panel shows only the Generate (AI)
-          pane, with its own header (see AdvisorPanel). */}
-      <AdvisorPanel file={file} />
+      {/* Documents get two panes: the Generate (AI) advisor and Metadata.
+          Text extraction lives in the Multitool footer, not a tab. */}
+      <SidePanelTabs tabs={['advisor', 'metadata']} active={rightTab} onChange={setRightTab} slot={sideTabsSlot} />
+      {rightTab === 'metadata' ? <MetadataPanel file={file} /> : <AdvisorPanel file={file} />}
       {false && (
       <>
       {/* "Extract text" lives in the shared Multitool footer. */}
@@ -7798,7 +7989,31 @@ function PptxRenderPane({ url, onExportPdf }) {
 function DocPane({ file, onWhatsAppDetected, sidePanelSlot = null, sideTabsSlot = null, regenTick = 0 }) {
   const { notify } = useNotifications();
   const { kind, mime } = useMemo(() => classify(file.mime, file.name), [file.mime, file.name]);
-  const url = useMemo(() => localUrlFor(file.path), [file.path]);
+  // Every pane (image/video OCR, audio player, PDF/text/docx preview) reads
+  // this one URL. Electron: the streaming localfile:// scheme. Web: no such
+  // scheme — connect the folder backend for this tab, read the bytes from
+  // the (OPFS) handle, and hand out an object URL instead.
+  const electronUrl = useMemo(() => (isElectron ? localUrlFor(file.path) : null), [file.path]);
+  const { selectedProjectId } = useSelectedProject();
+  const [webUrl, setWebUrl] = useState(null);
+  useEffect(() => {
+    if (isElectron || !selectedProjectId) return undefined;
+    let objectUrl = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureWebFolder(selectedProjectId);
+        const blob = await readLocalBlob(file.path);
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setWebUrl(objectUrl);
+      } catch { /* url stays null — panes render their no-preview state */ }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file.path, selectedProjectId]);
+  const url = isElectron ? electronUrl : webUrl;
   // While a saved version is being written to disk, show a spinner over the
   // preview (the chat stays calm — no thinking bubble there).
   const switchingVersion = !!useMultitoolAdvisor()?.switching;
@@ -8018,7 +8233,9 @@ export default function DocViewer() {
   // Opened from Files' "New file": the document is empty and the advisor should
   // generate its content. `regenTick` re-keys the pane after each generation so
   // the (now-filled) file is re-read from disk.
-  const wantsGenerate = params.get('generate') === '1';
+  // State rather than a plain read: a pre-warmed window (?warm=1) receives its
+  // file — and this flag — over IPC after mount. See the adoption effect below.
+  const [wantsGenerate, setWantsGenerate] = useState(() => params.get('generate') === '1');
   const [regenTick, setRegenTick] = useState(0);
 
   // The right card is a slot: each file's pane portals its tabbed side panel
@@ -8067,6 +8284,74 @@ export default function DocViewer() {
     return [{ id: path, path, name: params.get('name') || 'Document', mime: params.get('mime') || '' }];
   });
   const [activeId, setActiveId] = useState(() => params.get('path') || null);
+
+  // ── Instant open: adopting a file into a pre-warmed window ───────────────
+  // This window may have been booted empty and hidden (?warm=1) purely so a
+  // later double-click doesn't have to pay for a window + bundle + provider
+  // boot. When main hands it a file, swap the state in place — the React tree,
+  // the lazy /doc-viewer chunk, pdf.js and the AI panel are already loaded, so
+  // this is a re-render rather than a cold start. Main shows the window only
+  // after the ack below, so the user never sees the empty shell.
+  const isWarmWindow = params.get('warm') === '1';
+  useEffect(() => onDocViewerOpenFile((file) => {
+    if (!file?.path) return;
+    setTabs([{ id: file.path, path: file.path, name: file.name || 'Document', mime: file.mime || '' }]);
+    setActiveId(file.path);
+    setWantsGenerate(file.generate === true || file.generate === '1');
+    // The window title is normally derived from the launch query, which a warm
+    // window doesn't have.
+    try { document.title = `DocVex — ${file.name || 'Document'}`; } catch { /* non-fatal */ }
+  }), []);
+
+  // Tell main this warm window is mounted and can take a file. One shot.
+  useEffect(() => {
+    if (isWarmWindow) notifyDocViewerWarmReady();
+  }, [isWarmWindow]);
+
+  // While the warm window sits idle, pull in the modules a document open would
+  // otherwise dynamic-import on the critical path: pdf.js (module + worker),
+  // docx-preview and SheetJS. Parsing and evaluating these is most of the jank
+  // in the first seconds after a file opens, and here it costs nothing — the
+  // window is hidden and the user isn't waiting on anything.
+  useEffect(() => {
+    if (!isWarmWindow) return undefined;
+    let cancelled = false;
+    const warm = () => {
+      if (cancelled) return;
+      import('../lib/pdfWorker')
+        .then((m) => m.loadPdfModule?.())
+        .catch(() => { /* the real open will load it */ });
+      import('docx-preview').catch(() => {});
+      import('xlsx').catch(() => {});
+    };
+    const idle = window.requestIdleCallback
+      ? window.requestIdleCallback(warm, { timeout: 4000 })
+      : setTimeout(warm, 1500);
+    return () => {
+      cancelled = true;
+      if (window.cancelIdleCallback && window.requestIdleCallback) window.cancelIdleCallback(idle);
+      else clearTimeout(idle);
+    };
+  }, [isWarmWindow]);
+
+  // …and, once the document is actually on screen, that it's safe to show the
+  // window. TWO frames: the first commit only mounts the viewer chrome and the
+  // document pane; the pane's own first paint lands on the frame after. Acking
+  // on a single rAF showed the window mid-layout, which is what read as "the
+  // viewer lags for a second or two after it opens".
+  const paintedFor = useRef(null);
+  useEffect(() => {
+    if (!isWarmWindow || !activeId || paintedFor.current === activeId) return undefined;
+    paintedFor.current = activeId;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => notifyDocViewerFilePainted());
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      if (second) cancelAnimationFrame(second);
+    };
+  }, [isWarmWindow, activeId]);
 
   // A Files tab just trashed/deleted file(s) — close any tab showing one. A
   // folder delete arrives as the folder path, so also close tabs inside it.
@@ -8196,7 +8481,19 @@ export default function DocViewer() {
 
   const active = tabs.find((t) => t.id === activeId) || tabs[0] || null;
 
-  if (!active) return <div className="dv-page dv-page-empty">No file to display.</div>;
+  // A pre-warmed window is now SHOWN before it has been handed a file (main no
+  // longer waits for the document to paint — see adoptWarmDocViewer), so this
+  // branch is what the user sees for the first frames of every instant open.
+  // It has to read as "opening…", not as "there's nothing here".
+  if (!active) {
+    return isWarmWindow ? (
+      <div className="dv-page dv-page-empty">
+        <span className="dv-boot-spinner" aria-label="Opening document" />
+      </div>
+    ) : (
+      <div className="dv-page dv-page-empty">No file to display.</div>
+    );
+  }
 
   // Arm the AI Generate flow when it was opened with ?generate=1, when the active
   // file is an extensionless "wildcard" (a freshly-created file whose real type is

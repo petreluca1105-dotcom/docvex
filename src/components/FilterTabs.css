@@ -1,0 +1,63 @@
+/* ── Filter tab strip — flat tabs with one shared underline that slides to the
+   active tab (FilterTabs.jsx measures the active button and writes
+   translate(x, y) + width inline; the transition here does the movement).
+
+   Lifted out of Activity.css so the project Settings tab uses the SAME rules
+   rather than a copy that drifts. Class names are unchanged (`activity-*`) so
+   Activity's contextual overrides — the `.avt-toolbar` host, the per-category
+   underline tints — keep applying exactly as before; those stay in Activity.css
+   because they belong to that surface, not to the strip.
+
+   Overflow stays visible so the underline's lower half isn't clipped. */
+.activity-filters {
+  display: flex;
+  /* Breathing room between tabs (on top of each tab's own side padding). */
+  gap: 9.6px;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: visible;
+  /* Anchor for the shared sliding underline (offsetLeft/offsetTop of the tab
+     buttons are measured relative to this box). */
+  position: relative;
+}
+.activity-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: none;
+  position: relative;
+  color: var(--text-muted);
+  /* Same size as the chat toolbar's tabs (.dvx-tab). */
+  font-size: 0.704rem;
+  font-weight: 500;
+  padding: 0 0.48rem;
+  height: 100%;
+  white-space: nowrap;
+  overflow: visible;
+  cursor: pointer;
+  transition: color 150ms;
+  font-family: inherit;
+}
+.activity-filter:hover:not(.is-active) { color: var(--text-secondary); }
+.activity-filter.is-active { color: var(--text-primary); }
+
+/* Active underline — same shape as the chat toolbar's tab line
+   (.dvx-toolbar .dvx-tab.is-active::after): 3.2px tall, rounded ends, riding
+   the host bar's bottom edge. Tinted per surface via data-cat. */
+.activity-filter-underline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 3.2px;
+  border-radius: 2px;
+  background: var(--accent);
+  z-index: 2;
+  pointer-events: none;
+  transition:
+    transform 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 150ms;
+}

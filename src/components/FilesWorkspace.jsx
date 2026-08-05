@@ -1,13 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import FileThumbnail from './FileThumbnail';
-import { OfficeFileIcon } from './fileGlyph';
+import { ExtGlyph, extCategory } from './fileGlyph';
 import Tooltip from './Tooltip';
 import { useMorphPill } from './useMorphPill';
 import { usePaneChromeSlot, usePaneChromePortalEl } from '../context/PaneChromeContext';
 import { useAppPrefs } from '../context/AppPrefsContext';
 import { useAuth } from '../context/AuthContext';
 import { setDraggedFiles, clearDraggedFiles, getDraggedFiles } from '../lib/fileDragBus';
+import { toLayoutPx } from '../lib/appZoom';
+import { isSearchableFile, searchContents } from '../lib/fileContentSearch';
+import { aiSearchFiles } from '../lib/aiFileSearch';
 import { FOLDER_COLOR_PRESETS, loadFolderColors, persistFolderColors } from '../lib/folderColors';
 import { miniHeaderSpot } from '../lib/miniHeaderSpot';
 import MiniHeaderFade from './MiniHeaderFade';
@@ -177,30 +180,11 @@ function FullBinGlyph({ size = 42 }) {
   );
 }
 
-// Timeline glyph — the sidebar's Timeline tab icon (a winding path with two
-// endpoint nodes), reused for the virtual Timeline folder entry so the two
-// surfaces read as the same feature. Keep in sync with Sidebar.jsx's
-// TimelineIcon.
-function TimelineGlyph({ size = 42 }) {
-  return (
-    <svg
-      width={size} height={size} viewBox="0 0 24 24"
-      fill="none" stroke="currentColor" strokeWidth={1.6}
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-    >
-      <circle cx="6" cy="19" r="3" />
-      <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" />
-      <circle cx="18" cy="5" r="3" />
-    </svg>
-  );
-}
-
 // Glyph for a folder-kind item: the Recycle bin entry gets the trash icon —
-// FILLED when it holds files, outline when empty; the Timeline entry gets the
-// sidebar's timeline glyph; a folder probed as a WhatsApp export (it CONTAINS
-// a chat transcript — see isWhatsAppExport) gets the WhatsApp mark like the
-// export zips do; every other folder gets the folder glyph (optionally a
-// custom colour).
+// FILLED when it holds files, outline when empty; a folder probed as a
+// WhatsApp export (it CONTAINS a chat transcript — see isWhatsAppExport) gets
+// the WhatsApp mark like the export zips do; every other folder gets the
+// folder glyph (optionally a custom colour).
 function FolderOrBinGlyph({ item, size = 42, color }) {
   if (item.binEntry) {
     const s = Math.round(size * 0.92);
@@ -208,13 +192,6 @@ function FolderOrBinGlyph({ item, size = 42, color }) {
     return (
       <span className={`fx-bin-glyph${full ? ' is-full' : ''}`}>
         {full ? <FullBinGlyph size={s} /> : <Icon name="trash" size={s} strokeWidth={1.6} />}
-      </span>
-    );
-  }
-  if (item.timelineEntry) {
-    return (
-      <span className={`fx-bin-glyph fx-timeline-glyph${item.timelineCount > 0 ? ' is-full' : ''}`}>
-        <TimelineGlyph size={Math.round(size * 0.88)} />
       </span>
     );
   }
@@ -259,7 +236,7 @@ function FolderColorRow({ current, onPick }) {
 function whatsappMenuHeader(item, isFolder, canEdit, folderColor, onSetColor) {
   // Only the zip/loose-file exports get the WhatsApp header — never folders.
   const isWa = isWhatsAppExport(item) && !isFolder;
-  const showColors = isFolder && !item.binEntry && !item.timelineEntry && canEdit;
+  const showColors = isFolder && !item.binEntry && canEdit;
   if (!isWa && !showColors) return undefined;
   return (closeMenu) => (
     <>
@@ -305,115 +282,9 @@ const FX_GROUPS = [
   { key: 'other', label: 'Other files', icon: 'inbox' },
 ];
 
-// File-type → category for the colored ext-label glyph (from the design).
-function extCategory(ext) {
-  const e = (ext || '').toLowerCase();
-  if (e === 'pdf') return 'pdf';
-  // Word and everything it can save/export to (incl. templates, macro-enabled,
-  // RTF and the OpenDocument / Pages equivalents).
-  if (['doc', 'docx', 'docm', 'dot', 'dotx', 'dotm', 'rtf', 'odt', 'pages'].includes(e)) return 'doc';
-  // Excel and everything it can save/export to (workbooks, macro-enabled,
-  // binary, templates, CSV and the OpenDocument / Numbers equivalents).
-  if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'xltm', 'csv', 'ods', 'numbers'].includes(e)) return 'xls';
-  // PowerPoint and everything it can save/export to (decks, macro-enabled,
-  // shows, templates and the OpenDocument / Keynote equivalents).
-  if (['ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'ppsm', 'pot', 'potx', 'potm', 'odp', 'key'].includes(e)) return 'ppt';
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(e)) return 'zip';
-  if (e === 'psd') return 'psd';
-  if (e === 'ai') return 'ai';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic', 'bmp', 'tif', 'tiff'].includes(e)) return 'img';
-  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(e)) return 'vid';
-  if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus', 'wma', 'aif', 'aiff'].includes(e)) return 'aud';
-  if (['txt', 'md', 'rtf', 'log'].includes(e)) return 'txt';
-  return 'gen';
-}
-const EXT_GLYPH_LABEL = { pdf: 'PDF', doc: 'DOC', xls: 'XLS', ppt: 'PPT', zip: 'ZIP', img: 'IMG', vid: 'MP4', aud: 'AUD', txt: 'TXT', psd: 'PSD', ai: 'AI', gen: 'FILE' };
-
-// Colored ext-label badge — shown for files with no real preview.
-function ExtGlyph({ ext }) {
-  const cat = extCategory(ext);
-  // Videos read as a video at a glance: a centred play triangle, with the
-  // format tucked into the corner.
-  if (cat === 'vid') {
-    return (
-      <span className="fx-glyph fx-glyph-vid">
-        <svg className="fx-glyph-play" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.78-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14z" fill="currentColor" />
-        </svg>
-      </span>
-    );
-  }
-  // Audio reads as audio at a glance: a decibel line — a row of equalizer bars
-  // of varying heights (a sound waveform / level meter).
-  if (cat === 'aud') {
-    return (
-      <span className="fx-glyph fx-glyph-aud">
-        <svg className="fx-glyph-audio" viewBox="0 0 24 24" aria-hidden="true">
-          <g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M3 10.5v3" />
-            <path d="M6.5 7.5v9" />
-            <path d="M10 4.5v15" />
-            <path d="M13.5 8.5v7" />
-            <path d="M17 6v12" />
-            <path d="M20.5 9.5v5" />
-          </g>
-        </svg>
-      </span>
-    );
-  }
-  // Microsoft Office files use authentic Office file icons — a white document
-  // with the brand-colour letter badge (Word / Excel / PowerPoint).
-  if (cat === 'doc') {
-    return <span className="fx-glyph fx-glyph-icon"><OfficeFileIcon kind="word" className="fx-type-icon" /></span>;
-  }
-  if (cat === 'xls') {
-    return <span className="fx-glyph fx-glyph-icon"><OfficeFileIcon kind="excel" className="fx-type-icon" /></span>;
-  }
-  // Archives (zip / rar / 7z / tar / gz) read as a zipped folder, Windows-style:
-  // a folder with a zipper (teeth + pull) down the middle.
-  if (cat === 'zip') {
-    return (
-      <span className="fx-glyph fx-glyph-icon">
-        <svg className="fx-type-icon" viewBox="0 0 24 24" aria-hidden="true">
-          {/* folder */}
-          <path className="fx-type-base" d="M2.6 6.6a2.2 2.2 0 0 1 2.2-2.2h4.2l2 2h8.2a2.2 2.2 0 0 1 2.2 2.2v8.6a2.2 2.2 0 0 1-2.2 2.2H4.8a2.2 2.2 0 0 1-2.2-2.2z" />
-          {/* zipper teeth (thick dashed line down the middle) */}
-          <line className="fx-zip-teeth" x1="12" y1="9.2" x2="12" y2="19.3" />
-          {/* zipper pull — slider + tab */}
-          <circle className="fx-type-detail" cx="12" cy="9.4" r="1.8" />
-          <rect className="fx-type-detail" x="11.25" y="9.4" width="1.5" height="3.5" rx="0.75" />
-        </svg>
-      </span>
-    );
-  }
-  // Image types (img / psd) — a picture: a frame with a sun + mountains.
-  if (cat === 'img' || cat === 'psd') {
-    return (
-      <span className="fx-glyph fx-glyph-icon">
-        <svg className="fx-type-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <rect className="fx-type-base" x="3" y="4" width="18" height="16" rx="2.6" />
-          <circle className="fx-type-detail" cx="8.5" cy="9.5" r="2" />
-          <path className="fx-type-detail" d="M4 19 L9.5 12.5 L13 16 L16 12.5 L20 19 Z" />
-        </svg>
-      </span>
-    );
-  }
-  // PowerPoint — authentic Office file icon (see doc/xls above).
-  if (cat === 'ppt') {
-    return <span className="fx-glyph fx-glyph-icon"><OfficeFileIcon kind="ppt" className="fx-type-icon" /></span>;
-  }
-  // Everything else (doc / txt / pdf / ai / generic) — a document with text lines.
-  return (
-    <span className="fx-glyph fx-glyph-icon">
-      <svg className="fx-type-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <rect className="fx-type-base" x="4" y="2.5" width="16" height="19" rx="2.6" />
-        <rect className="fx-type-detail" x="7" y="7" width="10" height="1.8" rx="0.9" />
-        <rect className="fx-type-detail" x="7" y="11" width="10" height="1.8" rx="0.9" />
-        <rect className="fx-type-detail" x="7" y="15" width="7" height="1.8" rx="0.9" />
-      </svg>
-    </span>
-  );
-}
+// extCategory + ExtGlyph moved to fileGlyph.jsx — they're the app's ONE
+// file-icon style now, shared with the sidebar / Activity / project list via
+// glyphForFile(). Imported at the top of this file.
 
 // A WhatsApp "Export chat" produces a .zip — or, extracted, a folder —
 // holding the transcript + media. ProjectFiles probes the CONTENTS in the
@@ -474,6 +345,10 @@ export function ItemThumbnail({ item }) {
   return (
     <>
       <FileThumbnail descriptor={item.descriptor} glyph={<ItemGlyph item={item} />} />
+      {/* Extension pill — CSS reveals it only when the tile fell back to the
+          GENERIC document glyph (no thumbnail and no type icon of its own), so
+          an unknown format still says what it is. */}
+      {item.ext ? <span className="fx-ext-pill" aria-hidden="true">{String(item.ext).toUpperCase()}</span> : null}
       {isVideo ? (
         <span className="fx-video-play" aria-hidden="true">
           <svg viewBox="0 0 24 24">
@@ -580,28 +455,11 @@ function itemMenuItems(item, { tab, onOpen, onOpenContent, onRename, onPropertie
     }
     return entries;
   }
-  if (item.timelineEntry) {
-    // The Timeline entry is a read-only view of the case timeline's files —
-    // just open it.
-    return [{ key: 'open', label: 'Open', onClick: () => onOpen?.(item) }];
-  }
   const isFolder = item.kind === 'folder';
   const isBin = tab === 'trash';
   const localPath = isFolder ? item._dir?.path : item._raw?.path;
   const bulk = Boolean(isMultiSelected && bulkCount > 1);
   const subject = bulk ? `${bulkCount} items` : (isFolder ? `“${item.name}” and everything inside it` : `“${item.name}”`);
-
-  if (tab === 'timeline') {
-    // Timeline files are REFERENCES to files that live elsewhere (the project
-    // folder, or wherever they were picked from when the timeline was built)
-    // — read-only here: no rename / copy / cut / delete, which would break or
-    // orphan the timeline's filename links.
-    return [
-      { key: 'open', label: 'Open', onClick: () => onOpen?.(item) },
-      { key: 'props', label: 'Properties', onClick: () => onProperties?.(item) },
-      localPath && { key: 'loc', label: 'Open file location', onClick: () => onOpenLocation?.(item) },
-    ].filter(Boolean);
-  }
 
   if (isBin) {
     // Bin items: open (read in place), restore to the folder, or delete forever.
@@ -743,7 +601,7 @@ function Tile({ item, tab, selected, onSelect, onOpen, onOpenContent, onRename, 
   const isDropTarget = isFolder && dropFolderId === item.id;
   const isBinDrop = item.binEntry && isDropTarget;
   const isCut = !isFolder && cutPaths?.has(item._raw?.path);
-  const folderColor = isFolder && !item.binEntry && !item.timelineEntry ? folderColors?.[item.id] : undefined;
+  const folderColor = isFolder && !item.binEntry ? folderColors?.[item.id] : undefined;
   const morph = useMorphPill({
     // WhatsApp files use the SAME plain name pill as every other file (the
     // old rich "recognised as WhatsApp convo" hover pill was removed).
@@ -772,13 +630,13 @@ function Tile({ item, tab, selected, onSelect, onOpen, onOpenContent, onRename, 
         data-fx-id={item.id}
         className={`fx-tile${isFolder ? ' is-folder' : ''}${selected ? ' is-selected' : ''}${status === 'deleted' ? ' is-deleted' : ''}${isDropTarget ? ' is-droptarget' : ''}${isBinDrop ? ' is-bindrop' : ''}${isCut ? ' is-cut' : ''}`}
         onClick={(e) => onSelect(item, e)}
-        onDoubleClick={() => onOpen(item)}
+        onDoubleClick={(e) => onOpen(item, e)}
         onMouseMove={morph.handleMouseMove}
         onMouseLeave={morph.handleMouseLeave}
         onContextMenu={(e) => { e.stopPropagation(); morph.handleContextMenu(e); }}
-        draggable={draggable && !item.binEntry && !item.timelineEntry ? true : undefined}
-        onDragStart={draggable && !item.binEntry && !item.timelineEntry ? (e) => beginItemDrag?.(item, e) : undefined}
-        onDragEnd={draggable && !item.binEntry && !item.timelineEntry ? () => endItemDrag?.() : undefined}
+        draggable={draggable && !item.binEntry ? true : undefined}
+        onDragStart={draggable && !item.binEntry ? (e) => beginItemDrag?.(item, e) : undefined}
+        onDragEnd={draggable && !item.binEntry ? () => endItemDrag?.() : undefined}
         onDragOver={isFolder ? (e) => onFolderDragOver?.(item, e) : undefined}
         onDragLeave={isFolder ? () => onFolderDragLeave?.(item) : undefined}
         onDrop={isFolder ? (e) => onFolderDrop?.(item, e) : undefined}
@@ -791,10 +649,9 @@ function Tile({ item, tab, selected, onSelect, onOpen, onOpenContent, onRename, 
         <span>
           <span className="fx-tile-name">
             {displayBaseName(item)}
-            {/* Recycle bin / Timeline entries show how many items are inside —
+            {/* The Recycle bin entry shows how many items are inside —
                 inline, right of the label (not a corner badge). */}
             {item.binEntry && item.binCount > 0 && <span className="fx-bin-count is-inline">{item.binCount}</span>}
-            {item.timelineEntry && item.timelineCount > 0 && <span className="fx-bin-count is-inline">{item.timelineCount}</span>}
           </span>
         </span>
       </button>
@@ -837,7 +694,7 @@ function Row({ item, tab, selected, onSelect, onOpen, onOpenContent, onRename, o
   const isDropTarget = isFolder && dropFolderId === item.id;
   const isBinDrop = item.binEntry && isDropTarget;
   const isCut = !isFolder && cutPaths?.has(item._raw?.path);
-  const folderColor = isFolder && !item.binEntry && !item.timelineEntry ? folderColors?.[item.id] : undefined;
+  const folderColor = isFolder && !item.binEntry ? folderColors?.[item.id] : undefined;
   const morph = useMorphPill({
     // WhatsApp files use the SAME plain name pill as every other file.
     hoverContent: isBin && !item.binEntry ? trashHoverContent(item) : item.name,
@@ -864,13 +721,13 @@ function Row({ item, tab, selected, onSelect, onOpen, onOpenContent, onRename, o
         data-fx-id={item.id}
         className={`fx-list-row${isBin ? ' is-bin' : ''}${selected ? ' is-selected' : ''}${status === 'deleted' ? ' is-deleted' : ''}${isDropTarget ? ' is-droptarget' : ''}${isBinDrop ? ' is-bindrop' : ''}${isCut ? ' is-cut' : ''}`}
         onClick={(e) => onSelect(item, e)}
-        onDoubleClick={() => onOpen(item)}
+        onDoubleClick={(e) => onOpen(item, e)}
         onMouseMove={morph.handleMouseMove}
         onMouseLeave={morph.handleMouseLeave}
         onContextMenu={(e) => { e.stopPropagation(); morph.handleContextMenu(e); }}
-        draggable={draggable && !item.binEntry && !item.timelineEntry ? true : undefined}
-        onDragStart={draggable && !item.binEntry && !item.timelineEntry ? (e) => beginItemDrag?.(item, e) : undefined}
-        onDragEnd={draggable && !item.binEntry && !item.timelineEntry ? () => endItemDrag?.() : undefined}
+        draggable={draggable && !item.binEntry ? true : undefined}
+        onDragStart={draggable && !item.binEntry ? (e) => beginItemDrag?.(item, e) : undefined}
+        onDragEnd={draggable && !item.binEntry ? () => endItemDrag?.() : undefined}
         onDragOver={isFolder ? (e) => onFolderDragOver?.(item, e) : undefined}
         onDragLeave={isFolder ? () => onFolderDragLeave?.(item) : undefined}
         onDrop={isFolder ? (e) => onFolderDrop?.(item, e) : undefined}
@@ -882,15 +739,14 @@ function Row({ item, tab, selected, onSelect, onOpen, onOpenContent, onRename, o
           </span>
           <span className="fx-name">
             {displayBaseName(item)}
-            {/* Bin / Timeline count pill INSIDE the name span so it hugs the
-                label text (the span stretches flex:1 — a sibling pill would be
-                pushed to the column's far edge, next to the Date column). */}
+            {/* Bin count pill INSIDE the name span so it hugs the label text
+                (the span stretches flex:1 — a sibling pill would be pushed to
+                the column's far edge, next to the Date column). */}
             {item.binEntry && item.binCount > 0 && <span className="fx-bin-count is-inline">{item.binCount}</span>}
-            {item.timelineEntry && item.timelineCount > 0 && <span className="fx-bin-count is-inline">{item.timelineCount}</span>}
           </span>
         </span>
         <span className="fx-list-muted">{item.modifiedLabel || '—'}</span>
-        <span className="fx-list-muted">{item.binEntry ? 'Trash' : item.timelineEntry ? 'Timeline' : isFolder ? 'Folder' : (item.ext ? item.ext.toUpperCase() : 'File')}</span>
+        <span className="fx-list-muted">{item.binEntry ? 'Trash' : isFolder ? 'Folder' : (item.ext ? item.ext.toUpperCase() : 'File')}</span>
         <span className="fx-list-muted">{item.sizeLabel || '—'}</span>
       </button>
       {morph.node}
@@ -952,6 +808,8 @@ export default function FilesWorkspace({
   loading,
   renameTargetPath,       // path of a just-created file to auto-select + rename
   onRenameTargetConsumed, // () => void — clear the request once it's applied
+  selectTargetPath,       // path of a just-created file/FOLDER to auto-select (no rename)
+  onSelectTargetConsumed, // () => void — clear the request once it's applied
   // actions
   onOpen, onOpenContent, onRename, onDelete, onRestore, onNewFolder, onNewFile, onCreateTypedFile, onUpload, onUploadFolder, onOpenLocation,
   onEmptyBin,
@@ -968,7 +826,6 @@ export default function FilesWorkspace({
   onUndo, onRedo, canUndo, canRedo, undoLabel, redoLabel,
 }) {
   const isBin = tab === 'trash';
-  const isTimeline = tab === 'timeline';
   // Tile zoom — driven by Ctrl+scroll over the canvas. Zoom out far enough
   // and the grid collapses into the list view; zoom back in and the tiles
   // return. The INITIAL view honors Settings → "Default file view": 'list'
@@ -1032,6 +889,9 @@ export default function FilesWorkspace({
     catch { /* storage full / blocked — non-critical */ }
   }, [viewPrefsKey, tileSize, grouped]);
   const [propsItem, setPropsItem] = useState(null);
+  // Pointer-anchored "this is a compressed file" prompt — { item, x, y } in
+  // viewport px (null coords = no pointer, e.g. opened with Enter → centred).
+  const [archivePrompt, setArchivePrompt] = useState(null);
   const [dragOver, setDragOver] = useState(false);   // OS file drag over the canvas
   const [clipboard, setClipboard] = useState(null);  // { mode: 'copy'|'cut', items: [{ name, path }] }
   const [dropFolderId, setDropFolderId] = useState(null); // folder hovered during a move drag
@@ -1106,15 +966,38 @@ export default function FilesWorkspace({
     setRenamingId(match.id);
     onRenameTargetConsumed?.();
   }, [renameTargetPath, items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Parent made something and wants it SELECTED but not opened — the folder an
+  // archive was just extracted into. Unlike the rename request above this
+  // searches folders as well as files, and stops at selection: no rename mode,
+  // no navigation. Re-runs as the listing updates so it catches the folder
+  // once the post-extract refetch lands.
+  useEffect(() => {
+    if (!selectTargetPath) return;
+    const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const target = norm(selectTargetPath);
+    if (!target) return;
+    const match = [...(folders || []), ...(items || [])]
+      .find((it) => it && norm(it._dir?.path || it._raw?.path) === target);
+    if (!match) return;  // not listed yet — this effect re-runs when they change
+    setMultiSel(new Set([match.id]));
+    setAnchorId(match.id);
+    onSelectTargetConsumed?.();
+    requestAnimationFrame(() => {
+      try {
+        canvasRef.current?.querySelector(`[data-fx-id="${CSS.escape(match.id)}"]`)
+          ?.scrollIntoView({ block: 'nearest' });
+      } catch { /* CSS.escape unsupported */ }
+    });
+  }, [selectTargetPath, folders, items]); // eslint-disable-line react-hooks/exhaustive-deps
   const commitNewFolder = (name) => { setCreatingFolder(false); onNewFolder?.(name); };
   const cancelNewFolder = () => setCreatingFolder(false);
   const commitNewFile = (name) => { setCreatingFile(false); onNewFile?.(name); };
   const cancelNewFile = () => setCreatingFile(false);
 
   // Write actions (rename / import / new folder) are only offered in the
-  // My-drafts tab — the bin is restore / delete-forever only, and the
-  // timeline view is a read-only reference list.
-  const menuEditable = !isBin && !isTimeline && canEdit;
+  // My-drafts tab — the bin is restore / delete-forever only.
+  const menuEditable = !isBin && canEdit;
 
   // Clear selection + inline edits when the tab changes.
   useEffect(() => {
@@ -1235,8 +1118,6 @@ export default function FilesWorkspace({
   usePaneChromeSlot({
     description: isBin
       ? 'Deleted files are removed for good after 30 days.'
-      : isTimeline
-      ? 'Files referenced by the case timeline.'
       : summaryText,
   });
   const chromeSlotEl = usePaneChromePortalEl();
@@ -1284,15 +1165,14 @@ export default function FilesWorkspace({
     if (c === 'doc' || c === 'xls' || c === 'ppt' || c === 'pdf') return 'office';
     return 'other';
   };
-  // One flat ordering (no Folders/Files category split): the special entries
-  // first — Recycle bin, then Timeline, side by side (their order in the
-  // `folders` prop is preserved by filter) — then folders A→Z, then files A→Z.
+  // One flat ordering (no Folders/Files category split): the Recycle bin entry
+  // first, then folders A→Z, then files A→Z.
   const binFolders = useMemo(
-    () => (folders || []).filter((f) => (f.binEntry || f.timelineEntry) && matches(f.name)),
+    () => (folders || []).filter((f) => f.binEntry && matches(f.name)),
     [folders, q], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const shownFolders = useMemo(
-    () => (folders || []).filter((f) => !f.binEntry && !f.timelineEntry && matches(f.name)).sort(byName),
+    () => (folders || []).filter((f) => !f.binEntry && matches(f.name)).sort(byName),
     [folders, q], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // Compressed archives (zip / rar / 7z / tar / gz) are "compressed folders" —
@@ -1311,7 +1191,171 @@ export default function FilesWorkspace({
   // Bin → folders → files, in render order. Drives both the grid/list and the
   // Shift-range selection axis.
   const displayFolders = useMemo(() => [...binFolders, ...shownFolders], [binFolders, shownFolders]);
-  const totalShown = displayFolders.length + shownItems.length;
+
+  // ── Content search ──────────────────────────────────────────────────────
+  // A query matches two ways: by NAME (instant, the filter above) and by
+  // CONTENT (has to read the files). The two result sets are kept disjoint —
+  // a file whose name already matched isn't scanned or listed twice — and the
+  // content pass runs in the background so typing never waits on a PDF parse.
+  // [{ item, snippet }] — the snippet is the text around the match (literal
+  // search) or the model's one-line reason (AI search).
+  const [contentHits, setContentHits] = useState([]);
+  const [contentScanning, setContentScanning] = useState(false);
+  const [contentError, setContentError] = useState('');
+  // ── AI section ──────────────────────────────────────────────────────────
+  // Its own category beside the literal passes, and it only runs when ASKED:
+  // an AI search costs a request (and uploads picture stills — see
+  // lib/visualThumb.js), so it's a button in the section, not something every
+  // keystroke fires. Results are tagged with the query they answer so a stale
+  // set can't sit under a query it has nothing to do with.
+  const [aiHits, setAiHits] = useState([]);
+  const [aiScanning, setAiScanning] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiRanFor, setAiRanFor] = useState('');
+  // The query a run was STARTED for, set whether or not it succeeded. `aiRanFor`
+  // only records successes, so gating the auto-run on it would retry a failing
+  // query forever.
+  const [aiAttemptedFor, setAiAttemptedFor] = useState('');
+  // { done, total } while the one-time description pass runs (lib/aiFileIndex),
+  // null otherwise. Only ever non-null for files this folder hasn't described
+  // yet, so it shows on the first search and rarely again.
+  const [aiIndexing, setAiIndexing] = useState(null);
+  const aiAbortRef = useRef(null);
+  // The first AI search on a device asks for informed consent: it's the only
+  // feature here that sends a matter's contents off the machine, so the user
+  // gets told exactly what leaves before any of it does. Once granted the
+  // button runs directly — a firm shouldn't have to re-read the notice on
+  // every search.
+  const [aiConsentOpen, setAiConsentOpen] = useState(false);
+  const [aiConsented, setAiConsented] = useState(() => {
+    try { return localStorage.getItem('docvex.aiSearchConsent') === '1'; } catch { return false; }
+  });
+  const acceptAiConsent = () => {
+    try { localStorage.setItem('docvex.aiSearchConsent', '1'); } catch { /* ignore */ }
+    setAiConsented(true);
+    setAiConsentOpen(false);
+    runAiSearch();
+  };
+
+  // Typing invalidates whatever the AI last answered.
+  useEffect(() => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiHits([]);
+    setAiScanning(false);
+    setAiError('');
+    setAiRanFor('');
+    setAiAttemptedFor('');
+    setAiIndexing(null);
+  }, [q]);
+
+  const runAiSearch = async () => {
+    if (!q || aiScanning) return;
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+    setAiAttemptedFor(q);
+    setAiScanning(true);
+    setAiError('');
+    setAiHits([]);
+    setAiIndexing(null);
+    // Everything but folders: an image can only be judged by looking at it, so
+    // unreadable-as-text formats are exactly what this pass is for. Files
+    // already listed under "By name" are skipped — they're above.
+    const candidates = (itemsRef.current || []).filter((f) => (
+      f && f.kind !== 'folder' && f._raw?.path && !(f.name || '').toLowerCase().includes(q)
+    )).map((f) => ({ item: f, file: f._raw }));
+    const byPath = new Map(candidates.map((c) => [c.file.path, c.item]));
+    try {
+      const { matches, error } = await aiSearchFiles({
+        query: q,
+        files: candidates.map((c) => c.file),
+        // The masthead title is the project's own name — context for what the
+        // folder is about.
+        projectName: masthead?.title || '',
+        signal: controller.signal,
+        // Reported only while files are being described for the first time.
+        onProgress: (p) => { if (!controller.signal.aborted) setAiIndexing(p.done >= p.total ? null : p); },
+      });
+      if (controller.signal.aborted) return;
+      if (error) { setAiError(typeof error === 'string' ? error : 'AI search failed.'); return; }
+      setAiHits(matches.map((m) => ({ item: byPath.get(m.file.path), snippet: m.why })).filter((h) => h.item));
+      setAiRanFor(q);
+    } catch (err) {
+      if (!controller.signal.aborted) setAiError(err?.message || 'AI search failed.');
+    } finally {
+      if (!controller.signal.aborted) { setAiScanning(false); setAiIndexing(null); }
+    }
+  };
+
+  // Once the user has consented, AI search stops being a thing they press: the
+  // pitch and its Enable button are gone and each query just runs, alongside
+  // the two literal passes. Read through a ref because runAiSearch is rebuilt
+  // every render and would otherwise re-fire this effect endlessly.
+  const runAiRef = useRef(null);
+  runAiRef.current = runAiSearch;
+  useEffect(() => {
+    if (!aiConsented || q.length < 2) return undefined;
+    if (aiAttemptedFor === q || aiScanning) return undefined;
+    // Longer than the literal pass's debounce: this one costs a request, so it
+    // waits until the typing has actually stopped.
+    const t = setTimeout(() => runAiRef.current?.(), 650);
+    return () => clearTimeout(t);
+  }, [q, aiConsented, aiAttemptedFor, aiScanning]);
+
+  // `items` is rebuilt every render, so it can't be an effect dependency —
+  // this value-equal string can.
+  const itemsKey = useMemo(() => (items || []).map((f) => f.id).join('|'), [items]);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  useEffect(() => {
+    // One character matches nearly everything; scanning a folder for it is
+    // pure waste. The debounce keeps mid-word keystrokes from starting scans
+    // that are immediately abandoned.
+    if (q.length < 2) { setContentHits([]); setContentScanning(false); setContentError(''); return undefined; }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      // Files whose NAME already matched are shown in the section above — they
+      // aren't scanned again here, so the two sections stay disjoint. The AI
+      // pass considers every file (an image can only match by name/type), the
+      // literal pass only what it can actually read: documents whose text we
+      // can extract, plus recordings that already carry a transcript from the
+      // Doc Viewer's captions.
+      const candidates = (itemsRef.current || []).filter((f) => (
+        f && f.kind !== 'folder' && f._raw?.path
+        && !(f.name || '').toLowerCase().includes(q)
+        && isSearchableFile(f._raw)
+      )).map((f) => ({ item: f, file: f._raw }));
+      if (!candidates.length) { setContentHits([]); setContentError(''); return; }
+      setContentHits([]);
+      setContentError('');
+      setContentScanning(true);
+      const byPath = new Map(candidates.map((c) => [c.file.path, c.item]));
+      try {
+        await searchContents(candidates.map((c) => c.file), q, {
+          signal: controller.signal,
+          // Append as they land so the section fills in progressively.
+          onHit: (file, snippet) => {
+            if (controller.signal.aborted) return;
+            const item = byPath.get(file.path);
+            if (!item) return;
+            setContentHits((prev) => (prev.some((h) => h.item === item) ? prev : [...prev, { item, snippet }]));
+          },
+        });
+      } catch (err) {
+        if (!controller.signal.aborted) setContentError(err?.message || 'Search failed.');
+      } finally {
+        if (!controller.signal.aborted) setContentScanning(false);
+      }
+    }, 320);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [q, itemsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const searching = q.length > 0;
+  // While searching the AI section is always rendered (it holds its own run
+  // button), so a search never falls through to the "no matches" empty state.
+  const totalShown = displayFolders.length + shownItems.length
+    + (searching ? contentHits.length + aiHits.length + 1 : 0);
 
   // Category sections for the "Categorize" view — every displayed item bucketed
   // by itemCat, in FX_GROUPS order, empty sections dropped. The folders section
@@ -1344,8 +1388,15 @@ export default function FilesWorkspace({
   // it follows the section layout so a range drag tracks what the eye sees;
   // otherwise the flat bin → folders → files order.
   const orderedIds = useMemo(
-    () => (grouped ? groups.flatMap((g) => g.items) : [...displayFolders, ...shownItems]).map((f) => f.id),
-    [grouped, groups, displayFolders, shownItems],
+    () => {
+      // Must mirror RENDER order — it's the axis Shift-range selection walks.
+      if (searching) {
+        return [...displayFolders, ...shownItems, ...contentHits.map((h) => h.item), ...aiHits.map((h) => h.item)]
+          .map((f) => f.id);
+      }
+      return (grouped ? groups.flatMap((g) => g.items) : [...displayFolders, ...shownItems]).map((f) => f.id);
+    },
+    [searching, contentHits, aiHits, grouped, groups, displayFolders, shownItems],
   );
 
   // Click selection. Modifiers compose like Windows File Explorer:
@@ -1389,6 +1440,27 @@ export default function FilesWorkspace({
   };
 
   const clearSelection = () => { setMultiSel(new Set()); setAnchorId(null); };
+
+  // Click-away deselect, WINDOW-wide. The canvas's own handler only covers the
+  // grid's own row, so a click on the masthead, the page margin or anywhere
+  // else on screen used to leave a file selected. Bound at the document instead
+  // of stretching an invisible layer over the app: a real full-screen element
+  // would have to swallow the click to see it, breaking everything under it.
+  // Anything actionable is exempt — a toolbar button, a menu entry, a rename
+  // input — since those operate ON the selection and must not lose it first.
+  useEffect(() => {
+    if (!multiSel.size) return undefined;   // nothing to clear — don't listen
+    const onDocClick = (e) => {
+      const t = e.target;
+      if (!t || typeof t.closest !== 'function') return;
+      if (t.closest('.fx-tile, .fx-list-row, button, a, input, textarea, select, [role="menuitem"], [contenteditable="true"]')) return;
+      clearSelection();
+    };
+    // Bubble phase, so a tile's own onClick has already run and set the new
+    // selection before this sees the event.
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [multiSel.size]); // eslint-disable-line react-hooks/exhaustive-deps
   const exitSelectMode = () => { setSelectMode(false); clearSelection(); };
   const toggleSelectMode = () => {
     setSelectMode((on) => { if (on) clearSelection(); return !on; });
@@ -1448,6 +1520,22 @@ export default function FilesWorkspace({
     });
   };
 
+  // Opening an archive can't do what "open" normally does — there's nothing to
+  // preview inside a .zip — so it asks first, in a card pinned to the pointer.
+  // Every open path funnels through here (double-click, the menu's "Open", the
+  // toolbar button, Enter), so the prompt can't be bypassed by one of them.
+  // The bin is excluded: a trashed archive has no live path to extract to. So
+  // is a recognised WhatsApp export — it's a .zip, but double-clicking it has
+  // always opened the reconstructed conversation, which IS a useful preview.
+  const openItem = (item, e) => {
+    if (tab !== 'trash' && item && item.kind !== 'folder' && !isWhatsAppExport(item)
+        && item._raw?.path && extCategory(item.ext) === 'zip') {
+      setArchivePrompt({ item, x: e?.clientX ?? null, y: e?.clientY ?? null });
+      return;
+    }
+    onOpen?.(item);
+  };
+
   // Latest handlers/state for the global key listener (avoids re-binding it).
   kbdRef.current = {
     hasSelection: multiSel.size > 0,
@@ -1456,7 +1544,7 @@ export default function FilesWorkspace({
     menuEditable,
     deleteSelection: bulkDelete,
     renameSelected: () => { if (selectedItem) requestRename(selectedItem); },
-    openSelected: () => { if (selectedItem) onOpen?.(selectedItem); },
+    openSelected: () => { if (selectedItem) openItem(selectedItem); },
     selectAll,
     clearSelection,
     navigateSelection,
@@ -1500,6 +1588,9 @@ export default function FilesWorkspace({
   // "Create" expands an inline submenu mirroring the footer Create button
   // (New folder + the Build-with-AI document types).
   const bgMorph = useMorphPill({
+    // No hover tooltip precedes this one, so there's nothing to morph FROM —
+    // the scale-up just made the menu look like it took 220ms to appear.
+    instant: true,
     hoverContent: '',
     menuItems: [
       menuEditable && canPaste && { key: 'paste', label: clipboard?.items?.length > 1 ? `Paste ${clipboard.items.length} items` : 'Paste', onClick: () => pasteHere() },
@@ -1526,6 +1617,44 @@ export default function FilesWorkspace({
     ],
   });
   actionsRef.current = { copySelection, cutSelection, pasteHere, hasCopyable: menuEditable && (multiSel.size > 0 || !!selectedItem), canCut: menuEditable && !!onMoveItems && (multiSel.size > 0 || !!selectedItem), canPaste };
+
+  // ── Background right-click (New folder / Import) ────────────────────────
+  // Bound to the DOCUMENT, so a right-click anywhere in the window opens it.
+  // Element-scoped versions kept leaving dead zones: the canvas is one track of
+  // a grid and only as wide as the file content, and .fx-page is capped at
+  // --content-max-width, so on a wide window the gutter beside the content had
+  // no handler at all.
+  //
+  // Right-clicking again while it's open just re-anchors it — handleContextMenu
+  // rewrites the position, it doesn't toggle — so the menu follows the pointer
+  // rather than needing to be dismissed first.
+  //
+  // Three exemptions, and they're all load-bearing:
+  //   • tiles / rows      — they have their own item menus. They stop
+  //                         propagation natively too, so this rarely even sees
+  //                         them; the check is belt and braces.
+  //   • the menu itself   — it's portalled to <body>, i.e. OUTSIDE React's root
+  //                         container, so its events do reach this listener.
+  //                         Without this, right-clicking a menu entry would
+  //                         re-open the menu on top of itself.
+  //   • text fields       — keep the platform's own editing menu.
+  // The handler is read through a ref, refreshed every render. Binding
+  // bgMorph.handleContextMenu directly would freeze the closure from whichever
+  // render registered the listener, so a SECOND right-click ran against stale
+  // menu state — which is what made the reopened menu come up broken.
+  const bgMenuRef = useRef(null);
+  bgMenuRef.current = bgMorph.handleContextMenu;
+  useEffect(() => {
+    if (!menuEditable) return undefined;
+    const onMenu = (e) => {
+      const t = e.target;
+      if (!t || typeof t.closest !== 'function') return;
+      if (t.closest('.project-files-morph-pill, .fx-tile, .fx-list-row, input, textarea, [contenteditable="true"]')) return;
+      bgMenuRef.current?.(e);
+    };
+    document.addEventListener('contextmenu', onMenu);
+    return () => document.removeEventListener('contextmenu', onMenu);
+  }, [menuEditable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On-disk path of an item — files carry it on `_raw`, folders on `_dir`.
   const itemDiskPath = (it) => it?._raw?.path || it?._dir?.path || null;
@@ -1590,8 +1719,6 @@ export default function FilesWorkspace({
       if (dropFolderId !== folder.id) setDropFolderId(folder.id);
       return;
     }
-    // The Timeline entry is a read-only reference view — never a drop target.
-    if (folder.timelineEntry) return;
     if (!onMoveItems || !dragHasFiles(e)) return;
     // Don't accept a folder dropped onto itself / its own descendants — the
     // live payload comes from the drag bus since dragover can't read dataTransfer.
@@ -1615,7 +1742,6 @@ export default function FilesWorkspace({
       toDelete.forEach((it) => onDelete(it));
       return;
     }
-    if (folder.timelineEntry) return; // read-only reference view — no drops
     if (!onMoveItems || !dragHasFiles(e)) return;
     e.preventDefault();
     setDropFolderId(null);
@@ -1651,7 +1777,7 @@ export default function FilesWorkspace({
   // Common props every Tile/Row needs.
   const itemCommon = {
     tab,
-    onSelect, onOpen, onOpenContent,
+    onSelect, onOpen: openItem, onOpenContent,
     onRename: requestRename,
     onProperties: setPropsItem,
     onOpenLocation, onDelete, onRestore, onEmptyBin,
@@ -1688,7 +1814,6 @@ export default function FilesWorkspace({
   const emptyHint = {
     drafts: 'No files in your folder yet. Add or import files and they’ll show up here.',
     trash: 'Files you delete wait in the trash for 30 days before they’re removed for good.',
-    timeline: 'Build a timeline in the Timeline tab — every file it references shows up here.',
   }[tab];
 
   // List view shows its column header INSIDE the window chrome (same bar/section
@@ -1765,11 +1890,14 @@ export default function FilesWorkspace({
         <Tooltip content={view === 'list' ? 'Switch to grid view' : 'Switch to list view'}>
           <button
             type="button"
-            className="fx-cat-btn"
+            className="fx-cat-btn fx-view-btn"
             aria-label={view === 'list' ? 'Switch to grid view' : 'Switch to list view'}
             onClick={() => setTileSize(view === 'list' ? FX_LIST_THRESHOLD : FX_MIN_TILE)}
           >
-            <Icon name={view === 'list' ? 'list' : 'grid'} size={14} />
+            {/* Filled + accent, matching the file glyphs in the thumbs below —
+                the view switch reads as part of the same icon family rather
+                than a stroked outlier. */}
+            <Icon name={view === 'list' ? 'list' : 'grid'} size={14} filled />
           </button>
         </Tooltip>
         {/* Categorize — split the listing into labelled category sections
@@ -1829,15 +1957,9 @@ export default function FilesWorkspace({
     <div
       className="fx-page"
       ref={pageRef}
-      // Clicking inert page background OUTSIDE the canvas (the masthead, the
-      // toolbar/footer whitespace, layout gaps) clears the selection — the
-      // same rule as the canvas' own empty-space click. Interactive targets
-      // (items, buttons, inputs, menus) are exempt so actions that need the
-      // selection — footer Copy/Paste, the right-click menu — keep it.
-      onClick={(e) => {
-        if (e.target.closest?.('.fx-tile, .fx-list-row, button, input, textarea, a, [role="menu"], [role="dialog"]')) return;
-        clearSelection();
-      }}
+      // No handlers here: the background right-click menu and the click-away
+      // deselect are both bound at the document (see the effects above), so
+      // neither is limited to this element's box.
     >
       {chromeSlotEl && createPortal(toolbar, chromeSlotEl)}
       {/* Masthead — Versions-style hero (the page is chromeless on /files, so
@@ -1871,12 +1993,11 @@ export default function FilesWorkspace({
             // grid/list fills the canvas, so empty-area clicks land on it, not
             // the canvas node.
             if (bgMorph.isMenuOpen) bgMorph.closeMenu();
-            // Clicking empty space (anywhere not on a tile/row) clears the
-            // current selection — same reason we can't just compare to the
-            // canvas node: the grid sits between them.
-            if (!e.target.closest?.('.fx-tile, .fx-list-row')) clearSelection();
+            // Deselection isn't handled here — the document-level click-away
+            // above covers the whole window, this row included.
           }}
-          onContextMenu={menuEditable ? bgMorph.handleContextMenu : undefined}
+          // No onContextMenu here — .fx-page owns the background menu so it
+          // covers the whole surface, not just this grid track.
           onDragEnter={onDropFiles ? (e) => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) { e.preventDefault(); setDragOver(true); } } : undefined}
           onDragOver={onDropFiles ? (e) => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dragOver) setDragOver(true); } } : undefined}
           onDragLeave={onDropFiles ? (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); } : undefined}
@@ -1915,13 +2036,131 @@ export default function FilesWorkspace({
             )
           ) : loading ? (
             <div className="fx-empty"><p>Loading…</p></div>
-          ) : (totalShown === 0 && !creatingFolder && !creatingFile) ? (
+          ) : (totalShown === 0 && !contentScanning && !creatingFolder && !creatingFile) ? (
+            // While the content pass is still running there may yet be hits —
+            // claiming "no matches" and then filling in behind it would be a lie.
             <div className="fx-empty">
-              {isTimeline
-                ? <span className="fx-icon fx-timeline-glyph"><TimelineGlyph size={42} /></span>
-                : <Icon name={isBin ? 'trash' : 'inbox'} className="fx-icon" strokeWidth={1.2} />}
-              <h3>{q ? 'No matches' : (isBin ? 'Trash is empty' : isTimeline ? 'No timeline files yet' : 'Nothing here yet')}</h3>
-              <p>{q ? `No files match “${query}”.` : emptyHint}</p>
+              <Icon name={isBin ? 'trash' : 'inbox'} className="fx-icon" strokeWidth={1.2} />
+              <h3>{q ? 'No matches' : (isBin ? 'Trash is empty' : 'Nothing here yet')}</h3>
+              <p>{q ? `Nothing matches “${query}” by name or content.` : emptyHint}</p>
+            </div>
+          ) : searching ? (
+            // Search view — two labelled sections, using the Categorize view's
+            // section chrome so a divider means the same thing everywhere.
+            // Name matches first (they're instant); content matches below,
+            // filling in as the background scan reads each file.
+            <div className="fx-cat-groups">
+              {(displayFolders.length + shownItems.length) > 0 && (
+                <section className="fx-cat-section">
+                  <div className="fx-cat-head">
+                    <Icon name="a" className="fx-cat-head-ico" size={13} />
+                    <span className="fx-cat-head-label">By name</span>
+                    <span className="fx-cat-head-count">{displayFolders.length + shownItems.length}</span>
+                  </div>
+                  {view === 'tiles'
+                    ? <div className="fx-grid">{[...displayFolders, ...shownItems].map(renderTile)}</div>
+                    : <div className="fx-list">{[...displayFolders, ...shownItems].map(renderRow)}</div>}
+                </section>
+              )}
+              {(contentHits.length > 0 || contentScanning || contentError) && (
+                <section className="fx-cat-section">
+                  <div className="fx-cat-head">
+                    <Icon name="search" className="fx-cat-head-ico" size={13} />
+                    <span className="fx-cat-head-label">By content</span>
+                    <span className="fx-cat-head-count">{contentHits.length}</span>
+                    {contentScanning && <span className="fx-cat-head-spinner" aria-label="Searching file contents" />}
+                  </div>
+                  {contentError && <p className="fx-hit-error">{contentError}</p>}
+                  {/* Always a vertical list, whatever the tile/list view is
+                      set to: each row pairs the file with the snippet that
+                      explains WHY it matched, which a tile grid has no room
+                      for. */}
+                  <div className="fx-hits">
+                    {contentHits.map(({ item, snippet }) => (
+                      <HitRow
+                        key={item.id}
+                        item={item}
+                        snippet={snippet}
+                        highlight={q}
+                        fallback="Match found in this file."
+                        selected={multiSel.has(item.id)}
+                        onSelect={onSelect}
+                        onOpen={openItem}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* ── AI ── Its own category, and it only runs when asked: the
+                  request costs money and uploads picture stills, so it waits
+                  for the button rather than firing on every keystroke. */}
+              <section className="fx-cat-section">
+                <div className="fx-cat-head">
+                  <Icon name="sparkles" className="fx-cat-head-ico" size={13} />
+                  <span className="fx-cat-head-label">AI search</span>
+                  {aiRanFor === q && <span className="fx-cat-head-count">{aiHits.length}</span>}
+                  {aiScanning && <span className="fx-cat-head-spinner" aria-label="Searching with AI" />}
+                </div>
+                {aiError && <p className="fx-hit-error">{aiError}</p>}
+                {/* The pitch is a one-time thing: after consent the section
+                    just shows results, so this only renders while AI search
+                    hasn't been enabled yet. */}
+                {!aiConsented && !aiScanning && (
+                  <div className="fx-ai-cta">
+                    <h4 className="fx-ai-cta-title">
+                      <Icon name="sparkles" className="fx-ai-cta-ico" size={19} filled />
+                      <span>AI Search</span>
+                    </h4>
+                    <p className="fx-ai-cta-desc">
+                      Finds what “{query}” describes — reading the documents and{' '}
+                      <strong>looking at the pictures and video</strong>.
+                    </p>
+                    <button
+                      type="button"
+                      className="fx-ai-run"
+                      onClick={() => (aiConsented ? runAiSearch() : setAiConsentOpen(true))}
+                    >
+                      <span>Enable</span>
+                    </button>
+                  </div>
+                )}
+                {/* The description pass is the one-time cost, so it's named as
+                    such — "reading" a folder for the twentieth time would look
+                    like the search is slow when it's actually the index being
+                    built for files that have never been read. */}
+                {aiScanning && (
+                  <p className="fx-ai-hint">
+                    {aiIndexing
+                      ? `Reading new files — ${aiIndexing.done} of ${aiIndexing.total}. Only happens once per file.`
+                      : 'Searching…'}
+                  </p>
+                )}
+                {/* Between the keystroke and the debounce firing there's a
+                    beat with nothing to show — say so rather than flashing
+                    "nothing matches" at a search that hasn't run yet. */}
+                {aiConsented && !aiScanning && aiAttemptedFor !== q && !aiError && (
+                  <p className="fx-ai-hint">Waiting for you to finish typing…</p>
+                )}
+                {aiRanFor === q && !aiScanning && aiHits.length === 0 && !aiError && (
+                  <p className="fx-ai-hint">Nothing in this folder matches that.</p>
+                )}
+                {aiHits.length > 0 && (
+                  <div className="fx-hits">
+                    {aiHits.map(({ item, snippet }) => (
+                      <HitRow
+                        key={item.id}
+                        item={item}
+                        snippet={snippet}
+                        fallback="Matches your request."
+                        selected={multiSel.has(item.id)}
+                        onSelect={onSelect}
+                        onOpen={openItem}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           ) : grouped ? (
             // Categorize view — one labelled section per category, stacked
@@ -2049,7 +2288,7 @@ export default function FilesWorkspace({
                   <Icon name="upload" className="fx-icon" /><span>Import</span>
                 </button>
                 <div className="fx-tb-sep" />
-                <button className="fx-tb-btn" disabled={!selectedItem} onClick={() => selectedItem && onOpen?.(selectedItem)}>
+                <button className="fx-tb-btn" disabled={!selectedItem} onClick={(e) => selectedItem && openItem(selectedItem, e)}>
                   <Icon name="open" className="fx-icon" /><span>Open</span>
                 </button>
                 <button className="fx-tb-btn" disabled={!selectedItem || !canEdit} onClick={() => selectedItem && requestRename(selectedItem)}>
@@ -2100,7 +2339,7 @@ export default function FilesWorkspace({
               </>
             ) : (
               <>
-                <button className="fx-tb-btn" disabled={!selectedItem} onClick={() => selectedItem && onOpen?.(selectedItem)}>
+                <button className="fx-tb-btn" disabled={!selectedItem} onClick={(e) => selectedItem && openItem(selectedItem, e)}>
                   <Icon name="open" className="fx-icon" /><span>Open</span>
                 </button>
                 <button
@@ -2150,7 +2389,192 @@ export default function FilesWorkspace({
         {bgMorph.node}
       </div>
 
+
+      {aiConsentOpen && (
+        <AiConsentModal onAccept={acceptAiConsent} onCancel={() => setAiConsentOpen(false)} />
+      )}
       {propsItem && <PropertiesModal item={propsItem} onClose={() => setPropsItem(null)} />}
+      {archivePrompt && (
+        <ArchivePrompt
+          item={archivePrompt.item}
+          x={archivePrompt.x}
+          y={archivePrompt.y}
+          onExtract={() => { const it = archivePrompt.item; setArchivePrompt(null); onOpenContent?.(it); }}
+          onClose={() => setArchivePrompt(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── AI search consent ──────────────────────────────────────────────────
+// Shown before the FIRST AI search on a device. Everything else in the Files
+// page is local — this is the one action that sends a matter's contents to a
+// third party, and the people using this app owe their clients an answer about
+// that, so the notice is specific rather than a vague "AI may be used".
+function AiConsentModal({ onAccept, onCancel }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="fx-consent-scrim"
+      role="presentation"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div className="fx-consent" role="dialog" aria-modal="true" aria-labelledby="fx-consent-title">
+        <h3 id="fx-consent-title" className="fx-consent-title">AI search sends this folder’s contents to Anthropic</h3>
+        <p className="fx-consent-lead">
+          Every other part of the Files page works on your machine alone. This one doesn’t —
+          answering “find what I’m describing” means something has to read the files.
+        </p>
+        <ul className="fx-consent-list">
+          <li><strong>Text from documents.</strong> A short excerpt of each readable file (Word, PDF, Excel, text) — about 700 characters.</li>
+          <li><strong>Pictures and video frames.</strong> Downscaled, re-compressed stills. Small, but a person could still recognise a face or an ID card in one.</li>
+          <li><strong>Filenames</strong> of everything in this folder.</li>
+        </ul>
+        <p className="fx-consent-note">
+          <strong>Each file is read once.</strong> What comes back is a one-line description of what
+          the file is, saved on this computer. Later searches are matched against those descriptions,
+          so a document’s text and a photo’s image leave your machine a single time, not on every
+          search. A file you edit is read again.
+        </p>
+        <p className="fx-consent-note">
+          It goes to Anthropic’s business API, whose terms exclude your data from training their
+          models. It is held about 30 days for abuse monitoring, then deleted. Nothing is sent
+          unless you press the button, and nothing leaves for a normal (non-AI) search.
+        </p>
+        <p className="fx-consent-note">
+          Consider whether the client material in this folder is something you may send to a
+          processor outside your firm before continuing.
+        </p>
+        <div className="fx-consent-actions">
+          <button type="button" className="fx-consent-btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="fx-consent-btn is-primary" onClick={onAccept} autoFocus>
+            I understand — search
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Search-hit row ─────────────────────────────────────────────────────
+// One result in the "By content" / "AI" lists: the file on the left, the
+// evidence on the right. `highlight` marks the searched text inside the
+// snippet — only the literal pass passes it, since an AI reason is the model's
+// own words and won't contain the query verbatim.
+function HitRow({ item, snippet, highlight, fallback, selected, onSelect, onOpen }) {
+  return (
+    <div
+      className={`fx-hit${selected ? ' is-selected' : ''}`}
+      data-fx-id={item.id}
+      onClick={(e) => onSelect(item, e)}
+      onDoubleClick={(e) => onOpen(item, e)}
+      role="button"
+      tabIndex={-1}
+    >
+      <span className="fx-hit-thumb"><ItemThumbnail item={item} /></span>
+      <span className="fx-hit-name" title={item.name}>{item.name}</span>
+      <span className="fx-hit-snippet" title={snippet || ''}>
+        {snippet ? <Marked text={snippet} needle={highlight} /> : fallback}
+      </span>
+    </div>
+  );
+}
+
+// Wrap every case-insensitive occurrence of `needle` in <mark>. Split rather
+// than innerHTML: the snippet is file content, so it must never be parsed as
+// markup. A missing/empty needle renders the text unchanged.
+function Marked({ text, needle }) {
+  const q = (needle || '').trim();
+  if (!q) return text;
+  const lower = String(text).toLowerCase();
+  const target = q.toLowerCase();
+  const out = [];
+  let at = 0;
+  for (;;) {
+    const found = lower.indexOf(target, at);
+    if (found < 0) break;
+    if (found > at) out.push(text.slice(at, found));
+    out.push(<mark className="fx-hit-mark" key={found}>{text.slice(found, found + target.length)}</mark>);
+    at = found + target.length;
+  }
+  if (!out.length) return text;
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
+// ── Compressed-file prompt ─────────────────────────────────────────────
+// Opening an archive has no useful default: a .zip unpacks into a sibling
+// folder we then browse, anything else is handed to the OS archiver (see
+// local-folder:extract-archive in main). So the double-click asks, in a card
+// pinned to the pointer rather than a centred dialog — the answer belongs next
+// to the file you just hit.
+function ArchivePrompt({ item, x, y, onExtract, onClose }) {
+  const cardRef = useRef(null);
+  const isZip = /^zip$/i.test(item.ext || '');
+  // Hidden until measured: the card has to know its own size before it can be
+  // flipped away from a screen edge, and a visible jump would be worse.
+  const [pos, setPos] = useState(x == null || y == null ? 'center' : null);
+
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el || x == null || y == null) return;
+    // Clamp in VIEWPORT px (what clientX and getBoundingClientRect speak),
+    // then convert once — under the Settings display-scale the two spaces
+    // differ, and left/top are layout px.
+    const M = 12;                       // keep this much clear of every edge
+    const { width: w, height: h } = el.getBoundingClientRect();
+    let left = x + 8;
+    let top = y + 8;
+    if (left + w > window.innerWidth - M) left = x - w - 8;   // flip left
+    if (top + h > window.innerHeight - M) top = y - h - 8;    // flip above
+    setPos({ left: toLayoutPx(Math.max(M, left)), top: toLayoutPx(Math.max(M, top)) });
+  }, [x, y]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const style = pos === 'center' || pos == null
+    ? undefined
+    : { left: `${pos.left}px`, top: `${pos.top}px` };
+
+  return (
+    <div className="fx-arch-scrim" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={cardRef}
+        className={`fx-arch${pos === 'center' ? ' is-centered' : ''}${pos == null ? ' is-measuring' : ''}`}
+        style={style}
+        role="dialog"
+        aria-label="Compressed file"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="fx-arch-head">
+          <span className="fx-arch-glyph"><ExtGlyph ext={item.ext} /></span>
+          <div className="fx-arch-heading">
+            <h4>Compressed file</h4>
+            <p className="fx-arch-name" title={item.name}>{item.name}</p>
+          </div>
+        </div>
+        <p className="fx-arch-body">
+          {isZip
+            ? 'There’s nothing to preview inside an archive. Extract it to a folder here — you can undo it afterwards.'
+            : 'There’s nothing to preview inside an archive. DocVex can’t unpack this format, so it opens in your system’s archiver.'}
+        </p>
+        <div className="fx-arch-actions">
+          <button type="button" className="fx-arch-btn" onClick={onClose}>Close</button>
+          <button type="button" className="fx-arch-btn is-primary" onClick={onExtract} autoFocus>
+            {isZip ? 'Extract files' : 'Open in archiver'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2162,8 +2586,6 @@ function PropertiesModal({ item, onClose }) {
   const isFolder = item.kind === 'folder';
   const typeLabel = item.binEntry
     ? 'Trash'
-    : item.timelineEntry
-    ? 'Timeline'
     : isFolder
     ? 'Folder'
     : (item.ext ? `${item.ext.toUpperCase()} file` : 'File');

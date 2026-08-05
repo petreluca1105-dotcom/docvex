@@ -90,11 +90,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window:maximized-changed', listener);
     return () => ipcRenderer.removeListener('window:maximized-changed', listener);
   },
-  // Auth-screen window sizing. The signed-out screen pins the window to the
-  // default size + disables resizing ('locked'); on sign-in it restores
-  // resizing and maximizes ('app'); leaving the screen without signing in
-  // just restores resizing ('unlock').
-  setAuthWindowState: (state) => ipcRenderer.send('window:auth-state', state),
+  // Sign-in lives in its own window (main.js openAuthWindow), so the app window
+  // never reshapes itself into a login box. The app window reports which of the
+  // two should be on screen; the sign-in window reports when it's done.
+  //   authAppReady — signed in: reveal the app window, close the sign-in window.
+  //   authRequired — signed out: hide the app window, raise the sign-in window.
+  //   authCompleted — sent BY the sign-in window once a session lands.
+  authAppReady: () => ipcRenderer.send('auth:app-ready'),
+  authRequired: () => ipcRenderer.send('auth:required'),
+  authCompleted: () => ipcRenderer.send('auth:completed'),
 
   // Quit the whole app — used by a deliberate logout to close all windows.
   quitApp: () => ipcRenderer.send('app:quit'),
@@ -145,6 +149,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeDocViewerTab: (id) => ipcRenderer.send('doc-viewer:close', id),
   // "Back to app" from a doc-viewer window — raise the main app window.
   focusMainWindow: () => ipcRenderer.send('window:focus-main'),
+
+  // ── Pre-warmed doc-viewer window ────────────────────────────────────────
+  // A viewer window boots hidden and empty (?warm=1), says it's ready, and is
+  // later handed a file over `doc-viewer:open-file` — that swap is what makes
+  // opening a document instant. It acks once the document has painted so main
+  // can show the window with content already on screen.
+  notifyDocViewerWarmReady: () => ipcRenderer.send('doc-viewer:warm-ready'),
+  notifyDocViewerFilePainted: () => ipcRenderer.send('doc-viewer:file-painted'),
+  onDocViewerOpenFile: (handler) => {
+    const listener = (_, file) => handler(file);
+    ipcRenderer.on('doc-viewer:open-file', listener);
+    return () => ipcRenderer.removeListener('doc-viewer:open-file', listener);
+  },
   // Tray "Extract text" overlay: Esc → main destroys every snip window
   // (instant, no async close teardown).
   snipCancel: () => ipcRenderer.send('snip:cancel'),
@@ -154,6 +171,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Abort a delayed capture that hasn't fired yet (Esc during the countdown)
   // — kills the timer + countdown badges, keeps the panel open.
   snipCancelPending: () => ipcRenderer.send('snip:cancel-pending'),
+
+  // ── System-tray menu (/tray-menu, src/pages/TrayMenu.jsx) ───────────────
+  // The tray menu is drawn by the app, not the OS, so every row hands its
+  // effect back to main: 'open' | 'navigate' | 'external' | 'extract' |
+  // 'check-updates' | 'install-update' | 'restart' | 'quit'. Main runs the
+  // action and hides the menu window.
+  trayMenuAction: (action, payload) => ipcRenderer.send('tray:action', { action, payload }),
+  // The card measures itself and main resizes + re-anchors the window to the
+  // tray icon (sizes are DIP — the renderer multiplies out its zoom factor).
+  trayMenuResize: (size) => ipcRenderer.send('tray:resize', size),
+  trayMenuClose: () => ipcRenderer.send('tray:close'),
+  // App facts the menu shows: { version, isPackaged, platform, updateState }.
+  getTrayMenuState: () => ipcRenderer.invoke('tray:state'),
+  // Fired each time the tray re-opens the (reused) window, with the edge the
+  // tray sits on ({ anchor: 'bottom' | 'top' }) so the card animates from the
+  // right corner. Returns an unsubscribe fn.
+  onTrayMenuOpened: (handler) => {
+    const listener = (_, payload) => handler(payload);
+    ipcRenderer.on('tray:opened', listener);
+    return () => ipcRenderer.removeListener('tray:opened', listener);
+  },
+  // Main → main-window navigation, driven by the tray menu's rows. Payload is
+  // a route path, or '@report' for the Report-a-problem modal. Returns an
+  // unsubscribe fn.
+  onAppNavigate: (handler) => {
+    const listener = (_, dest) => handler(dest);
+    ipcRenderer.on('app:navigate', listener);
+    return () => ipcRenderer.removeListener('app:navigate', listener);
+  },
   // A doc-viewer window reports whether its AI advisor is currently working, so
   // the main app's "Open files" list can show an AI-busy marker on that row.
   setDocViewerAiStatus: (busy) => ipcRenderer.send('doc-viewer:ai-status', busy),
@@ -188,6 +234,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // thumbnails restored from a saved timeline). Awaitable so callers can
   // register BEFORE mounting <img> tiles.
   allowLocalFile: (p) => ipcRenderer.invoke('localfile:allow-file', p),
+  // File extensions this machine has no OS thumbnail provider for (e.g. .docx
+  // with no Office installed). The thumbnail engine stops requesting `?thumb=`
+  // for them instead of re-asking — and logging a 415 — per file.
+  getUnsupportedThumbExts: () => ipcRenderer.invoke('thumb:unsupported-exts'),
 
   // "Opened with DocVex" — standalone files opened through the OS file
   // association (not linked to any project). The Hub lists them; open
@@ -266,6 +316,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // folder) on first use — the SAME folder the hub creates.
     projectDir: (projectId, name, baseDir) => ipcRenderer.invoke('local-folder:project-dir', { projectId, name, baseDir }),
     list: (dir) => ipcRenderer.invoke('local-folder:list', dir),
+    // Filesystem facts for one path (size + created/modified/accessed) —
+    // the Doc Viewer's Metadata tab.
+    stat: (filePath) => ipcRenderer.invoke('local-folder:stat', filePath),
     listRecursive: (dir) => ipcRenderer.invoke('local-folder:list-recursive', dir),
     download: (payload) => ipcRenderer.invoke('local-folder:download', payload),
     // Write raw bytes already held in the renderer (e.g. files the

@@ -14,6 +14,11 @@ import { toLayoutPx } from '../lib/appZoom';
 // or the dropdown rendered with the bare tooltip styling.
 import './useMorphPill.css';
 
+// How long the menu's dismissal fade runs. Must stay in step with the
+// `.is-closing` animation in useMorphPill.css — the JS keeps the pill mounted
+// for exactly this long before tearing the state down.
+const MENU_EXIT_MS = 130;
+
 // Shared morph-pill hook + portal renderer. Powers the same hover-
 // tooltip → right-click-menu interaction the file grid uses on every
 // surface (Cloud-tab FileCard, My-branch LocalFileCard). Lives here
@@ -57,9 +62,18 @@ import './useMorphPill.css';
 // Falsy entries in menuItems are filtered, so callers can write
 // `[itemA, condition && itemB, itemC]` and have the conditional
 // collapse cleanly without per-render branching.
-export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, className = '', placement = 'right', stickyMenu = false }) {
+export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, className = '', placement = 'right', stickyMenu = false, instant = false }) {
   const [pillPos, setPillPos] = useState(null);
   const [menuMode, setMenuMode] = useState(false);
+  // True while the menu is playing its exit animation — still mounted, but on
+  // its way out (see closeMenu / MENU_EXIT_MS).
+  const [closing, setClosing] = useState(false);
+  const exitTimerRef = useRef(null);
+  // Mirror of `closing` for the handlers. They can run from a listener bound in
+  // an earlier render (a document-level right-click handler, say), where the
+  // captured `closing` is stale — and a stale `false` there would skip the
+  // reset and leave the pill stuck in its faded-out, click-through state.
+  const closingRef = useRef(false);
   // Item currently in its confirmation step (or null). Holds the
   // whole item so the panel can read title / message / labels / the
   // onClick to fire when the user confirms. Mutually exclusive with
@@ -92,6 +106,9 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
   // (the menu is portalled, so it never "contains" the trigger). Letting the
   // click handler own the toggle makes a second press close-and-stay-closed.
   const triggerElRef = useRef(null);
+  // Whether pressing the trigger again is what CLOSES the menu (the left-click
+  // toggles) — only then is it exempt from outside-click dismissal.
+  const triggerTogglesRef = useRef(false);
   // Grace timer for menu dismissal. Rather than closing the instant the
   // cursor leaves the pill (which made the menu vanish when crossing the
   // small offset gap from the trigger, or skimming an edge), we wait a beat
@@ -115,6 +132,7 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
   };
   const handleContextMenu = (e) => {
     e.preventDefault();
+    cancelExit();   // right-clicking again mid-fade re-opens rather than half-fading
     // Snapshot the pill's current (tooltip-size) rect BEFORE the
     // menu-mode flip so the FLIP effect below has a "from" size to
     // scale up from. Captured here in the event handler rather than
@@ -124,11 +142,20 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
       oldPillRectRef.current = pillRef.current.getBoundingClientRect();
     }
     triggerElRef.current = e.currentTarget;
+    // A right-click opens the menu; it never TOGGLES it shut, so the trigger
+    // gets no exemption from outside-click dismissal. This matters because a
+    // background menu's trigger is a whole surface (the Files page frame) —
+    // exempting it would swallow the click-away over most of the window.
+    triggerTogglesRef.current = false;
     setPillPos({ x: toLayoutPx(e.clientX), y: toLayoutPx(e.clientY) });
     setMenuMode(true);
   };
-  const closeMenu = () => {
-    if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
+  // Tear the menu down for real. Split out of closeMenu so the dismissal can
+  // be deferred behind an exit animation (see below).
+  const finishClose = () => {
+    if (exitTimerRef.current) { clearTimeout(exitTimerRef.current); exitTimerRef.current = null; }
+    closingRef.current = false;
+    setClosing(false);
     setMenuMode(false);
     setConfirmingItem(null);
     setOpenSubKey(null);
@@ -141,6 +168,28 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
     triggerElRef.current = null;
   };
 
+  // Dismissal is animated: the pill stays mounted with `.is-closing` for one
+  // short fade, THEN the state is torn down. The exit fades opacity only —
+  // never transform — because the pill's position is an inline transform the
+  // FLIP code owns, and a CSS animation would override it mid-flight and fling
+  // the menu to the corner as it left.
+  const closeMenu = () => {
+    if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
+    if (closingRef.current) return;             // already leaving
+    if (!menuMode && !promptOpen) { finishClose(); return; }  // hover pill — nothing to animate
+    closingRef.current = true;
+    setClosing(true);
+    exitTimerRef.current = setTimeout(finishClose, MENU_EXIT_MS);
+  };
+
+  // Re-opening mid-fade cancels it, so a fast right-click → right-click never
+  // leaves a half-faded menu behind.
+  const cancelExit = () => {
+    if (exitTimerRef.current) { clearTimeout(exitTimerRef.current); exitTimerRef.current = null; }
+    closingRef.current = false;
+    setClosing(false);
+  };
+
   // LEFT-click entry into menu mode. Mirrors handleContextMenu (same FLIP
   // snapshot + cursor anchoring) but for a normal click, so a left-click
   // morphs the already-showing hover tooltip straight into the menu — the
@@ -149,11 +198,15 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
   const handleOpenMenu = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (menuMode) { closeMenu(); return; }
+    // Only an OPEN menu toggles shut; one that's already fading gets re-opened
+    // by the same press instead of being left to finish dying.
+    if (menuMode && !closingRef.current) { closeMenu(); return; }
+    cancelExit();
     if (pillRef.current) {
       oldPillRectRef.current = pillRef.current.getBoundingClientRect();
     }
     triggerElRef.current = e.currentTarget;
+    triggerTogglesRef.current = true;   // a second press on it closes the menu
     const rect = e.currentTarget?.getBoundingClientRect?.();
     const x = toLayoutPx(e.clientX || (rect ? rect.left : 0));
     const y = toLayoutPx(e.clientY || (rect ? rect.bottom : 0));
@@ -241,11 +294,14 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
     const onKey = (e) => { if (e.key === 'Escape') closeMenu(); };
     const onDown = (e) => {
       if (pillRef.current && pillRef.current.contains(e.target)) return;
-      // A press on the trigger itself isn't an "outside" click — let the
+      // A press on a TOGGLING trigger isn't an "outside" click — let the
       // trigger's own click handler decide (it toggles the menu closed).
       // Without this, mousedown would close the menu here and the ensuing
       // click would reopen it, so a second press never stuck.
-      if (triggerElRef.current && triggerElRef.current.contains(e.target)) return;
+      // Only for left-click triggers: a right-click-opened menu has no toggle,
+      // and its "trigger" can be a whole page surface, which would otherwise
+      // swallow the click-away across most of the window.
+      if (triggerTogglesRef.current && triggerElRef.current?.contains(e.target)) return;
       closeMenu();
     };
     const onScroll = () => closeMenu();
@@ -288,6 +344,13 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
       pill.style.transform = `translate(${x}px, ${y}px)`;
       void pill.offsetWidth;
       pill.style.transition = '';
+    } else if (instant) {
+      // Re-anchoring an instant menu (a second right-click elsewhere) should
+      // jump, not glide across the screen from where it was.
+      pill.style.transition = 'none';
+      pill.style.transform = `translate(${x}px, ${y}px)`;
+      void pill.offsetWidth;
+      pill.style.transition = '';
     } else {
       pill.style.transform = `translate(${x}px, ${y}px)`;
     }
@@ -310,6 +373,10 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
   useLayoutEffect(() => {
     const oldRect = oldPillRectRef.current;
     if (!oldRect) return;
+    // `instant` opts out of the morph entirely: a menu with no hover tooltip
+    // behind it (the Files background right-click) has nothing to morph FROM,
+    // so the scale-up just reads as the menu taking 220ms to show up.
+    if (instant) { oldPillRectRef.current = null; return; }
     const pill = pillRef.current;
     if (!pill) return;
     const newRect = pill.getBoundingClientRect();
@@ -578,7 +645,7 @@ export function useMorphPill({ hoverContent, menuItems, menuHeader, prompt, clas
   const node = pillPos ? createPortal(
     <div
       ref={pillRef}
-      className={`tooltip project-files-morph-pill${pillClassMod}${multilineMod}${className ? ` ${className}` : ''}`}
+      className={`tooltip project-files-morph-pill${pillClassMod}${multilineMod}${closing ? ' is-closing' : ''}${className ? ` ${className}` : ''}`}
       role={confirmingItem || promptOpen ? 'dialog' : menuMode ? 'menu' : 'tooltip'}
       aria-modal={confirmingItem || promptOpen ? 'true' : undefined}
       // In menu mode, cursor leaving the pill dismisses it after a short

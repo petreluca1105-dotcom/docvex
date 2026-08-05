@@ -6,13 +6,6 @@ import FileThumbnail from './FileThumbnail';
 import Tooltip from './Tooltip';
 import './ExtractionsPanel.css';
 
-// localfile:// URL for an on-disk path (Electron) so the thumbnail resolver can
-// paint a real file preview; web paths have no streamable URL → glyph fallback.
-function localUrlFor(path) {
-  if (!path || String(path).startsWith('web://')) return null;
-  return `localfile://local/${encodeURIComponent(path)}`;
-}
-
 // "Extractions" tab (AI section, next to Mail). Surfaces every "Extract text"
 // snippet collected in the Doc Viewer across all files. A left sidebar lists an
 // "All files" entry plus one row per file that has extracted text; the main
@@ -69,14 +62,9 @@ export default function ExtractionsPanel({ from = '', to = '', arrange = 'date' 
   const fileTiles = useMemo(() => files.map((f) => ({
     ...f,
     descriptor: describeLocalFile({
-      // MIME inferred from the filename — the resolver only generates a
-      // preview for image/video/pdf mimes, so an empty mime would always
-      // fall back to the glyph.
+      // MIME inferred from the filename — the engine classifies by extension
+      // too, but a real MIME keeps the classification exact.
       localFile: { name: f.fileName, mimeType: guessMimeFromName(f.fileName), path: f.filePath },
-      localUrl: localUrlFor(f.filePath),
-      cloud: null,
-      bytesChanged: false,
-      localContentHash: null,
     }),
   })), [files]);
 

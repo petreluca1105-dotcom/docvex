@@ -1,14 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { createPortal } from 'react-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationsContext';
 import { useSelectedProject } from '../context/SelectedProjectContext';
 import { useUpdates } from '../context/UpdatesContext';
-import { openExternal, listDocViewerTabs, onDocViewerTabs, focusDocViewerTab, closeDocViewerTab } from '../lib/platform';
+import { isElectron, isLocalhostWeb, openExternal, listDocViewerTabs, onDocViewerTabs, focusDocViewerTab, closeDocViewerTab } from '../lib/platform';
 import { supabase } from '../lib/supabaseClient';
 import { toLayoutPx } from '../lib/appZoom';
 import { hasNewBrief, onNewsletterChanged } from '../lib/legalFeed';
+import { prefetchProjects } from '../lib/projectListPrefetch';
+import { preloadProjectList } from '../AppRoutes';
 import Tooltip from './Tooltip';
+import ConfirmModal from './ConfirmModal';
+import SecurityInfoModal from './SecurityInfoModal';
 import FileThumbnail from './FileThumbnail';
 import { glyphForFile } from './fileGlyph';
 import './Sidebar.css';
@@ -59,6 +64,15 @@ const AllProjectsIcon = (
     <rect x="14" y="3" width="7" height="7" rx="1.5" />
     <rect x="3" y="14" width="7" height="7" rx="1.5" />
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </svg>
+);
+
+// Globe — the web build's lead rail item: back out to the marketing website.
+const WebsiteIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a13.4 13.4 0 0 1 0 18 13.4 13.4 0 0 1 0-18Z" />
   </svg>
 );
 
@@ -132,6 +146,15 @@ const SignOutIcon = (
 const AdminIcon = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  </svg>
+);
+
+// Info glyph — the Privacy & security notice at the foot of the rail.
+const InfoIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 16v-4" />
+    <path d="M12 8h.01" />
   </svg>
 );
 
@@ -209,13 +232,17 @@ const ProjectSettingsIcon = (
   </svg>
 );
 
-// Double-chevron glyph — the sidebar minimize/expand toggle. Points left to
-// collapse the rail; rotated 180° via CSS when collapsed so it points right
-// (expand).
+// Panel glyph — the sidebar's own show/hide toggle. It draws the thing it acts
+// on: the app window with its left rail filled in. A pair of chevrons said
+// "something moves left" without saying what; this says "this is the sidebar".
+// The filled rail is the state being toggled, and the CSS flips the glyph
+// horizontally when collapsed so the solid column sits where the rail would
+// reappear.
 const CollapseIcon = (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="11 17 6 12 11 7"/>
-    <polyline points="18 17 13 12 18 7"/>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M9 4v16" />
+    <path d="M3.2 6.5h5.6M3.2 10h5.6M3.2 13.5h5.6" strokeWidth="1.4" opacity="0.55" />
   </svg>
 );
 
@@ -228,7 +255,27 @@ const AiIcon = (
 );
 
 export default function Sidebar({ collapsed = false, onToggleCollapse, offstage = false, onHubNav }) {
-  const { session, logout } = useAuth();
+  const { session, signOut } = useAuth();
+  const navigate = useNavigate();
+  // Signing out is one click next to the account row, so it asks first.
+  // Note this uses signOut(), NOT AuthContext's logout() — logout quits the
+  // desktop app entirely, whereas here we want to land on the auth screen so
+  // the user can sign back in (or into another account) straight away.
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  // Privacy & security notice (the ⓘ item in the System section).
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const doSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try { await signOut(); } catch { /* the local session is cleared regardless */ }
+    setConfirmSignOut(false);
+    setSigningOut(false);
+    // Explicit: only the protected routes bounce to /auth on their own, so a
+    // sign-out from a public page (Activity, Versions…) would otherwise leave
+    // the user sitting on it.
+    navigate('/auth', { replace: true });
+  };
   const { unreadCount } = useNotifications();
   const { selectedProjectId, selectedProject } = useSelectedProject();
   const { hasUpdate, currentVersion, latestVersion } = useUpdates();
@@ -313,12 +360,14 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
     // the window title bar now leads the Project section, opening /projects/:id
     // (Overview + Members/Roles/AI/Settings tabs). `end` so it's only active on
     // the exact overview route, not the deeper project surfaces below.
-    {
+    // Electron only — the web demo has no members/roles/settings to manage,
+    // so its Project section starts straight at Files.
+    ...(isElectron ? [{
       to: `/projects/${selectedProjectId}`,
       label: selectedProject?.name || 'Project settings',
       icon: ProjectSettingsIcon,
       end: true,
-    },
+    }] : []),
     { to: '/files', label: 'Files', icon: FilesIcon },
     { to: '/chat', label: 'Chat', icon: ChatIcon },
     { to: '/events', label: 'Timeline', icon: TimelineIcon },
@@ -350,17 +399,33 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
   const systemItems = [
     ...(session ? [{ to: '/settings', label: 'Settings', icon: GearIcon, end: true }] : []),
     ...(session && isAdmin ? [{ to: '/admin', label: 'Admin', icon: AdminIcon, end: true }] : []),
-    ...(import.meta.env.DEV ? [{ to: '/debug', label: 'Debug', icon: BugIcon, end: true }] : []),
+    // Debug: dev builds, plus the BUILT web app when served from localhost
+    // (import.meta.env.DEV is false there but it's still a dev surface).
+    ...((import.meta.env.DEV || isLocalhostWeb) ? [{ to: '/debug', label: 'Debug', icon: BugIcon, end: true }] : []),
   ];
+
+  // Hub warm-up. Both halves are idempotent and de-duped internally (the
+  // dynamic import resolves from the module cache, the fetch reuses its
+  // in-flight promise / fresh snapshot), so firing this on every hover of the
+  // Projects row costs nothing after the first.
+  const warmHub = () => {
+    preloadProjectList();
+    prefetchProjects();
+  };
 
   // Render a single NavLink nav-item from a descriptor (shared by every
   // category group).
-  const renderNavItem = ({ to, label, icon, end, badge, pill, onClick }) => (
+  const renderNavItem = ({ to, label, icon, end, badge, pill, onClick, onWarm }) => (
     <NavLink
       key={to}
       to={to}
       end={end}
       onClick={onClick}
+      // `onWarm` fires on hover / keyboard focus so a route can start loading
+      // its chunk and its data before the click lands. Pointer-enter rather
+      // than mouse-over so it fires once per entry, not per child element.
+      onPointerEnter={onWarm}
+      onFocus={onWarm}
       className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
     >
       <span className="icon">
@@ -500,47 +565,43 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
       inert={offstage || undefined}
     >
       <ul className="sidebar-nav">
-        {/* ── All projects — the Hub launcher as a regular rail tab (the old
-            floating DOCVEX | HUB button above the rail was removed). Opens
-            /projects, where this sidebar slides out of the window so the Hub
-            fills it. The click is intercepted (onHubNav → AppShell) so the
-            current page fades out and the rail starts sliding BEFORE the
-            route swaps; plain navigation still works as the fallback. */}
-        {session && (
+        {/* Web build only: a lead row linking back to the marketing website
+            (served at the site root on the same origin). The desktop build has
+            no lead row — its Projects launcher moved down into Personal. */}
+        {!isElectron ? (
           <li className="sidebar-cat sidebar-cat--lead">
             <div className="sidebar-cat-items">
-              {renderNavItem({
-                to: '/projects',
-                label: 'Projects',
-                icon: AllProjectsIcon,
-                end: true,
-                onClick: onHubNav ? (e) => { e.preventDefault(); onHubNav(); } : undefined,
-              })}
+              <a className="nav-item" href="/">
+                <span className="icon">{WebsiteIcon}</span>
+                <span className="label nav-label-row">Website</span>
+              </a>
             </div>
           </li>
-        )}
+        ) : null}
 
         {/* ── Personal — the user's own feeds. ── */}
         <li className="sidebar-cat">
           <span className="sidebar-cat-label">
             <span className="sidebar-cat-text">Personal</span>
-            {/* Minimize/expand toggle — sits in line with the Personal divider,
-                pushed to the far right by the hairline rule. When the rail is
-                collapsed it's the only thing left in this row (centered) and
-                its chevron flips to point right. */}
-            <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-              <button
-                type="button"
-                className="sidebar-collapse-btn"
-                onClick={onToggleCollapse}
-                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                aria-pressed={collapsed}
-              >
-                {CollapseIcon}
-              </button>
-            </Tooltip>
           </span>
           <div className="sidebar-cat-items">
+            {/* Projects (the Hub launcher) leads the Personal section — it used
+                to sit above the divider as its own lead row. Opens /projects,
+                where this sidebar slides out of the window so the Hub fills it;
+                the click is intercepted (onHubNav → AppShell) so the current
+                page fades and the rail starts sliding BEFORE the route swaps,
+                with plain navigation as the fallback. */}
+            {isElectron && session && renderNavItem({
+              to: '/projects',
+              label: 'Projects',
+              icon: AllProjectsIcon,
+              end: true,
+              onClick: onHubNav ? (e) => { e.preventDefault(); onHubNav(); } : undefined,
+              // Hovering the row loads the Hub's chunk and starts its project
+              // query, so by the time the click lands the page can mount with
+              // its rows already in hand instead of on an empty frame.
+              onWarm: warmHub,
+            })}
             {personalItems.map(renderNavItem)}
           </div>
         </li>
@@ -626,6 +687,40 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
                 <span className="label">Docs</span>
               </button>
             </Tooltip>
+            {/* Privacy & security — where the files live, what reaches the AI
+                providers, which models those are, and the legal pages. A firm
+                has to be able to answer this for its clients, so it's one
+                click from anywhere rather than buried in Settings. */}
+            <Tooltip content="Privacy, security and AI">
+              <button
+                type="button"
+                className="nav-item"
+                onClick={() => setSecurityOpen(true)}
+              >
+                <span className="icon">{InfoIcon}</span>
+                <span className="label">Privacy &amp; security</span>
+              </button>
+            </Tooltip>
+            {/* Collapse / expand the rail. It used to ride on the Personal
+                divider at the top; it lives here now, last item in the rail,
+                behind its own hairline — a control ABOUT the sidebar rather
+                than a place to navigate to, so it's set apart from the rows
+                above it. The chevron flips to point right when collapsed. */}
+            <span className="sidebar-rail-rule" aria-hidden="true" />
+            <Tooltip content={collapsed ? 'Widen the sidebar back out' : 'Shrink the sidebar to icons'}>
+              <button
+                type="button"
+                className="nav-item sidebar-collapse-item"
+                onClick={onToggleCollapse}
+                aria-label={collapsed ? 'Widen sidebar' : 'Shrink sidebar to icons'}
+                aria-pressed={collapsed}
+              >
+                <span className="icon">{CollapseIcon}</span>
+                {/* Names the RESULT, not the mechanic: the rail never goes
+                    away, it narrows to its icons. "Collapse" read as "hide". */}
+                <span className="label">{collapsed ? 'Widen sidebar' : 'Narrow sidebar'}</span>
+              </button>
+            </Tooltip>
           </div>
         </li>
       </ul>
@@ -658,7 +753,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
               <button
                 type="button"
                 className="sidebar-account-signout"
-                onClick={logout}
+                onClick={() => setConfirmSignOut(true)}
                 aria-label="Sign out"
               >
                 {SignOutIcon}
@@ -672,6 +767,31 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
           </NavLink>
         )}
       </div>
+
+      {/* Sign-out confirmation. PORTALLED to <body>: the rail sets
+          `isolation: isolate` + a backdrop-filter and animates a transform, all
+          of which would contain a position:fixed child and clip the modal to
+          the 192px rail. Confirming ends the session and lands on /auth. */}
+      {createPortal(
+        <ConfirmModal
+          open={confirmSignOut}
+          title="Sign out of DocVex?"
+          message="You'll be taken to the sign-in screen. Your files stay on this computer — signing back in picks up where you left off."
+          confirmLabel={signingOut ? 'Signing out…' : 'Sign out'}
+          cancelLabel="Stay signed in"
+          destructive
+          onConfirm={doSignOut}
+          onCancel={() => { if (!signingOut) setConfirmSignOut(false); }}
+        />,
+        document.body,
+      )}
+      {/* Portalled for the same reason as the sign-out confirm above: the rail
+          sets `isolation: isolate` + a backdrop-filter, which would trap a
+          fixed-position child inside its 192px column. */}
+      {securityOpen && createPortal(
+        <SecurityInfoModal onClose={() => setSecurityOpen(false)} />,
+        document.body,
+      )}
     </nav>
   );
 }

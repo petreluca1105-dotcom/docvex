@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, Tray, ipcMain, shell, autoUpdater, dialog, pr
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import started from 'electron-squirrel-startup';
 import { updateElectronApp } from 'update-electron-app';
@@ -163,6 +164,22 @@ app.on('open-file', (event, filePath) => {
   else pendingExternalOpens.push(filePath);
 });
 
+// Windows: disable Chromium's native window-occlusion tracking. With it on
+// (the default), fully-covered windows are marked hidden and their renderers
+// suspended — and hovering the app's TASKBAR icon makes DWM request a live
+// thumbnail of EVERY window at once, so Chromium flips them all back to
+// visible simultaneously: every doc-viewer window re-rasterizes its whole
+// surface through the one shared GPU process, and the visibility state
+// thrashes for as long as the preview flyout is open. With several viewer
+// windows open this stalls the whole desktop (see electron/electron#25291).
+// Disabling the feature keeps background windows composited normally, so
+// taskbar previews are cheap. Trade-off: a fully-occluded (but not
+// minimized) window no longer gets the "hidden" throttle — acceptable, as
+// idle DocVex windows render static content. Must run before app 'ready'.
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+}
+
 // Squirrel-based in-place auto-update only works on Windows for this app.
 // The macOS build is NOT Developer-ID signed (forge.config.js ad-hoc signs
 // it), so Squirrel.Mac's autoUpdater refuses to apply updates — it emits an
@@ -195,6 +212,18 @@ if (app.isPackaged && AUTO_UPDATE_SUPPORTED) {
 const __userDataBeforeRename = app.getPath('userData');
 app.setName('DocVex');
 app.setPath('userData', __userDataBeforeRename);
+// Windows identity. Without an explicit AppUserModelID every window inherits
+// the host process's (electron.exe's) identity, which is what puts "Electron"
+// and the Electron logo at the head of the taskbar's right-click menu and on
+// toast notifications. Setting it ties our windows to a DocVex identity that
+// the Squirrel-installed shortcut also carries.
+//
+// Caveat worth knowing in dev: under `electron-forge start` the running binary
+// really is electron.exe, and Windows reads the jump-list header's label and
+// icon from the executable's own resources unless a Start-menu shortcut with a
+// matching AppUserModelID exists. So the dev taskbar may still say "Electron";
+// the packaged build (DocVex.exe, own icon + FileDescription) does not.
+if (process.platform === 'win32') app.setAppUserModelId('com.docvex.app');
 
 // Register custom URL scheme for OAuth callbacks.
 // In dev mode (`electron-forge start`), process.defaultApp is true and we must
@@ -230,33 +259,91 @@ let mainWindow = null;
 let appTray = null;
 
 // ── Multi-monitor / window-state persistence ───────────────────────────────
-// Remember where the main window last lived (which monitor + size) so the next
-// launch reopens it on the same display, and pin every SECONDARY window (doc
-// viewer, file viewers) to whichever monitor the main window is currently on.
-// State is a tiny JSON file in userData. All of `screen` is only valid after
-// the app is ready, but these run at window-creation time, so that holds.
+// Remember where each KIND of window last lived (which monitor, what size,
+// whether it was maximized) so the next one opens the same way, and pin every
+// secondary window to whichever monitor the main window is currently on.
+// State is a tiny JSON file in userData, keyed by role:
+//   { main: {x,y,width,height,maximized,fullscreen}, docViewer: {…} }
+// Resizing a doc-viewer window therefore sets the size for the NEXT document
+// you open, exactly like the main window. (A pre-roles file held the main
+// window's rect at the top level — readWindowState still accepts that shape.)
+// All of `screen` is only valid after the app is ready, but these run at
+// window-creation time, so that holds.
 const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
 
-function readWindowState() {
-  try {
-    const s = JSON.parse(fs.readFileSync(windowStateFile(), 'utf8'));
-    if (s && Number.isFinite(s.width) && Number.isFinite(s.height)) return s;
-  } catch { /* no/invalid state — fall back to defaults */ }
-  return null;
+function isUsableRect(s) {
+  return !!s && Number.isFinite(s.width) && Number.isFinite(s.height);
 }
 
-function saveWindowState(win) {
+function readWindowStateFile() {
+  try {
+    const s = JSON.parse(fs.readFileSync(windowStateFile(), 'utf8'));
+    if (!s || typeof s !== 'object') return {};
+    // Legacy flat shape → treat it as the main window's state.
+    if (isUsableRect(s) && !s.main && !s.docViewer) return { main: s };
+    return s;
+  } catch { /* no/invalid state — fall back to defaults */ }
+  return {};
+}
+
+function readWindowState(role = 'main') {
+  const state = readWindowStateFile()[role];
+  return isUsableRect(state) ? state : null;
+}
+
+function saveWindowState(win, role = 'main') {
   if (!win || win.isDestroyed()) return;
   try {
     // getNormalBounds() is the restored (non-maximized) rect, so we can reopen
     // at the user's chosen size even when they quit while maximized.
     const b = win.getNormalBounds ? win.getNormalBounds() : win.getBounds();
-    const state = {
-      x: b.x, y: b.y, width: b.width, height: b.height,
-      maximized: win.isMaximized(), fullscreen: win.isFullScreen(),
-    };
-    fs.writeFileSync(windowStateFile(), JSON.stringify(state));
+    const all = readWindowStateFile();
+    // A minimized window reports isMaximized() === false and a stale rect —
+    // the OS has already collapsed it. So while minimized we keep whatever was
+    // last recorded for those fields and only flip the `minimized` flag;
+    // otherwise "maximize, minimize, quit" would come back un-maximized.
+    const minimized = win.isMinimized();
+    const prev = all[role] || null;
+    all[role] = minimized && prev
+      ? { ...prev, minimized: true }
+      : {
+        x: b.x, y: b.y, width: b.width, height: b.height,
+        maximized: win.isMaximized(), fullscreen: win.isFullScreen(),
+        minimized,
+      };
+    fs.writeFileSync(windowStateFile(), JSON.stringify(all));
   } catch { /* best-effort */ }
+}
+
+// Persist a window's size + position (i.e. which monitor) under `role`.
+// Debounced on move/resize so a force-quit still leaves a recent state, and
+// flushed on close.
+function trackWindowState(win, role) {
+  let saveTimer = null;
+  const schedule = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveWindowState(win, role), 400);
+  };
+  win.on('resize', schedule);
+  win.on('move', schedule);
+  win.on('maximize', schedule);
+  win.on('unmaximize', schedule);
+  win.on('minimize', schedule);
+  win.on('restore', schedule);
+  win.on('close', () => { clearTimeout(saveTimer); saveWindowState(win, role); });
+}
+
+// Put a freshly-created window into the maximized / fullscreen / minimized mode
+// it was last left in. `saved` is a readWindowState() record (bounds are applied
+// at creation time, not here).
+function applySavedWindowMode(win, saved, { allowMinimized = false } = {}) {
+  if (!win || win.isDestroyed() || !saved) return;
+  if (saved.maximized) win.maximize();
+  if (saved.fullscreen) win.setFullScreen(true);
+  // Only the main window honours this: a doc-viewer window is created BECAUSE
+  // the user asked to see a document, so opening it minimized would swallow the
+  // very action that spawned it.
+  if (allowMinimized && saved.minimized) win.minimize();
 }
 
 // A saved rect is only usable if it still overlaps a CONNECTED display — a
@@ -392,16 +479,20 @@ function wireDevtoolsShortcuts(win) {
 // so the doc-viewer window doesn't pop its own devtools.
 // Default app-window size — used as the launch fallback for the signed-in app.
 const DEFAULT_WINDOW_SIZE = { width: 1200, height: 750 };
-// Fixed size the signed-out (auth) screen pins the window to — narrower than the
-// app default so the login screen reads as a focused, compact window. Kept >720px
-// wide so the split brand panel stays visible (its hide breakpoint in
+// Fixed size the signed-out (auth) screen pins the window to — its own compact,
+// centred, non-resizable window rather than the full app frame. Kept >720px wide
+// so the split brand panel stays visible (its hide breakpoint in
 // authCabinet.css is tuned to match).
 // White (form) side is double the fixed 368px blue panel → 736px, so the window
-// is 368 + 736 = 1104px wide.
-const AUTH_WINDOW_SIZE = { width: 1104, height: 750 };
+// is 368 + 736 = 1104px wide. The height is sized to the tallest step of the
+// sign-up flow; the form column scrolls if a translation makes it taller.
+const AUTH_WINDOW_SIZE = { width: 1104, height: 640 };
 
-function createAppWindow({ query, openDevtools = false, bounds = null } = {}) {
+function createAppWindow({ query, openDevtools = false, bounds = null, show = true } = {}) {
   const win = new BrowserWindow({
+    // `show: false` backs the pre-warmed doc-viewer window — it boots fully but
+    // stays invisible until a file is handed to it.
+    show,
     // `bounds` pins size + monitor: restored main-window state on launch, or a
     // rect centered on the main window's display for secondary windows. Without
     // it Electron centers a default-sized window on the primary display.
@@ -491,26 +582,166 @@ function createAppWindow({ query, openDevtools = false, bounds = null } = {}) {
   return win;
 }
 
+// The app window is created HIDDEN and revealed once its renderer reports an
+// authenticated session (`auth:app-ready`). Signed out, it stays hidden and the
+// dedicated sign-in window opens in front of it instead — the app window is the
+// app, and it no longer shrinks itself into a login box.
+//   • `pendingMainReveal` holds the saved window mode until that reveal, because
+//     maximize() SHOWS a window on Windows and would defeat the point.
+//   • `mainRevealTimer` is the backstop: a renderer that never reports (old
+//     bundle, crash before mount) must not leave a headless process running.
+let pendingMainReveal = null;
+let mainRevealTimer = null;
+const MAIN_REVEAL_FALLBACK_MS = 8000;
+
+function revealMainWindow() {
+  clearTimeout(mainRevealTimer);
+  mainRevealTimer = null;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const mode = pendingMainReveal;
+  pendingMainReveal = null;
+  // Order matters: maximize() shows the window on Windows, so it goes first;
+  // minimize() must come last or the other two would undo it.
+  if (mode?.maximized) mainWindow.maximize();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mode?.fullscreen) mainWindow.setFullScreen(true);
+  if (mode?.minimized) mainWindow.minimize();
+  else mainWindow.focus();
+}
+
 const createWindow = () => {
   // Reopen on the same monitor + size as last time, when that display is still
   // connected (otherwise let Electron center on the primary display).
   const saved = readWindowState();
   const bounds = saved && boundsAreOnScreen(saved) ? saved : null;
-  mainWindow = createAppWindow({ openDevtools: true, bounds });
-  // Restore the maximized / fullscreen state the user left it in.
-  if (saved?.maximized) mainWindow.maximize();
-  if (saved?.fullscreen) mainWindow.setFullScreen(true);
-  // Persist size + position (i.e. which monitor) for next launch. Debounced on
-  // move/resize so a force-quit still leaves a recent state; flushed on close.
-  let saveTimer = null;
-  const scheduleSave = () => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveWindowState(mainWindow), 400);
-  };
-  mainWindow.on('resize', scheduleSave);
-  mainWindow.on('move', scheduleSave);
-  mainWindow.on('close', () => { clearTimeout(saveTimer); saveWindowState(mainWindow); });
+  mainWindow = createAppWindow({ openDevtools: true, bounds, show: false });
+  // Reopen in the mode it was closed in — maximized, fullscreen, or minimized
+  // to the taskbar. (Minimized is deliberate: "reopen how I left it" includes
+  // that. The tray icon and taskbar button both bring it back.) Applied at
+  // reveal, not now.
+  pendingMainReveal = saved;
+  clearTimeout(mainRevealTimer);
+  mainRevealTimer = setTimeout(revealMainWindow, MAIN_REVEAL_FALLBACK_MS);
+  // Persist size + position (i.e. which monitor) for next launch.
+  trackWindowState(mainWindow, 'main');
+  // Once the app itself is up and idle, pre-boot the doc-viewer window so the
+  // first file opens instantly. Deliberately late: warming during startup
+  // would compete with the main window's own first paint.
+  mainWindow.webContents.once('did-finish-load', () => scheduleWarmDocViewer(4000));
 };
+
+// ── Dedicated sign-in window ───────────────────────────────────────────────
+// Signing in gets its own window rather than reshaping the app window. It's
+// the same renderer booted with `?authWindow=1`, pinned to the Cabinet's size
+// and non-resizable, centred on whichever display the app window is on.
+let authWindow = null;
+// Set while the sign-in window is closing BECAUSE sign-in succeeded, so its
+// 'closed' handler hands over to the app instead of quitting.
+let authHandedOver = false;
+
+function openAuthWindow() {
+  if (authWindow && !authWindow.isDestroyed()) {
+    if (authWindow.isMinimized()) authWindow.restore();
+    authWindow.show();
+    authWindow.focus();
+    return authWindow;
+  }
+  const bounds = centeredOnDisplayOf(mainWindow, AUTH_WINDOW_SIZE.width, AUTH_WINDOW_SIZE.height);
+  const win = createAppWindow({ query: { authWindow: '1' }, bounds });
+  // A login box has one size. (The app-wide 900×600 floor is below the Cabinet,
+  // so nothing needs relaxing here.)
+  win.setResizable(false);
+  win.setMaximizable(false);
+  win.setFullScreenable(false);
+  authWindow = win;
+  authHandedOver = false;
+  win.on('closed', () => {
+    const handedOver = authHandedOver;
+    authWindow = null;
+    authHandedOver = false;
+    // Closing the sign-in window without signing in ends the attempt. With the
+    // app window still hidden behind it, leaving the process running would look
+    // exactly like a hang — so quit, the way any login window does.
+    if (handedOver) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) app.quit();
+  });
+  return win;
+}
+
+// Deliver a `docvex://` deep link (the Google OAuth callback) to the window
+// that's waiting for it. While the sign-in window is up it's the one that
+// started the flow, so it must be the one to run exchangeCodeForSession —
+// sending the code to the hidden app window instead would leave the sign-in
+// screen sitting there having apparently done nothing.
+// It goes to BOTH the sign-in window and the app window, not just one.
+//
+// Which of them can actually complete the exchange depends on which one holds
+// the PKCE code verifier, and that's whichever one started the flow — not
+// something the main process can know. Sending to one and guessing wrong loses
+// the sign-in silently. Sending to both is safe: the verifier is consumed by
+// the first successful exchange, so the other window's attempt just returns an
+// error, and either outcome finishes the flow —
+//   • sign-in window wins → it reports `auth:completed`;
+//   • app window wins     → its gate reports `auth:app-ready`, which reveals
+//                           the app and closes the sign-in window anyway.
+// A window still loading gets the URL on `did-finish-load` instead of dropping
+// it on the floor.
+function sendDeepLink(url) {
+  const targets = [authWindow, mainWindow].filter((w) => w && !w.isDestroyed());
+  for (const win of targets) {
+    if (win.webContents.isLoading()) {
+      win.webContents.once('did-finish-load', () => {
+        if (!win.isDestroyed()) win.webContents.send('oauth:callback-url', url);
+      });
+    } else {
+      win.webContents.send('oauth:callback-url', url);
+    }
+  }
+}
+
+function closeAuthWindow() {
+  if (!authWindow || authWindow.isDestroyed()) return;
+  authHandedOver = true;
+  authWindow.close();
+  authWindow = null;
+}
+
+// The app window's renderer resolved its session.
+//   'app-ready' → signed in: reveal the app window, dismiss any sign-in window.
+//   'required'  → signed out: hide the app window and put the sign-in window up.
+ipcMain.on('auth:app-ready', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (w !== mainWindow) return;
+  closeAuthWindow();
+  revealMainWindow();
+});
+
+ipcMain.on('auth:required', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (w !== mainWindow) return;
+  clearTimeout(mainRevealTimer);
+  mainRevealTimer = null;
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) mainWindow.hide();
+  openAuthWindow();
+});
+
+// The sign-in window got a session. The app window booted signed-out, so it's
+// reloaded rather than messaged: a reload remounts the whole React tree against
+// the session now sitting in localStorage, and there's no in-flight state to
+// lose at sign-in time. It reveals itself again via `auth:app-ready`.
+ipcMain.on('auth:completed', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (authWindow && w !== authWindow) return;
+  authHandedOver = true;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+  } else {
+    clearTimeout(mainRevealTimer);
+    mainRevealTimer = setTimeout(revealMainWindow, MAIN_REVEAL_FALLBACK_MS);
+    mainWindow.webContents.reload();
+  }
+  closeAuthWindow();
+});
 
 // Document-viewer window — opened from the Files page when a file is double-
 // clicked. Each file gets its OWN dedicated window (one file = one window); the
@@ -558,6 +789,13 @@ function createDocViewerWindow(file) {
       }
     }
   }
+  // A warm viewer is already booted and idle — hand it the file instead of
+  // paying for a whole new window + renderer + bundle parse (see below).
+  if (warmViewerReady && warmViewer && !warmViewer.isDestroyed()) {
+    return adoptWarmDocViewer(file);
+  }
+  // Cold path: no warm window available (first open of the session, or two
+  // files opened back to back). Build one the slow way and warm the next.
   const query = { docViewer: '1' };
   if (file?.path) query.path = file.path;
   if (file?.name) query.name = file.name;
@@ -565,11 +803,52 @@ function createDocViewerWindow(file) {
   // A freshly-created "New file" opens with the AI generator armed so the
   // advisor prompts for what to put in the (currently empty) document.
   if (file?.generate) query.generate = '1';
-  // Open on the same monitor as the base app, maximized to fill the screen.
-  const win = createAppWindow({ query, bounds: centeredOnDisplayOf(mainWindow, 1200, 800) });
-  win.maximize();
-  // Track it for the main app's "Open files" sidebar section, and drop it from
-  // the registry when the window closes.
+  const { restorable, bounds } = docViewerBounds();
+  const win = createAppWindow({ query, bounds });
+  applyViewerWindowState(win, restorable);
+  registerDocViewerWindow(win, file);
+  scheduleWarmDocViewer();
+  return win;
+}
+
+// ── Instant open: a pre-warmed doc-viewer window ───────────────────────────
+// Opening a file used to cost a full window boot — new renderer process, the
+// app bundle parsed and executed, every provider mounted, the lazy /doc-viewer
+// chunk (pdf.js, docx-preview, the AI panel) fetched — before anything could
+// paint. That's the second or two between double-clicking a file and seeing it.
+//
+// So the app keeps ONE viewer window pre-booted and hidden, sized exactly like
+// the next one will be. Opening a file sends it the file over IPC, the already-
+// mounted React tree swaps its state, and the window is shown the moment it
+// reports the new document painted — no process spawn, no bundle parse, no
+// chunk fetch on the critical path. A replacement is warmed in the background
+// straight afterwards, so back-to-back opens stay fast too.
+//
+// The warm window is NOT in `docViewerWindows` (the sidebar's open-files list)
+// and must never keep the app alive on its own — see the last-window watcher.
+let warmViewer = null;
+let warmViewerReady = false;
+let warmViewerTimer = null;
+
+// Where the next viewer window should open: the size/monitor the last one was
+// left at, else centered on the main window's display.
+function docViewerBounds() {
+  const saved = readWindowState('docViewer');
+  const restorable = saved && boundsAreOnScreen(saved) ? saved : null;
+  return { restorable, bounds: restorable || centeredOnDisplayOf(mainWindow, 1200, 800) };
+}
+
+// Maximize / fullscreen to match what the user left behind. First ever open
+// (no saved state) maximizes, which is the long-standing behaviour.
+function applyViewerWindowState(win, restorable) {
+  if (win.isDestroyed()) return;
+  if (!restorable || restorable.maximized) win.maximize();
+  if (restorable?.fullscreen) win.setFullScreen(true);
+  trackWindowState(win, 'docViewer');
+}
+
+// Enter a viewer window into the open-files registry + broadcast it.
+function registerDocViewerWindow(win, file) {
   docViewerWindows.set(win.id, {
     id: win.id,
     name: file?.name || 'Document',
@@ -584,8 +863,84 @@ function createDocViewerWindow(file) {
     docViewerWindows.delete(win.id);
     broadcastDocViewerTabs();
   });
+}
+
+function scheduleWarmDocViewer(delayMs = 1200) {
+  clearTimeout(warmViewerTimer);
+  warmViewerTimer = setTimeout(() => {
+    if (warmViewer && !warmViewer.isDestroyed()) return;
+    // Don't warm while the app is shutting down or before there's a main
+    // window to take bounds from.
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const { restorable, bounds } = docViewerBounds();
+    // `warm=1` tells the renderer to boot the viewer shell with no document
+    // and report readiness instead of trying to open a file.
+    const win = createAppWindow({ query: { docViewer: '1', warm: '1' }, bounds, show: false });
+    // Lay it out at its eventual size WITHOUT maximize(): on Windows maximize()
+    // also SHOWS the window, which is what used to make an empty viewer pop up
+    // next to the real one. The maximized state is applied at reveal instead.
+    if (!restorable || restorable.maximized) {
+      try {
+        const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+        win.setBounds(wa);
+      } catch { /* keep the bounds it was created with */ }
+    }
+    warmViewer = win;
+    warmViewerReady = false;
+    // Safety net: a warm window must never be visible. Anything that shows it
+    // (an OS quirk, a stray focus call) puts it straight back to hidden — by
+    // adoption time `warmViewer` is already null, so real windows are unaffected.
+    win.on('show', () => {
+      if (warmViewer === win && !win.isDestroyed()) win.hide();
+    });
+    win.on('closed', () => {
+      if (warmViewer === win) { warmViewer = null; warmViewerReady = false; }
+    });
+  }, delayMs);
+}
+
+// The warm renderer finished mounting — it can accept a file now.
+ipcMain.on('doc-viewer:warm-ready', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win && win === warmViewer) warmViewerReady = true;
+});
+
+// The adopted renderer paints its document — kept as a no-op so an older
+// renderer (or a reload racing an update) sending it isn't an unhandled
+// channel. The window no longer waits on it: adoptWarmDocViewer shows the
+// window straight away and the renderer covers the gap with a spinner.
+ipcMain.on('doc-viewer:file-painted', () => {});
+
+// Hand the warm window a file and promote it to a real viewer window.
+function adoptWarmDocViewer(file) {
+  const win = warmViewer;
+  // Clearing this FIRST also disarms the "hide if shown" guard above, so the
+  // window is free to become visible now that it owns a document.
+  warmViewer = null;
+  warmViewerReady = false;
+  const { restorable, bounds } = docViewerBounds();
+  const wantsMaximized = !restorable || restorable.maximized;
+  if (!wantsMaximized && restorable) win.setBounds(bounds);
+  trackWindowState(win, 'docViewer');
+  registerDocViewerWindow(win, file);
+  win.webContents.send('doc-viewer:open-file', file);
+
+  // Show it NOW. This used to wait for the renderer's "document painted" ack
+  // (with a 600ms backstop) so the window would appear fully laid out — but
+  // that put the whole decode of a heavy PDF between the double-click and any
+  // visible response, which reads as the app ignoring you. The window opens
+  // immediately instead and the renderer paints a spinner in the document
+  // pane until the file is ready (see `docLoading` in DocViewer.jsx).
+  if (win.isDestroyed()) return win;
+  if (wantsMaximized) win.maximize();   // also shows it, on Windows
+  win.show();
+  if (restorable?.fullscreen) win.setFullScreen(true);
+  win.focus();
+  // Line up the next one.
+  scheduleWarmDocViewer();
   return win;
 }
+
 ipcMain.on('window:open-doc-viewer', (_, file) => createDocViewerWindow(file));
 
 // ── Tray "Extract text" — Snipping-Tool-style capture ─────────────────────
@@ -867,6 +1222,324 @@ ipcMain.on('snip:cancel', () => {
   snipWindows = [];
 });
 
+// ── System-tray menu (app-drawn) ───────────────────────────────────────────
+// Clicking the tray icon opens /tray-menu (src/pages/TrayMenu.jsx) instead of
+// a native Menu: the app's themed card, a live status header, and a recent-
+// projects flyout can't be expressed in a Menu template. It rides in one
+// reusable transparent, frameless, always-on-top window that:
+//   • is anchored to the tray icon's bounds (clamped to the work area, so it
+//     never sits under the taskbar or off a display edge),
+//   • is sized by the RENDERER — the card measures itself and sends
+//     `tray:resize`, so the window is exactly as tall as the menu and only
+//     grows wider while the recent-projects flyout is open,
+//   • hides on blur / Esc / after any action, and toggles on tray click.
+// Every row's effect comes back over `tray:action`, handled at the bottom.
+let trayMenuWindow = null;
+// The window hides on blur, and clicking the tray icon blurs it first — so a
+// click that was meant to CLOSE the menu would immediately reopen it. Ignore
+// tray clicks that land right after a hide.
+let trayMenuHiddenAt = 0;
+// Where the tray sits, so the card animates from the right corner and clamps
+// its flyout on the correct side ('bottom' = Windows taskbar, 'top' = macOS
+// menu bar).
+let trayMenuAnchor = 'bottom';
+const TRAY_MENU_MARGIN = 8;
+// Pre-measurement fallback only — the renderer reports the real size (card +
+// the permanent flyout apron) as soon as it has laid the menu out, and the
+// window stays hidden until then so it can never appear clipped.
+const TRAY_MENU_DEFAULT = { width: 435, height: 460 };
+// Set while a freshly created menu window waits for its first size report.
+let trayMenuPendingReveal = null;
+// Coalesces a BURST of measurements into one reveal. The renderer re-measures
+// several times as the card settles (the recent-projects list, its relative
+// timestamps, the updater row), and each measurement used to move the window —
+// which on a transparent always-on-top window replays the OS show animation.
+// That's what read as the menu fading in twice.
+let trayMenuRevealTimer = null;
+const TRAY_MEASURE_SETTLE_MS = 40;
+// Last size the renderer reported. Reveal positions from THIS rather than
+// win.getBounds(): a setBounds applied while the window is still hidden isn't
+// always reflected back on Windows, and reading a stale (default) height there
+// is what left the menu clipped at the top on first open.
+let trayMenuSize = null;
+
+// Place the (already sized) menu next to the tray icon: right edge aligned to
+// the icon, above the taskbar when the tray is at the bottom, below the menu
+// bar when it's at the top. Falls back to the cursor's display when the
+// platform gives no tray bounds.
+function positionTrayMenu(width, height) {
+  const point = screen.getCursorScreenPoint();
+  let trayBounds = null;
+  try {
+    const b = appTray?.getBounds?.();
+    if (b && b.width > 0 && b.height > 0) trayBounds = b;
+  } catch { /* no tray bounds on this platform — cursor fallback below */ }
+  const display = trayBounds
+    ? screen.getDisplayMatching(trayBounds)
+    : screen.getDisplayNearestPoint(point);
+  const wa = display.workArea;
+
+  const anchorX = trayBounds ? trayBounds.x + trayBounds.width / 2 : point.x;
+  // The card hugs the window's RIGHT edge (the flyout opens into the space on
+  // the left), so anchor the right edge just past the icon's centre.
+  let x = Math.round(anchorX - width + 24);
+  x = Math.min(Math.max(x, wa.x + TRAY_MENU_MARGIN), wa.x + wa.width - width - TRAY_MENU_MARGIN);
+
+  const atBottom = trayBounds ? trayBounds.y + trayBounds.height / 2 > wa.y + wa.height / 2 : true;
+  trayMenuAnchor = atBottom ? 'bottom' : 'top';
+  let y = atBottom
+    ? wa.y + wa.height - height - TRAY_MENU_MARGIN
+    : wa.y + TRAY_MENU_MARGIN;
+  y = Math.min(Math.max(y, wa.y + TRAY_MENU_MARGIN), Math.max(wa.y, wa.y + wa.height - height - TRAY_MENU_MARGIN));
+
+  return { x, y, width, height };
+}
+
+function createTrayMenuWindow() {
+  const win = new BrowserWindow({
+    ...positionTrayMenu(TRAY_MENU_DEFAULT.width, TRAY_MENU_DEFAULT.height),
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,          // the card paints its own shadow
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+  // Above the taskbar, like the native tray menu it replaces.
+  win.setAlwaysOnTop(true, 'pop-up-menu');
+  const wcId = win.webContents.id;
+  appWindowContentIds.add(wcId);
+  win.removeMenu();
+  const query = { trayMenu: '1' };
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    win.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}?${new URLSearchParams(query).toString()}`);
+  } else {
+    win.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+      { query },
+    );
+  }
+  // Click-away dismissal. DevTools focus counts as a blur too, so keep the
+  // menu out of the dev-tools flow (it's a plain route — open /tray-menu in
+  // the main window to inspect it).
+  win.on('blur', () => hideTrayMenu());
+  win.on('closed', () => {
+    appWindowContentIds.delete(wcId);
+    if (trayMenuWindow === win) trayMenuWindow = null;
+  });
+  trayMenuWindow = win;
+  return win;
+}
+
+function hideTrayMenu() {
+  // Drop any reveal still waiting on measurements — otherwise a menu dismissed
+  // during the settle window pops open again a frame later.
+  clearTimeout(trayMenuRevealTimer);
+  trayMenuRevealTimer = null;
+  trayMenuPendingReveal = null;
+  if (trayMenuWindow && !trayMenuWindow.isDestroyed() && trayMenuWindow.isVisible()) {
+    trayMenuWindow.hide();
+    trayMenuHiddenAt = Date.now();
+  }
+}
+
+function showTrayMenu() {
+  const existing = (trayMenuWindow && !trayMenuWindow.isDestroyed()) ? trayMenuWindow : null;
+  const win = existing || createTrayMenuWindow();
+  // Already up — a second show() would replay the OS window animation on a
+  // menu that's already on screen.
+  if (existing && win.isVisible()) return;
+  const reveal = () => {
+    if (win.isDestroyed() || win.isVisible()) return;
+    const size = trayMenuSize || win.getBounds();
+    win.setBounds(positionTrayMenu(size.width, size.height));
+    win.show();
+    // show() normally activates the window too; focusing an already-focused
+    // window is a SECOND activation, which Windows animates a second time.
+    // Keep the call only as the fallback for when show() didn't take focus
+    // (without it the blur-to-dismiss never arms).
+    if (!win.isFocused()) win.focus();
+  };
+
+  // Hold the window back until the renderer has MEASURED the menu — the
+  // pending reveal fires from the tray:resize handler. This runs on EVERY
+  // open, not just the first: the card's height changes between opens (the
+  // recent-projects list, the relative timestamps in it, the updater row), and
+  // resizing a transparent always-on-top window that's already on screen reads
+  // as the menu fading in a second time. Measure first, then show once.
+  trayMenuPendingReveal = reveal;
+  // Reused window: the renderer is alive and re-measures as soon as it handles
+  // tray:opened, so the safety net can be short. A cold window has to boot the
+  // bundle first.
+  const fallbackMs = existing ? 250 : 2000;
+  setTimeout(() => {
+    if (trayMenuPendingReveal !== reveal) return;
+    clearTimeout(trayMenuRevealTimer);
+    trayMenuRevealTimer = null;
+    trayMenuPendingReveal = null;
+    reveal();
+  }, fallbackMs);
+
+  // Tell the reused renderer it's opening again: reset the flyout, re-read the
+  // recent projects + updater state, and re-send its size (which is what
+  // releases the reveal above).
+  if (existing) win.webContents.send('tray:opened', { anchor: trayMenuAnchor });
+}
+
+function toggleTrayMenu() {
+  if (trayMenuWindow && !trayMenuWindow.isDestroyed() && trayMenuWindow.isVisible()) {
+    hideTrayMenu();
+    return;
+  }
+  // A click right after a blur-hide is the SAME click that closed the menu.
+  if (Date.now() - trayMenuHiddenAt < 250) return;
+  showTrayMenu();
+}
+
+// The menu window is HIDDEN, not closed, between uses — which would keep the
+// app alive after the user closes every real window, because
+// 'window-all-closed' only fires once the last window is DESTROYED. Watch for
+// the last real window going away and tear the menu down so the normal quit
+// path runs (the menu is rebuilt on the next tray click).
+app.on('browser-window-created', (_e, created) => {
+  created.on('closed', () => {
+    setImmediate(() => {
+      // The tray menu and the pre-warmed viewer are infrastructure: neither is
+      // a window the user opened, so neither should hold the app open.
+      const alive = BrowserWindow.getAllWindows()
+        .filter((w) => !w.isDestroyed() && w !== trayMenuWindow && w !== warmViewer);
+      if (alive.length) return;
+      clearTimeout(warmViewerTimer);
+      if (warmViewer && !warmViewer.isDestroyed()) warmViewer.destroy();
+      if (trayMenuWindow && !trayMenuWindow.isDestroyed()) trayMenuWindow.destroy();
+      if (process.platform !== 'darwin') app.quit();
+    });
+  });
+});
+
+// Raise the main window (creating it if the user closed it on macOS), and
+// optionally send it somewhere. A freshly created window can't receive the
+// route until its renderer has booted.
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return mainWindow;
+  }
+  // Still waiting on its first reveal (booted hidden, session not resolved yet)
+  // — reveal it in the mode it was last left in rather than at whatever size
+  // it happens to be sitting at offscreen.
+  if (pendingMainReveal !== null || !mainWindow.isVisible()) {
+    revealMainWindow();
+    return mainWindow;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  return mainWindow;
+}
+
+function navigateMainWindow(dest) {
+  const win = showMainWindow();
+  if (!win || win.isDestroyed() || typeof dest !== 'string' || !dest) return;
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', () => {
+      if (!win.isDestroyed()) win.webContents.send('app:navigate', dest);
+    });
+  } else {
+    win.webContents.send('app:navigate', dest);
+  }
+}
+
+// The card's measured size (DIP) → resize + re-anchor. Clamped so a runaway
+// measurement can't paint a window across the whole screen.
+ipcMain.on('tray:resize', (e, size) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || win.isDestroyed() || win !== trayMenuWindow) return;
+  const width = Math.max(200, Math.min(900, Math.round(Number(size?.width) || 0)));
+  const height = Math.max(120, Math.min(1200, Math.round(Number(size?.height) || 0)));
+  if (!width || !height) return;
+  const changed = !trayMenuSize || trayMenuSize.width !== width || trayMenuSize.height !== height;
+  trayMenuSize = { width, height };
+  // Moving a window that's already on screen replays the OS window animation.
+  // A re-measurement that lands on the SAME size has nothing to apply, so
+  // skipping it is the difference between one fade and two.
+  if (changed || !win.isVisible()) win.setBounds(positionTrayMenu(width, height));
+  // Measurements arrive in bursts as the card settles. Wait out the burst
+  // before showing, so the window appears once, already at its final size,
+  // instead of appearing and then being resized into place.
+  if (trayMenuPendingReveal) {
+    clearTimeout(trayMenuRevealTimer);
+    trayMenuRevealTimer = setTimeout(() => {
+      trayMenuRevealTimer = null;
+      const pending = trayMenuPendingReveal;
+      trayMenuPendingReveal = null;
+      pending?.();
+    }, TRAY_MEASURE_SETTLE_MS);
+  }
+});
+
+ipcMain.on('tray:close', () => hideTrayMenu());
+
+ipcMain.handle('tray:state', () => ({
+  version: app.getVersion(),
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  updateState: updateStatus?.state || 'idle',
+  anchor: trayMenuAnchor,
+}));
+
+// Every menu row lands here. The menu always closes first — an action that
+// raises the main window shouldn't leave the menu floating over it.
+ipcMain.on('tray:action', (_e, msg) => {
+  const action = msg?.action;
+  const payload = msg?.payload;
+  hideTrayMenu();
+  switch (action) {
+    case 'open':
+      showMainWindow();
+      break;
+    case 'navigate':
+      navigateMainWindow(payload);
+      break;
+    case 'external':
+      openExternalSafe(payload);
+      break;
+    case 'extract':
+      try { openSnipPanel(); } catch { /* capture unavailable — non-fatal */ }
+      break;
+    case 'check-updates':
+      // Show the release history (which reports the result), and kick the
+      // packaged updater. Dev / macOS builds just land on the page — see the
+      // `update:check` handler for why Squirrel is Windows-only.
+      navigateMainWindow('/versions');
+      if (app.isPackaged && AUTO_UPDATE_SUPPORTED && updateStatus.state !== 'downloaded') {
+        try { autoUpdater.checkForUpdates(); } catch { /* reported via update:status */ }
+      }
+      break;
+    case 'install-update':
+      if (app.isPackaged && updateStatus.state === 'downloaded') autoUpdater.quitAndInstall();
+      break;
+    case 'restart':
+      app.relaunch();
+      app.quit();
+      break;
+    case 'quit':
+      app.quit();
+      break;
+    default:
+      break;
+  }
+});
+
 // Sidebar "Open files" section IPC: snapshot the open viewers, and refocus /
 // close a specific one by its BrowserWindow id.
 ipcMain.handle('doc-viewer:list', () => docViewerTabList());
@@ -1128,14 +1801,15 @@ ipcMain.handle('whatsapp:detect', async (_e, paths) => {
 
 // On Windows: when the OS opens docvex:// in a second instance, argv contains the URL
 app.on('second-instance', (_, argv) => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+  // Raise whichever window is actually the user's current surface — while
+  // they're signing in that's the sign-in window, not the (hidden) app window.
+  const front = authWindow && !authWindow.isDestroyed() ? authWindow : mainWindow;
+  if (front && !front.isDestroyed()) {
+    if (front.isMinimized()) front.restore();
+    front.focus();
   }
   const callbackUrl = argv.find((arg) => arg.startsWith('docvex://'));
-  if (callbackUrl && mainWindow) {
-    mainWindow.webContents.send('oauth:callback-url', callbackUrl);
-  }
+  if (callbackUrl) sendDeepLink(callbackUrl);
   // "Open with DocVex" while the app is already running — the second
   // instance's argv carries the file path(s).
   (argv || []).slice(1).forEach((arg) => {
@@ -1213,9 +1887,19 @@ function registerOpenWithDocVexVerb() {
       child.on('exit', (code) => resolve(code === 0));
     } catch { resolve(false); }
   });
+  // The menu entry's icon. A packaged build's own exe embeds the app icon, so
+  // pointing at it is right — but in DEV `process.execPath` is electron.exe,
+  // which is why the entry showed the Electron logo. Fall back to the .ico on
+  // disk there. (Only in dev: once packaged that file lives inside app.asar,
+  // which Explorer can't read an icon out of.)
+  let iconSpec = `"${exe}",0`;
+  if (!app.isPackaged) {
+    const icoPath = path.join(__dirname, 'favicon.ico');
+    try { if (fs.existsSync(icoPath)) iconSpec = `"${icoPath}"`; } catch { /* keep the exe */ }
+  }
   (async () => {
     await run([base, '/ve', '/d', 'Open with DocVex']);
-    await run([base, '/v', 'Icon', '/d', `"${exe}",0`]);
+    await run([base, '/v', 'Icon', '/d', iconSpec]);
     await run([`${base}\\command`, '/ve', '/d', cmd]);
   })();
 }
@@ -1223,9 +1907,7 @@ function registerOpenWithDocVexVerb() {
 // On macOS: the OS fires open-url instead of launching a second instance
 app.on('open-url', (event, url) => {
   event.preventDefault();
-  if (url.startsWith('docvex://') && mainWindow) {
-    mainWindow.webContents.send('oauth:callback-url', url);
-  }
+  if (url.startsWith('docvex://')) sendDeepLink(url);
 });
 
 // ── Navigation hardening (Electron security checklist) ─────────────────────
@@ -1302,36 +1984,10 @@ ipcMain.handle('window:is-fullscreen', (e) => {
   return !!(w && w.isFullScreen());
 });
 
-// Window sizing driven by the signed-out (auth) screen — AuthPage sends these
-// as it mounts/unmounts. Acts on the window that sent the event.
-//   'locked' → entering the login screen: drop maximize/fullscreen, pin to the
-//              default size, and disable resizing/maximizing (a focused window).
-//   'app'    → just signed in: restore resizing and fill the screen (maximize).
-//   'unlock' → left the login screen without signing in (e.g. back to a public
-//              page): just restore resizing, leave size/position alone.
-ipcMain.on('window:auth-state', (e, state) => {
-  const w = BrowserWindow.fromWebContents(e.sender);
-  if (!w || w.isDestroyed()) return;
-  if (state === 'locked') {
-    if (w.isFullScreen()) w.setFullScreen(false);
-    if (w.isMaximized()) w.unmaximize();
-    w.setResizable(false);
-    w.setMaximizable(false);
-    w.setFullScreenable(false);
-    // The app-wide minWidth (900) would clamp setSize up — drop the floor to the
-    // auth size first so the window can actually shrink to it.
-    w.setMinimumSize(AUTH_WINDOW_SIZE.width, AUTH_WINDOW_SIZE.height);
-    w.setSize(AUTH_WINDOW_SIZE.width, AUTH_WINDOW_SIZE.height);
-    w.center();
-    return;
-  }
-  // 'app' or 'unlock' — both restore interactive sizing + the app minimum.
-  w.setMinimumSize(900, 600);
-  w.setResizable(true);
-  w.setMaximizable(true);
-  w.setFullScreenable(true);
-  if (state === 'app' && !w.isMaximized()) w.maximize();
-});
+// (The old `window:auth-state` channel is gone. The signed-out screen used to
+// resize the APP window into a login box and restore it afterwards, which meant
+// every launch through sign-in threw away the size the user had chosen. Signing
+// in has its own window now — see openAuthWindow above.)
 
 // Quit the entire app — fired by a deliberate logout. Closes every window
 // (each runs its own close handler, so the main window still persists its
@@ -2181,6 +2837,36 @@ ipcMain.handle('local-folder:list', async (_, dir) => {
   }
 });
 
+// Filesystem facts for ONE path — the Doc Viewer's Metadata tab reads the
+// dates/size the OS holds (which no amount of parsing the bytes can give).
+// Returns `{ error }` rather than throwing so the panel can show a row-level
+// failure instead of losing the whole extraction.
+ipcMain.handle('local-folder:stat', async (_, filePath) => {
+  if (!filePath) return { error: 'No path specified' };
+  try {
+    const stat = await fsp.stat(filePath);
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      dir: path.dirname(filePath),
+      sizeBytes: stat.size,
+      isFile: stat.isFile(),
+      isDirectory: stat.isDirectory(),
+      mtimeIso: stat.mtime.toISOString(),
+      // Creation time is only real on Windows/macOS; on Linux birthtime can
+      // come back as the epoch or equal to ctime — the panel just shows it.
+      birthtimeIso: stat.birthtime ? stat.birthtime.toISOString() : null,
+      ctimeIso: stat.ctime.toISOString(),
+      atimeIso: stat.atime.toISOString(),
+      // POSIX permission bits, e.g. 644. Windows reports a synthesised mode.
+      mode: (stat.mode & 0o777).toString(8),
+      error: null,
+    };
+  } catch (err) {
+    return { error: err?.message || 'Could not read file info' };
+  }
+});
+
 // Recursive listing — every file anywhere under `dir`, each tagged with
 // its `folderPath` (relative dir from the root, forward-slash separated,
 // '' for root). This is the SYNC source: the branch flow needs to see
@@ -2544,7 +3230,8 @@ ipcMain.handle('local-folder:save-as', async (_, srcPath) => {
 // into a sibling folder named after the archive (deduped if it already exists)
 // so the user can browse it inline; other formats (rar/7z/tar/gz) have no
 // bundled extractor, so they're handed to the OS archiver via shell.openPath.
-// Returns { ok, extracted, path } — `path` is the new folder when extracted.
+// Returns { ok, extracted, path, created } — `path` is the new folder when
+// extracted, `created` false if we merged into a folder that already existed.
 ipcMain.handle('local-folder:extract-archive', async (_, srcPath) => {
   try {
     if (typeof srcPath !== 'string' || !srcPath) return { ok: false };
@@ -2563,12 +3250,17 @@ ipcMain.handle('local-folder:extract-archive', async (_, srcPath) => {
     const parent = path.dirname(srcPath);
     const baseName = path.basename(srcPath).replace(/\.zip$/i, '');
     const dest = path.join(parent, `${baseName} - unzipped`);
+    // Whether WE created the folder decides if the extract is undoable: when it
+    // already existed we've merged into someone else's files, and undoing by
+    // deleting the folder would take those with it.
+    let created = false;
+    try { await fsp.stat(dest); } catch { created = true; }
     await fsp.mkdir(dest, { recursive: true });
     const { default: extract } = await import('extract-zip');
     await extract(srcPath, { dir: dest });
     // Strip any hostile symlink entries the archive planted (CWE-59 link-follow).
     await stripSymlinks(dest);
-    return { ok: true, extracted: true, path: dest };
+    return { ok: true, extracted: true, path: dest, created };
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -3143,36 +3835,171 @@ app.whenReady().then(() => {
   // fs.realpath so a symlink can't point out of an allowed folder. Without this
   // the scheme would read any absolute path the renderer names, turning any
   // content-injection/XSS foothold into arbitrary local-file disclosure.
-  // Downscaled-image cache for the `?thumb=` branch below. Keyed by
-  // path+mtime+width; capped so a huge folder can't grow it unbounded
-  // (entries are ~20-60KB JPEGs — the cap is a few MB of RAM).
-  const thumbCache = new Map();
-  const THUMB_CACHE_MAX = 400;
+  // ── Thumbnail service (the `?thumb=N` branch below) ──────────────────────
+  // The renderer paints tiles with a plain <img src="localfile://…?thumb=256">,
+  // so this is where every file grid's thumbnail actually comes from. Three
+  // things make it reliable under load, all of which the renderer used to lack:
+  //
+  //   • A CONCURRENCY GATE. createThumbnailFromPath goes out to the Windows
+  //     Shell / QuickLook; hundreds of simultaneous calls (one folder of
+  //     photos = one call per tile) make the providers slow down and start
+  //     failing. Four at a time keeps them healthy and is still faster than
+  //     the renderer could ever decode.
+  //   • SINGLE-FLIGHT. Several windows (Files grid, sidebar, doc viewer) ask
+  //     for the same file's thumbnail at the same moment; they share one job.
+  //   • A DISK CACHE. Thumbnails survive restarts and folder revisits, so the
+  //     second open of a folder paints instantly and costs the shell nothing.
+  //     Keyed by path+mtime+width, so an edited file re-renders automatically.
+  const thumbMemCache = new Map();      // key → { buffer, mime } | null (null = "can't")
+  const thumbInflight = new Map();      // key → Promise
+  const THUMB_MEM_MAX = 300;
+  const THUMB_DISK_MAX_BYTES = 256 * 1024 * 1024;
+  const THUMB_CONCURRENCY = 4;
+  let thumbActive = 0;
+  const thumbQueue = [];
+  const thumbDir = () => path.join(app.getPath('userData'), 'thumbnails');
+
+  function thumbPump() {
+    while (thumbActive < THUMB_CONCURRENCY && thumbQueue.length) {
+      const job = thumbQueue.shift();
+      thumbActive += 1;
+      // A rejection must resolve to null, not to the error object — a truthy
+      // "thumbnail" would be served as an image body.
+      job.run().then(job.resolve, () => job.resolve(null)).finally(() => {
+        thumbActive -= 1;
+        thumbPump();
+      });
+    }
+  }
+  function thumbSchedule(run) {
+    return new Promise((resolve) => {
+      thumbQueue.push({ run, resolve });
+      thumbPump();
+    });
+  }
+
+  // Cache filename for a key — hashed so path separators / length limits and
+  // unicode filenames can't produce an invalid name.
+  function thumbCacheFile(key, ext) {
+    const hash = crypto.createHash('sha1').update(key).digest('hex');
+    return path.join(thumbDir(), `${hash}.${ext}`);
+  }
+
+  // Trim the on-disk cache to THUMB_DISK_MAX_BYTES, oldest-accessed first.
+  // Runs at most once per session start and then every ~500 writes.
+  let thumbWritesSinceSweep = 0;
+  async function sweepThumbCache() {
+    try {
+      const dir = thumbDir();
+      const names = await fsp.readdir(dir);
+      const entries = [];
+      let total = 0;
+      for (const n of names) {
+        try {
+          const st = await fsp.stat(path.join(dir, n));
+          if (!st.isFile()) continue;
+          entries.push({ file: path.join(dir, n), size: st.size, at: st.mtimeMs });
+          total += st.size;
+        } catch { /* vanished mid-sweep */ }
+      }
+      if (total <= THUMB_DISK_MAX_BYTES) return;
+      entries.sort((a, b) => a.at - b.at);
+      for (const e of entries) {
+        if (total <= THUMB_DISK_MAX_BYTES) break;
+        try { await fsp.unlink(e.file); total -= e.size; } catch { /* ignore */ }
+      }
+    } catch { /* no cache dir yet — nothing to sweep */ }
+  }
+
+  async function readThumbFromDisk(key, ext, mime) {
+    try {
+      const buffer = await fsp.readFile(thumbCacheFile(key, ext));
+      if (!buffer?.length) return null;
+      return { buffer, mime };
+    } catch { return null; }
+  }
+
+  async function writeThumbToDisk(key, ext, buffer) {
+    try {
+      await fsp.mkdir(thumbDir(), { recursive: true });
+      await fsp.writeFile(thumbCacheFile(key, ext), buffer);
+      thumbWritesSinceSweep += 1;
+      if (thumbWritesSinceSweep >= 500) {
+        thumbWritesSinceSweep = 0;
+        sweepThumbCache();
+      }
+    } catch { /* cache write is best-effort */ }
+  }
+
+  function rememberThumb(key, value) {
+    if (thumbMemCache.size >= THUMB_MEM_MAX) {
+      thumbMemCache.delete(thumbMemCache.keys().next().value);
+    }
+    thumbMemCache.set(key, value);
+    return value;
+  }
+
+  // Per-extension verdict on whether this machine has a thumbnail provider at
+  // all. Without it, a PC with no Office installed re-asks the shell for every
+  // .docx in every folder, and the renderer logs a 415 for each. Only counted
+  // from genuine "the provider returned nothing" results — a blocked path is
+  // rejected long before it reaches here — and a couple of failures with zero
+  // successes is what marks a format unsupported (so one corrupt file can't).
+  const thumbExtStats = new Map();   // ext → { ok, fail }
+  function noteExtResult(ext, ok) {
+    if (!ext) return;
+    const s = thumbExtStats.get(ext) || { ok: 0, fail: 0 };
+    if (ok) s.ok += 1; else s.fail += 1;
+    thumbExtStats.set(ext, s);
+  }
+  ipcMain.handle('thumb:unsupported-exts', () => (
+    [...thumbExtStats.entries()]
+      .filter(([, s]) => s.ok === 0 && s.fail >= 2)
+      .map(([ext]) => ext)
+  ));
+
+  // Returns { buffer, mime } or null when this file has no OS thumbnail.
   async function thumbnailFor(filePath, mtimeMs, width, mime) {
     const key = `${filePath}:${mtimeMs}:${width}`;
-    const hit = thumbCache.get(key);
+    const hit = thumbMemCache.get(key);
     if (hit !== undefined) return hit;
-    let out = null;
-    try {
-      // OS thumbnailer (Windows Shell / macOS QuickLook) — fast, and decodes
-      // HEIC where Chromium can't. Not available on Linux → caller streams
-      // the original.
-      const img = await nativeImage.createThumbnailFromPath(filePath, { width, height: width });
-      if (img && !img.isEmpty()) {
-        // PNG keeps alpha for png sources; everything else compresses better
-        // as JPEG.
-        out = mime === 'image/png'
-          ? { buffer: img.toPNG(), mime: 'image/png' }
-          : { buffer: img.toJPEG(82), mime: 'image/jpeg' };
-        if (!out.buffer?.length) out = null;
+    const inflight = thumbInflight.get(key);
+    if (inflight) return inflight;
+
+    // PNG sources keep alpha; everything else is smaller as JPEG.
+    const asPng = mime === 'image/png';
+    const ext = asPng ? 'png' : 'jpg';
+    const outMime = asPng ? 'image/png' : 'image/jpeg';
+
+    const job = (async () => {
+      try {
+        const cached = await readThumbFromDisk(key, ext, outMime);
+        if (cached) return rememberThumb(key, cached);
+        const built = await thumbSchedule(async () => {
+          try {
+            // OS thumbnailer (Windows Shell / macOS QuickLook) — fast, and
+            // renders HEIC/RAW/Office/PDF that Chromium can't. Absent on most
+            // Linux setups, where this simply returns null.
+            const img = await nativeImage.createThumbnailFromPath(filePath, { width, height: width });
+            if (!img || img.isEmpty()) return null;
+            const buffer = asPng ? img.toPNG() : img.toJPEG(82);
+            return buffer?.length ? { buffer, mime: outMime } : null;
+          } catch { return null; }
+        });
+        noteExtResult(path.extname(filePath).slice(1).toLowerCase(), Boolean(built));
+        if (built) writeThumbToDisk(key, ext, built.buffer);
+        return rememberThumb(key, built);
+      } finally {
+        thumbInflight.delete(key);
       }
-    } catch { out = null; }
-    if (thumbCache.size >= THUMB_CACHE_MAX) {
-      thumbCache.delete(thumbCache.keys().next().value);
-    }
-    thumbCache.set(key, out);
-    return out;
+    })();
+    thumbInflight.set(key, job);
+    return job;
   }
+
+  // One sweep per launch so a cache grown large in a previous session gets
+  // trimmed even if this one writes little.
+  sweepThumbCache();
 
   protocol.handle('localfile', async (request) => {
     let filePath = '';
@@ -3211,13 +4038,31 @@ app.whenReady().then(() => {
       // to the normal full-file stream; callers must therefore check the
       // response's content-type before treating the bytes as an image.
       const thumbW = parseInt(url.searchParams.get('thumb') || '', 10);
-      // Documents (PDF / Office / OpenDocument) get a page thumbnail from the
-      // SAME OS provider as photos/videos — matched by extension because legacy
-      // Office (.doc/.xls/.ppt) reports application/octet-stream, not a real mime.
+      // Classification is EXTENSION-first: the MIME guesser reports plenty of
+      // real formats (.heic, .pptx, legacy .doc/.xls/.ppt) as
+      // application/octet-stream, and those are exactly the files that most
+      // need the OS thumbnailer.
       const thumbExt = path.extname(filePath).slice(1).toLowerCase();
+      // Images Chromium decodes itself. If no OS thumbnail exists we can
+      // safely fall through and stream the original — an <img> will render it.
+      const isBrowserImage = /^image\//.test(mime)
+        || ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'avif', 'bmp', 'svg', 'ico'].includes(thumbExt);
+      // Formats an <img> can NOT decode. Streaming their raw bytes just paints
+      // a broken image (and, for video, downloads megabytes to do it), so
+      // these answer 415 and let the renderer fall back to its type glyph.
+      const isOpaqueImage = ['tif', 'tiff', 'heic', 'heif', 'psd', 'ai', 'eps',
+        'raw', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'rw2', 'raf', 'srw'].includes(thumbExt);
+      const isVideoThumb = /^video\//.test(mime)
+        || ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', '3gp', 'ogv'].includes(thumbExt);
       const isDocThumb = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf'].includes(thumbExt);
-      const isMediaThumb = /^(image\/(jpeg|png|bmp|tiff|heic|heif)|video\/)/.test(mime);
-      if (Number.isFinite(thumbW) && thumbW > 0 && (isMediaThumb || isDocThumb)) {
+      // Animated / vector formats are served as-is: a shell thumbnail would
+      // freeze a GIF or WhatsApp sticker and rasterise an SVG, and all three
+      // are small enough to paint directly. (The renderer's engine skips
+      // asking for a thumb on these too — keep the two lists in step.)
+      const isAnimatedOrVector = ['gif', 'webp', 'svg', 'ico'].includes(thumbExt)
+        || /^image\/(gif|webp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/.test(mime);
+      if (Number.isFinite(thumbW) && thumbW > 0 && !isAnimatedOrVector
+          && (isBrowserImage || isOpaqueImage || isVideoThumb || isDocThumb)) {
         const body = await thumbnailFor(filePath, stat.mtimeMs, Math.min(1024, thumbW), mime);
         if (body) {
           return new Response(body.buffer, {
@@ -3226,17 +4071,18 @@ app.whenReady().then(() => {
               'content-type': body.mime,
               'content-length': String(body.buffer.length),
               // Immutable per URL: the renderer never reuses a thumb URL for
-              // different bytes (the path encodes the file, mtime busts the
-              // main-process cache on change).
+              // different bytes (the path encodes the file, and callers fold
+              // mtime into the query so a save mints a new URL).
               'cache-control': 'max-age=3600',
             },
           });
         }
-        // No thumbnail could be produced (Linux, no shell provider installed,
-        // etc.). For documents, DON'T fall through to streaming the raw multi-MB
-        // file to an <img> — signal "no image" so the renderer shows its type
-        // icon instead. (Images/videos still fall through to the normal stream.)
-        if (isDocThumb) return new Response('No thumbnail', { status: 415, headers: cors });
+        // No thumbnail could be produced (Linux, no shell provider for this
+        // format, a corrupt file). Only browser-decodable images fall through
+        // to the raw stream; everything else says so plainly.
+        if (!isBrowserImage) {
+          return new Response('No thumbnail', { status: 415, headers: cors });
+        }
       }
       // Honour HTTP Range requests so <audio>/<video> can seek and read
       // duration. Chromium needs a 206 partial response for this; an .ogg
@@ -3328,10 +4174,12 @@ app.whenReady().then(() => {
   }
 
   // ── System tray / menu-bar icon ─────────────────────────────────────────
-  // Puts the app icon in the Windows notification area / macOS menu bar. The
-  // context menu's "Extract text" freezes the desktop (screenshots the
-  // cursor's display) and opens a selection overlay that OCRs the chosen
-  // region — see openScreenSnip below.
+  // Puts the app icon in the Windows notification area / macOS menu bar.
+  // Left- OR right-clicking opens the APP-DRAWN menu (showTrayMenu above) —
+  // themed like the rest of DocVex, with a status header, recent projects,
+  // and "Extract text" (which freezes the desktop and OCRs a selection, see
+  // openScreenSnip). A native Menu is kept as the fallback if that window
+  // can't be created, so the tray is never a dead icon.
   try {
     let trayIcon = nativeImage.createFromPath(path.join(__dirname, 'appicon_desktop.png'));
     // Tray icons render at ~16px; macOS in particular shows a giant blurry
@@ -3339,12 +4187,27 @@ app.whenReady().then(() => {
     if (!trayIcon.isEmpty()) trayIcon = trayIcon.resize({ width: 16, height: 16 });
     appTray = new Tray(trayIcon);
     appTray.setToolTip('DocVex');
-    appTray.setContextMenu(Menu.buildFromTemplate([
-      {
-        label: 'Extract text',
-        click: () => { try { openSnipPanel(); } catch { /* window unavailable — non-fatal */ } },
-      },
-    ]));
+    // macOS: don't wait out the double-click interval before reacting.
+    try { appTray.setIgnoreDoubleClickEvents(true); } catch { /* Windows/Linux — no-op */ }
+    // Left click raises the app, right click opens the menu — the Windows
+    // convention, and what the user asked for.
+    appTray.on('click', () => { hideTrayMenu(); showMainWindow(); });
+    const openMenu = () => {
+      try {
+        toggleTrayMenu();
+      } catch {
+        // Custom window unavailable — fall back to a native menu with the
+        // essentials so the tray still works.
+        appTray.popUpContextMenu(Menu.buildFromTemplate([
+          { label: 'Open DocVex', click: () => showMainWindow() },
+          { label: 'Extract text', click: () => { try { openSnipPanel(); } catch { /* non-fatal */ } } },
+          { type: 'separator' },
+          { label: 'Quit DocVex', click: () => app.quit() },
+        ]));
+      }
+    };
+    appTray.on('right-click', openMenu);
+    appTray.on('double-click', () => { hideTrayMenu(); showMainWindow(); });
   } catch { /* tray unavailable (some Linux DEs) — non-fatal */ }
 
   // Best-effort sweep of stale WhatsApp-zip extractions (temp/docvex-wa) on

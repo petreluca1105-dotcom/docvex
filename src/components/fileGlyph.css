@@ -1,0 +1,84 @@
+/* ── File-type glyphs — the app's ONE file-icon style ────────────────────────
+   These rules used to live in FilesWorkspace.css, which meant only the Files
+   page could paint them; every other surface (the sidebar's open-file rows,
+   Activity, the project list, the doc-viewer tabs) fell back to a different
+   set of line-art glyphs, so the same file wore two different icons depending
+   on where you looked at it. `glyphForFile()` now returns <ExtGlyph/> for
+   everyone, and its styling lives here — imported by fileGlyph.jsx, so it
+   loads wherever a glyph does.
+
+   Sizing belongs to the HOST, not here: `.fx-glyph` fills the box it's given
+   (see `.fx-tile-thumb .fx-glyph`, `.doc-tab-thumb .fx-glyph`, …), so a 24px
+   sidebar row and a zoomable Files tile share artwork without sharing scale. */
+
+.fx-glyph {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 7.2px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+/* Filled type icons (document / picture / archive / slide) — an accent shape
+   with darker accent details, filling the glyph box. */
+.fx-glyph-icon { background: transparent; color: var(--accent); }
+.fx-glyph-icon .fx-type-icon { width: 100%; height: 100%; display: block; }
+.fx-type-base { fill: currentColor; }
+.fx-type-detail { fill: color-mix(in srgb, var(--accent) 52%, #000); }
+
+/* Zipped-folder archive icon — the zipper teeth are a thick dashed line in a
+   darker accent down the folder's middle. */
+.fx-zip-teeth {
+  stroke: color-mix(in srgb, var(--accent) 52%, #000);
+  stroke-width: 3;
+  stroke-dasharray: 1 1.3;
+}
+
+/* Video — a play triangle, with the format tag tucked into the corner. */
+.fx-glyph-vid { position: relative; overflow: hidden; }
+.fx-glyph-vid .fx-glyph-play {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1px 2.4px rgba(0, 0, 0, 0.45));
+}
+.fx-glyph-vid-tag {
+  position: absolute;
+  bottom: 1.6px;
+  right: 2.4px;
+  font-size: 0.55em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-shadow: 0 1px 1.6px rgba(0, 0, 0, 0.5);
+}
+
+/* Audio — a decibel line (equalizer bars), mirroring the video badge. */
+.fx-glyph-aud { position: relative; overflow: hidden; }
+.fx-glyph-aud .fx-glyph-audio {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1px 2.4px rgba(0, 0, 0, 0.45));
+}
+
+/* ── Unified file-type glyphs ──────────────────────────────────────────
+   Every type glyph shares one style: NO badge fill — just the label / inner
+   glyph drawn in the theme accent straight on the (transparent) thumb, so the
+   icons read as a consistent set that re-tints with the selected theme. The
+   WhatsApp badge (green) and the Microsoft Office tiles (Word / Excel /
+   PowerPoint — their own brand colours, see fileGlyph.jsx) are intentionally
+   excluded. */
+.fx-glyph-pdf,
+.fx-glyph-img, .fx-glyph-vid, .fx-glyph-aud, .fx-glyph-txt, .fx-glyph-psd,
+.fx-glyph-ai, .fx-glyph-gen {
+  background: transparent;
+  color: var(--accent);
+  border: none;
+}
+.fx-glyph-vid .fx-glyph-play,
+.fx-glyph-aud .fx-glyph-audio,
+.fx-glyph-vid-tag { color: var(--accent); }

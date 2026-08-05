@@ -1,5 +1,6 @@
 import React from 'react';
 import { DOCX_MIME, PPTX_MIME } from '../lib/thumbnails';
+import './fileGlyph.css';
 
 // Office Open XML + legacy binary MIME types, kept here next to the
 // glyph dispatcher (thumbnails.js only exports the two it needs).
@@ -8,39 +9,18 @@ const DOC_MIME = 'application/msword';
 const PPT_MIME = 'application/vnd.ms-powerpoint';
 const XLS_MIME = 'application/vnd.ms-excel';
 
-// Single MIME → SVG glyph map for the whole app. Replaces the two
-// parallel maps that used to live in ProjectFiles.jsx and
-// ChangeRequestsView.jsx — same glyphs, slightly different ordering
-// in each, drifted over time. Now there's one source so a new file
-// type (or a glyph tweak) lands everywhere at once.
+// The whole app's file icons. <ExtGlyph/> is the artwork (it was the Files
+// tab's, hence the `fx-` class names and fileGlyph.css) and glyphForFile() is
+// the MIME/filename → glyph dispatcher every other surface calls — the
+// sidebar's open-file rows, Activity, the project list, the doc-viewer tabs.
 //
-// All SVGs use stroke=currentColor so the parent's color inheritance
-// works without per-icon overrides — the thumb container can recolor
-// the glyph by setting `color` on its own rule.
-
-const COMMON_PROPS = {
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: '1.8',
-  strokeLinecap: 'round',
-  strokeLinejoin: 'round',
-  'aria-hidden': true,
-};
-
-const PaperBase = (
-  <>
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-    <polyline points="14 2 14 8 20 8" />
-  </>
-);
-
-const PdfGlyph = (
-  <svg {...COMMON_PROPS}>
-    {PaperBase}
-    <text x="8" y="18" fontSize="6" fontWeight="700" fill="currentColor" stroke="none">PDF</text>
-  </svg>
-);
+// Those surfaces used to get a SEPARATE set of line-art glyphs defined here,
+// so the same file wore one icon in the Files tab and a different one in the
+// rail. That set is gone; there is one style now, and a glyph tweak lands
+// everywhere at once.
+//
+// Sizing is the host's job: `.fx-glyph` fills the box it's given, so a 17px
+// sidebar row and a zoomable Files tile share artwork without sharing scale.
 
 // ── Microsoft Office file icons ─────────────────────────────────────
 // Authentic Word / Excel / PowerPoint file icons: a white document with
@@ -87,66 +67,149 @@ export function OfficeFileIcon({ kind, className }) {
   );
 }
 
-const DocxGlyph = <OfficeFileIcon kind="word" />;
-const PptxGlyph = <OfficeFileIcon kind="ppt" />;
-const XlsxGlyph = <OfficeFileIcon kind="excel" />;
 
-const VideoGlyph = (
-  <svg {...COMMON_PROPS}>
-    <rect x="2" y="6" width="14" height="12" rx="2" ry="2" />
-    <polygon points="22 8 16 12 22 16 22 8" />
-  </svg>
-);
 
-// Audio files — a decibel line: equalizer bars of varying heights (waveform).
-const AudioGlyph = (
-  <svg {...COMMON_PROPS}>
-    <path d="M3 10.5v3" />
-    <path d="M6.5 7.5v9" />
-    <path d="M10 4.5v15" />
-    <path d="M13.5 8.5v7" />
-    <path d="M17 6v12" />
-    <path d="M20.5 9.5v5" />
-  </svg>
-);
-
-const ImageGlyph = (
-  <svg {...COMMON_PROPS}>
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-    <circle cx="8.5" cy="8.5" r="1.5" />
-    <polyline points="21 15 16 10 5 21" />
-  </svg>
-);
-
-const TextGlyph = (
-  <svg {...COMMON_PROPS}>
-    {PaperBase}
-    <line x1="8" y1="13" x2="16" y2="13" />
-    <line x1="8" y1="17" x2="14" y2="17" />
-  </svg>
-);
-
-const FileGlyph = (
-  <svg {...COMMON_PROPS}>
-    {PaperBase}
-  </svg>
-);
+// MIME → a representative extension, for callers that only know the type.
+// Only consulted when the filename doesn't carry a usable extension.
+function extFromMime(mime) {
+  const m = (mime || '').toLowerCase();
+  if (m === 'application/pdf') return 'pdf';
+  if (m === DOCX_MIME || m === DOC_MIME) return 'docx';
+  if (m === PPTX_MIME || m === PPT_MIME) return 'pptx';
+  if (m === XLSX_MIME || m === XLS_MIME) return 'xlsx';
+  if (m === 'application/zip' || m === 'application/x-zip-compressed') return 'zip';
+  if (m.startsWith('image/')) return 'png';
+  if (m.startsWith('video/')) return 'mp4';
+  if (m.startsWith('audio/')) return 'mp3';
+  if (m.startsWith('text/')) return 'txt';
+  return '';
+}
 
 // Pick the glyph for a given MIME + filename. Filename matters because
 // DOCX-like files sometimes upload with mime_type='application/octet-stream'
-// when the OS didn't resolve the type before upload — falling back to
-// the `.docx` extension catches those.
+// when the OS didn't resolve the type before upload — falling back to the
+// extension catches those. The reverse is also true (a name with no extension,
+// or a trailing "v1.2" that only looks like one), so a name-derived extension
+// is only trusted when it's a type we actually recognise.
+//
+// Returns the SAME <ExtGlyph/> the Files tab paints. It used to return a
+// separate set of line-art glyphs, which is why a file could wear one icon in
+// the Files tab and a different one in the sidebar; there is now one style.
 export function glyphForFile(mime, name) {
-  const m = (mime || '').toLowerCase();
-  const lcName = (name || '').toLowerCase();
-  if (m === 'application/pdf') return PdfGlyph;
-  if (m === DOCX_MIME || m === DOC_MIME || /\.docx?$/.test(lcName)) return DocxGlyph;
-  if (m === PPTX_MIME || m === PPT_MIME || /\.pptx?$/.test(lcName)) return PptxGlyph;
-  if (m === XLSX_MIME || m === XLS_MIME || /\.xlsx?$/.test(lcName)) return XlsxGlyph;
-  if (m.startsWith('image/')) return ImageGlyph;
-  if (m.startsWith('video/')) return VideoGlyph;
-  // Audio — match by MIME, or by extension when the OS didn't resolve a type.
-  if (m.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|oga|flac|opus|wma|aiff?)$/i.test(lcName)) return AudioGlyph;
-  if (m.startsWith('text/')) return TextGlyph;
-  return FileGlyph;
+  const named = /\.([a-z0-9]{1,5})$/i.exec(String(name || '').trim());
+  const namedExt = named ? named[1].toLowerCase() : '';
+  const ext = (namedExt && extCategory(namedExt) !== 'gen') ? namedExt : (extFromMime(mime) || namedExt);
+  return <ExtGlyph ext={ext} />;
+}
+
+// File-type → category for the colored ext-label glyph (from the design).
+export function extCategory(ext) {
+  const e = (ext || '').toLowerCase();
+  if (e === 'pdf') return 'pdf';
+  // Word and everything it can save/export to (incl. templates, macro-enabled,
+  // RTF and the OpenDocument / Pages equivalents).
+  if (['doc', 'docx', 'docm', 'dot', 'dotx', 'dotm', 'rtf', 'odt', 'pages'].includes(e)) return 'doc';
+  // Excel and everything it can save/export to (workbooks, macro-enabled,
+  // binary, templates, CSV and the OpenDocument / Numbers equivalents).
+  if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'xltm', 'csv', 'ods', 'numbers'].includes(e)) return 'xls';
+  // PowerPoint and everything it can save/export to (decks, macro-enabled,
+  // shows, templates and the OpenDocument / Keynote equivalents).
+  if (['ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'ppsm', 'pot', 'potx', 'potm', 'odp', 'key'].includes(e)) return 'ppt';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(e)) return 'zip';
+  if (e === 'psd') return 'psd';
+  if (e === 'ai') return 'ai';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic', 'bmp', 'tif', 'tiff'].includes(e)) return 'img';
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(e)) return 'vid';
+  if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus', 'wma', 'aif', 'aiff'].includes(e)) return 'aud';
+  if (['txt', 'md', 'rtf', 'log'].includes(e)) return 'txt';
+  return 'gen';
+}
+
+// Colored ext-label badge — shown for files with no real preview.
+export function ExtGlyph({ ext }) {
+  const cat = extCategory(ext);
+  // Videos read as a video at a glance: a centred play triangle, with the
+  // format tucked into the corner.
+  if (cat === 'vid') {
+    return (
+      <span className="fx-glyph fx-glyph-vid">
+        <svg className="fx-glyph-play" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.78-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14z" fill="currentColor" />
+        </svg>
+      </span>
+    );
+  }
+  // Audio reads as audio at a glance: a decibel line — a row of equalizer bars
+  // of varying heights (a sound waveform / level meter).
+  if (cat === 'aud') {
+    return (
+      <span className="fx-glyph fx-glyph-aud">
+        <svg className="fx-glyph-audio" viewBox="0 0 24 24" aria-hidden="true">
+          <g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 10.5v3" />
+            <path d="M6.5 7.5v9" />
+            <path d="M10 4.5v15" />
+            <path d="M13.5 8.5v7" />
+            <path d="M17 6v12" />
+            <path d="M20.5 9.5v5" />
+          </g>
+        </svg>
+      </span>
+    );
+  }
+  // Microsoft Office files use authentic Office file icons — a white document
+  // with the brand-colour letter badge (Word / Excel / PowerPoint).
+  if (cat === 'doc') {
+    return <span className="fx-glyph fx-glyph-icon"><OfficeFileIcon kind="word" className="fx-type-icon" /></span>;
+  }
+  if (cat === 'xls') {
+    return <span className="fx-glyph fx-glyph-icon"><OfficeFileIcon kind="excel" className="fx-type-icon" /></span>;
+  }
+  // Archives (zip / rar / 7z / tar / gz) read as a zipped folder, Windows-style:
+  // a folder with a zipper (teeth + pull) down the middle.
+  if (cat === 'zip') {
+    return (
+      <span className="fx-glyph fx-glyph-icon">
+        <svg className="fx-type-icon" viewBox="0 0 24 24" aria-hidden="true">
+          {/* folder */}
+          <path className="fx-type-base" d="M2.6 6.6a2.2 2.2 0 0 1 2.2-2.2h4.2l2 2h8.2a2.2 2.2 0 0 1 2.2 2.2v8.6a2.2 2.2 0 0 1-2.2 2.2H4.8a2.2 2.2 0 0 1-2.2-2.2z" />
+          {/* zipper teeth (thick dashed line down the middle) */}
+          <line className="fx-zip-teeth" x1="12" y1="9.2" x2="12" y2="19.3" />
+          {/* zipper pull — slider + tab */}
+          <circle className="fx-type-detail" cx="12" cy="9.4" r="1.8" />
+          <rect className="fx-type-detail" x="11.25" y="9.4" width="1.5" height="3.5" rx="0.75" />
+        </svg>
+      </span>
+    );
+  }
+  // Image types (img / psd) — a picture: a frame with a sun + mountains.
+  if (cat === 'img' || cat === 'psd') {
+    return (
+      <span className="fx-glyph fx-glyph-icon">
+        <svg className="fx-type-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect className="fx-type-base" x="3" y="4" width="18" height="16" rx="2.6" />
+          <circle className="fx-type-detail" cx="8.5" cy="9.5" r="2" />
+          <path className="fx-type-detail" d="M4 19 L9.5 12.5 L13 16 L16 12.5 L20 19 Z" />
+        </svg>
+      </span>
+    );
+  }
+  // PowerPoint — authentic Office file icon (see doc/xls above).
+  if (cat === 'ppt') {
+    return <span className="fx-glyph fx-glyph-icon"><OfficeFileIcon kind="ppt" className="fx-type-icon" /></span>;
+  }
+  // Everything else (doc / txt / pdf / ai / generic) — a document with text
+  // lines. This is the "we have no icon for this type" case, so the tile also
+  // gets a corner pill naming the extension (see .fx-ext-pill, shown by CSS
+  // only when this generic glyph is what's painted).
+  return (
+    <span className="fx-glyph fx-glyph-icon fx-glyph-generic">
+      <svg className="fx-type-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect className="fx-type-base" x="4" y="2.5" width="16" height="19" rx="2.6" />
+        <rect className="fx-type-detail" x="7" y="7" width="10" height="1.8" rx="0.9" />
+        <rect className="fx-type-detail" x="7" y="11" width="10" height="1.8" rx="0.9" />
+        <rect className="fx-type-detail" x="7" y="15" width="7" height="1.8" rx="0.9" />
+      </svg>
+    </span>
+  );
 }

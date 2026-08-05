@@ -10,6 +10,9 @@ import React, {
 import { useAuth } from './AuthContext';
 import { getProject } from '../lib/projects';
 import { markProjectAccessed, getMostRecentProjectId } from '../lib/recentProjects';
+import { isElectron } from '../lib/platform';
+import { setAiUsageProject } from '../lib/aiTokenMeter';
+import { DEMO_PROJECT, DEMO_PROJECT_ID } from '../lib/demoWorkspace';
 
 // Tracks which project the user is "working in" right now. Distinct from
 // ProjectContext (which is URL-scoped, used inside /projects/:projectId):
@@ -61,8 +64,11 @@ export function SelectedProjectProvider({ children }) {
 
   // Tracks the user-id we last hydrated for. Prevents a re-mount from
   // clobbering an in-flight selection when only the user_id reference is
-  // stable but auth-loading hasn't settled yet.
-  const hydratedForUserRef = useRef(null);
+  // stable but auth-loading hasn't settled yet. Starts as `undefined` (a
+  // value userId can never take — it's a string or null) so the signed-out
+  // web case (userId === null) still runs its first hydration, which is
+  // what selects the Demo Workspace.
+  const hydratedForUserRef = useRef(undefined);
 
   // Optionally seeded by selectProject(id, prefetched) — when the caller
   // already has the full project row (e.g. the Hub handing us the
@@ -78,6 +84,13 @@ export function SelectedProjectProvider({ children }) {
     hydratedForUserRef.current = userId;
 
     if (!userId) {
+      // Web demo: signed-out visitors work in the synthetic Demo Workspace —
+      // its Files live in OPFS, seeded with starter files (lib/demoWorkspace).
+      if (!isElectron) {
+        _setSelectedProjectId(DEMO_PROJECT_ID);
+        setSelectedProject(DEMO_PROJECT);
+        return;
+      }
       _setSelectedProjectId(null);
       setSelectedProject(null);
       return;
@@ -91,9 +104,15 @@ export function SelectedProjectProvider({ children }) {
       // <App>'s ProjectPrefetch) so the "Project" tab opens instantly. The
       // fallback is in-memory only (no localStorage write), so it stays a soft
       // default rather than re-persisting a selection the user cleared.
-      _setSelectedProjectId(stored || getMostRecentProjectId(userId) || null);
+      //
+      // Web: the browser build has no Projects hub to pick a project from, so
+      // a signed-in visitor with no working selection still lands in the Demo
+      // Workspace rather than a project-less shell with no Project tabs.
+      _setSelectedProjectId(
+        stored || getMostRecentProjectId(userId) || (isElectron ? null : DEMO_PROJECT_ID),
+      );
     } catch {
-      _setSelectedProjectId(null);
+      _setSelectedProjectId(isElectron ? null : DEMO_PROJECT_ID);
     }
   }, [userId, authLoading]);
 
@@ -105,9 +124,21 @@ export function SelectedProjectProvider({ children }) {
   // picker already has it from listMyProjects), use it directly and skip the
   // network. The ref is consumed once so a later mismatched id falls back to
   // a real fetch.
+  // AI token accounting is attributed to whichever project is selected, so
+  // every AI helper in the app doesn't have to thread a project id down to the
+  // call. Kept in sync here — this is the one place the selection changes.
+  useEffect(() => { setAiUsageProject(selectedProjectId); }, [selectedProjectId]);
+
   useEffect(() => {
     if (!selectedProjectId) {
       setSelectedProject(null);
+      return;
+    }
+    // The demo project has no Supabase row — resolve it locally so the
+    // fetch-failure path below can't clear the selection.
+    if (selectedProjectId === DEMO_PROJECT_ID) {
+      setSelectedProject(DEMO_PROJECT);
+      setLoading(false);
       return;
     }
     const cached = prefetchedProjectRef.current;
@@ -122,6 +153,18 @@ export function SelectedProjectProvider({ children }) {
     getProject(selectedProjectId).then(({ data, error }) => {
       if (cancelled) return;
       if (error || !data) {
+        // Web: a dead selection (deleted project, lost access, stale id from
+        // an old session) degrades to the Demo Workspace instead of a
+        // project-less shell — there's no hub on web to pick a new one.
+        if (!isElectron) {
+          if (userId) {
+            try { localStorage.removeItem(storageKey(userId)); } catch { /* ignore */ }
+          }
+          _setSelectedProjectId(DEMO_PROJECT_ID);
+          setSelectedProject(DEMO_PROJECT);
+          setLoading(false);
+          return;
+        }
         _setSelectedProjectId(null);
         setSelectedProject(null);
         if (userId) {

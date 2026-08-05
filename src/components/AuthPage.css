@@ -349,3 +349,35 @@
   .auth-split { grid-template-columns: 1fr; }
   .auth-brand { display: none; }
 }
+
+/* ── Handover placeholder ──────────────────────────────────────────────────
+   Shown only if the APP window somehow lands on /auth while signed out. It
+   normally isn't visible at all — the app window stays hidden until there's a
+   session and the dedicated sign-in window is what's on screen — so this is a
+   way back, not a screen anyone is meant to use. */
+.auth-handoff {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12.8px;
+}
+.auth-handoff-text {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 14.4px;
+  color: var(--text-secondary);
+}
+.auth-handoff-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11.2px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+}
+.auth-handoff-btn:hover { background: var(--bg-elevated); border-color: var(--accent); }

@@ -337,6 +337,17 @@ export async function runTimelineCouncil({ projectName, fileNames, excerpts, onP
         member,
         events: parsed.events.length,
         flags: Array.isArray(parsed.flags) ? parsed.flags.length : 0,
+        // The flags THEMSELVES (not just the count), clamped to a sane
+        // shape — the chamber shows them in the "We have a question…"
+        // panel the moment the draft lands, instead of only at the Review
+        // round after the merge.
+        flagDetails: (Array.isArray(parsed.flags) ? parsed.flags : []).slice(0, 6).map((fl) => ({
+          sev: String(fl?.sev || 'Medium').slice(0, 12),
+          type: String(fl?.type || 'Flag').slice(0, 40),
+          title: String(fl?.title || '').slice(0, 160),
+          detail: String(fl?.detail || '').slice(0, 400),
+          sources: String(fl?.sources || '').slice(0, 200),
+        })),
         citations: countCitations(parsed),
         // The draft's reading of the story — surfaces as the analyst's
         // "proposal" in the chamber UI.

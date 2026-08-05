@@ -1,5 +1,18 @@
 import React from 'react';
+import { openExternal } from '../../lib/platform';
 import woodHSrc from './assets/wood-h.svg';
+
+// The public legal pages on the marketing site. Opened in a new browser tab
+// from web, and in the user's default browser from the desktop app — either
+// way the signup form the user is filling in stays exactly as it was.
+export const TERMS_URL = 'https://docvex.ro/terms.html';
+export const PRIVACY_URL = 'https://docvex.ro/privacy.html';
+
+// Account creation happens on the website (same Supabase project, same
+// account), so "Create an account" leaves the app for the site's sign-up tab —
+// the site can also finish the flows the desktop app can't host, e.g. the
+// email-confirmation and password-recovery landings.
+export const SIGNUP_URL = 'https://docvex.ro/auth.html?mode=signup';
 
 export const woodH = woodHSrc;
 
@@ -66,14 +79,29 @@ export function Strength({ strength, label }) {
 }
 
 // Terms acceptance + newsletter opt-in checkboxes (shared confirm step).
-export function Agreements({ agree, news, onAgree, onNews, onTerms }) {
+// The two legal links open the real pages in a new tab. They're inside a
+// <label>, so a plain click would toggle the checkbox as well — stopPropagation
+// keeps "read the terms" from silently accepting them. openExternal handles the
+// Electron/web split (system browser vs. window.open).
+export function Agreements({ agree, news, onAgree, onNews }) {
+  const openLegal = (url) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openExternal(url);
+  };
   return (
     <>
       <label className="auv-check">
         <input type="checkbox" checked={agree} onChange={onAgree} />
         <span>
-          I agree to the <a href="#" onClick={onTerms}>Terms of Service</a> and{' '}
-          <a href="#" onClick={onTerms}>Privacy Policy</a>.
+          I agree to the{' '}
+          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" onClick={openLegal(TERMS_URL)}>
+            Terms of Service
+          </a>{' '}
+          and{' '}
+          <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" onClick={openLegal(PRIVACY_URL)}>
+            Privacy Policy
+          </a>.
         </span>
       </label>
       <label className="auv-check" style={{ marginTop: 13 }}>
@@ -107,5 +135,3 @@ export function FormMsg({ error, notice }) {
   return null;
 }
 
-// Inert handler for the Terms/Privacy placeholder links — no legal route yet.
-export const preventNav = (e) => e.preventDefault();

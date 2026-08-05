@@ -21,6 +21,22 @@
    We keep the cursor-chase transform transition from the base
    `.tooltip` rules (Tooltip.css) — that one is already transform-
    only, cheap. */
+/* ── Dismissal ──────────────────────────────────────────────────────────
+   The pill stays mounted for this fade before its state is torn down (see
+   MENU_EXIT_MS in useMorphPill.jsx — keep the two in step). OPACITY ONLY: the
+   pill's position is an inline transform owned by the FLIP morph, and a
+   keyframe touching transform would override it mid-animation and throw the
+   menu across the screen on its way out. Clicks pass through while it leaves,
+   so a dying menu can't swallow the one that dismissed it. */
+.project-files-morph-pill.is-closing {
+  animation: fxMorphPillOut 130ms ease-in forwards;
+  pointer-events: none;
+}
+@keyframes fxMorphPillOut { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .project-files-morph-pill.is-closing { animation-duration: 1ms; }
+}
+
 .project-files-morph-pill.is-menu {
   padding: 3.2px;
   border-radius: 8px;

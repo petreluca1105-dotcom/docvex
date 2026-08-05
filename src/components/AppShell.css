@@ -4,13 +4,13 @@
    Hub button, the fixed page mastheads) reads this one var, so all dependants
    move in lock-step.
 
-   The width flip is intentionally NOT transitioned: tweening a registered
-   custom property re-resolves var() across the whole subtree and re-lays-out
-   the entire app row (rail + page content + fixed mastheads) on EVERY frame
-   for 250ms — on heavy pages (chat, file grids) that reads as the app lagging.
-   Snapping costs a single reflow; the rail's internal transitions (label fade,
-   avatar resize, section max-height) still animate so the toggle keeps its
-   sense of motion. */
+   The flip IS transitioned (see .app-shell below), which means a var() re-
+   resolve + a re-layout of the whole app row on every frame of it. That cost
+   is real and was the reason this used to snap — but the rail is now also
+   drag-resizable, which pays exactly the same cost per frame, so refusing to
+   animate the toggle bought nothing. It's kept short and is dropped entirely
+   while dragging (no point tweening toward a target that moves every frame)
+   and under reduce-motion. */
 @property --sidebar-width {
   syntax: '<length>';
   inherits: true;
@@ -18,7 +18,11 @@
 }
 
 .app-shell {
+  position: relative;   /* anchors the sidebar resize handle */
   display: flex;
+  /* Collapse / expand tween. Short and eased-out so the rail settles quickly —
+     every frame of this re-lays-out the app row (see the note above). */
+  transition: --sidebar-width 200ms cubic-bezier(0.22, 1, 0.36, 1);
   /* Reserve room for the custom frameless title bar (--titlebar-h; 0 on web)
      so the shell sits below it. */
   height: calc(100 * var(--vh1) - var(--titlebar-h));
@@ -55,6 +59,38 @@
 /* App chrome — layout row only. The sidebar and the content each get their
    OWN bordered, rounded frame (see .sidebar and .main-content); this just lays
    them out side by side with a gap between the two frames. */
+/* Mid-drag the width IS the pointer, so tweening toward it would just lag
+   behind the cursor. Same for a reduce-motion preference. */
+.app-shell.sidebar-resizing { transition: none; }
+[data-reduce-motion='true'] .app-shell { transition: none; }
+
+/* ── Sidebar resize handle ──────────────────────────────────────────────
+   A grab strip straddling the rail's right edge. Lives on the shell rather
+   than inside the rail because the rail scrolls its own content — a handle in
+   there would scroll away with the nav list. Invisible until hovered/dragged;
+   double-click resets to the default width. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: var(--chrome-inset, 6.4px);
+  bottom: var(--chrome-inset, 6.4px);
+  left: calc(var(--chrome-inset, 6.4px) + var(--sidebar-width, 192px));
+  width: 9px;
+  margin-left: -4.5px;   /* straddle the seam rather than sit beside it */
+  z-index: 5;
+  cursor: col-resize;
+  /* The visible hint is a hairline drawn down the middle, so the grab area can
+     be finger-friendly without painting a 9px bar. */
+  background: linear-gradient(to right, transparent 3.5px, var(--accent) 3.5px, var(--accent) 5.5px, transparent 5.5px);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.sidebar-resize-handle:hover { opacity: 0.55; }
+.app-shell.sidebar-resizing .sidebar-resize-handle { opacity: 0.85; }
+/* While dragging, the pointer owns the window: kill text selection and stop
+   every other element fighting for the cursor. */
+.app-shell.sidebar-resizing { user-select: none; cursor: col-resize; }
+.app-shell.sidebar-resizing * { cursor: col-resize !important; }
+
 .app-chrome {
   flex: 1;
   min-width: 0;
@@ -69,34 +105,86 @@
 /* The floating Hub launcher was replaced by the sidebar's "All projects"
    nav item — the rail now starts at the chrome top with no clearance offset. */
 
+/* ── Sidebar slot ───────────────────────────────────────────────────────
+   The rail's layout box. The rail itself is absolutely positioned inside it
+   (see Sidebar.css), which decouples "how much room the rail takes in the
+   row" from "where the rail is drawn" — the Hub transition below animates
+   only the second. */
+.sidebar-slot {
+  position: relative;
+  flex: 0 0 var(--sidebar-width, 192px);
+  width: var(--sidebar-width, 192px);
+  /* Stretch rather than height:100% — the rail inside is absolutely
+     positioned against this box, so it needs a definite height from the flex
+     row itself. */
+  align-self: stretch;
+  min-width: 0;
+  /* The rail slides out THROUGH this box on the way to the Hub, so the slot
+     must not clip it. */
+  overflow: visible;
+  /* Closing back up is animated (see the direction note in the Hub transition
+     block below); opening to the Hub is not. */
+  transition: flex-basis 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-reduce-motion='true'] .sidebar-slot { transition: none; }
+
 /* ── Hub transition (/projects) ─────────────────────────────────────────
-   On the Hub the sidebar stays MOUNTED but slides out of the window: a
-   negative margin-left pulls the rail (rigid, at its full width) past the
-   window's left edge while the content column expands to fill the row — one
-   smooth move, reversed when a project is selected and the class drops.
-   `hub-leaving` applies the same slide DURING the pre-navigation beat (the
-   "All projects" click is intercepted in AppShell.jsx) so the rail is already
-   moving while the old page fades out.
-   The margin stops at exactly -width (outer flex size 0, so the content
-   column lands exactly where it would with no rail — going further would pull
-   the content past the window edge); the translateX carries the rail's
-   remaining sliver (chrome inset + border + card shadow) fully off-window
-   without affecting layout. NOTE: the margin half tweens layout (~320ms,
-   one-off, only when crossing the hub boundary) — unlike the sidebar collapse
-   toggle, which snaps --sidebar-width to avoid per-frame reflow on heavy
-   pages. */
-.app-shell.on-hub .sidebar,
-.app-shell.hub-leaving .sidebar {
-  margin-left: calc(-1 * var(--sidebar-width, 192px));
-  transform: translateX(-32px);
+   On the Hub the sidebar stays MOUNTED but slides out of the window. The
+   layout half and the paint half are deliberately split:
+
+   - PAINT always animates. The rail rides on `transform` + `opacity` alone
+     (Sidebar.css), which the compositor handles without touching layout. It
+     travels its own width plus the chrome inset and shadow spread so no sliver
+     is left at the window edge.
+   - LAYOUT animates in ONE direction. The transition sits on the base
+     `.sidebar-slot` rule and is cancelled here, so the after-change style
+     decides: going TO the Hub the slot snaps to zero (no transition in the
+     rule being applied), coming BACK it tweens open (no transition in the rule
+     being removed).
+
+   That asymmetry is on purpose. Outbound, the same beat also mounts the Hub
+   and unmounts a possibly-heavy page (Files, Chat) — tweening the column width
+   there means a full relayout every frame on the app's busiest moment, which
+   is the stutter this replaces. Inbound, the content area is the
+   project-switch loader — a spinner over the dot grid, free to relayout — so
+   the column can open in lockstep with the returning rail instead of leaving a
+   rail-shaped hole.
+
+   WHEN the outbound snap happens is the other half of this. It's keyed to
+   `hub-collapsed` (set from `onHub` alone), NOT to `on-hub` (which also covers
+   the pre-navigation beat) — so the column holds its geometry for the whole
+   fade-out and the departing tab dissolves in place instead of being yanked
+   192px wider as it goes. By the time the snap lands the old tab is unmounted
+   and the Hub is mid-entrance-fade at opacity 0, so nothing visible moves. */
+.app-shell.hub-collapsed .sidebar-slot {
+  flex-basis: 0;
+  width: 0;
+  transition: none;
+}
+.app-shell.on-hub .sidebar {
+  /* -100% is the rail's own width; the extra clears the chrome inset, the
+     1.5px border and the card shadow's spread. */
+  transform: translateX(calc(-100% - 24px));
+  opacity: 0;
   pointer-events: none;
 }
-/* Old page fades out under the departing rail; once navigation lands, the
-   incoming content plays the shared is-switch-fade-in entrance instead. */
+
+/* Departing tab. `hub-leaving` covers only the gap between the Projects click
+   and the /projects commit (AppShell.jsx), so the tab the user is leaving
+   dissolves under the sliding rail instead of sitting there fully lit until it
+   is swapped out from under them.
+
+   Duration is paired with HUB_LEAVE_MS in AppShell.jsx, which holds the route
+   swap open for exactly this long — without that hold React commits the flag
+   and the navigation in one task and the browser never paints a frame with the
+   old content still up, so there is nothing to dissolve. Opacity only, so it
+   composites. */
 .app-shell.hub-leaving .sv-single {
   opacity: 0;
-  transition: opacity 200ms ease;
+  transition: opacity 150ms ease;
 }
+[data-reduce-motion='true'] .app-shell.hub-leaving .sv-single { transition: none; }
 
 .main-content {
   /* position:relative makes this the containing block for absolute-positioned

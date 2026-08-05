@@ -85,7 +85,9 @@ Subject: ${email.subject}
 ${(email.body || email.snippet || '').slice(0, 6000)}
 --- END EMAIL ---`;
 
-  const { text, error } = await askProjectAi({ messages: [{ role: 'user', content: prompt }], projectName: '', fileNames: [] });
+  // usageProject: null — Mail is a personal tab, so its drafting tokens don't
+  // belong on whatever project happens to be selected.
+  const { text, error } = await askProjectAi({ messages: [{ role: 'user', content: prompt }], projectName: '', fileNames: [], usageProject: null });
   if (error) return { reasoning: [], draft: '', error };
 
   let raw = (text || '').trim();

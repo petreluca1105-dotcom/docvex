@@ -54,8 +54,16 @@ function initialsOf(name) {
 // for a project the caller is a member of, that's the full membership, so
 // the number matches what the Project Overview's Members card would show.
 export async function listMyProjects() {
-  const userResult = await supabase.auth.getUser();
-  const userId = userResult.data.user?.id;
+  // getSession() reads the persisted session from storage; getUser() is a
+  // round-trip to /auth/v1/user. This runs on every Hub open, where it used to
+  // add a whole request's latency before the first query could even start, so
+  // prefer the local read and only fall back to the network one.
+  const sessionResult = await supabase.auth.getSession();
+  let userId = sessionResult.data.session?.user?.id;
+  if (!userId) {
+    const userResult = await supabase.auth.getUser();
+    userId = userResult.data.user?.id;
+  }
   if (!userId) return { data: [], error: new Error('Not signed in') };
 
   const { data, error } = await supabase

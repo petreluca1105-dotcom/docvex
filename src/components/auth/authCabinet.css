@@ -177,7 +177,13 @@
 .auv-cab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 14.4px; }
 .auv-cab-grid-t { font-family: 'Cinzel', serif; font-size: 12px; font-weight: 600; color: var(--auv-cream); letter-spacing: 0.03em; }
 .auv-cab-grid-d { font-size: 9.6px; color: rgba(245, 242, 234, 0.55); margin-top: 2.4px; }
-.auv-cab-form { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; padding: 32px 44.8px; background: transparent; }
+/* Scrolls rather than overflowing: the window is fixed at AUTH_WINDOW_SIZE
+   (main.js), so a taller step — sign-up's confirm view — has to be reachable. */
+.auv-cab-form {
+  flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+  padding: 28px 44.8px; background: transparent;
+  min-height: 0; overflow-y: auto;
+}
 .auv-cab-form-inner { width: 100%; max-width: 304px; }
 
 .auv-cab-stepper { display: flex; align-items: center; margin-bottom: 24px; }

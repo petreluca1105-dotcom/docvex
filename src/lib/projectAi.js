@@ -5,6 +5,7 @@
 // back gracefully instead of throwing on a non-2xx.
 
 import { supabase } from './supabaseClient';
+import { recordAiTokens } from './aiTokenMeter';
 
 // Selectable Claude models, surfaced in the chat composer's model picker. The
 // `best` line is the in-UI guidance for "which model for which task". `id`s are
@@ -63,7 +64,11 @@ function unwrap(data, error) {
 //   • `forceDocument: true` — pin tool_choice to write_document (guarantees a new
 //     version; use when the user clearly asked for a document).
 //   • `docKind` — 'docx'|'pptx'|'xlsx' to lock the format across versions.
-export async function askProjectAi({ messages, projectName, fileNames, model, tools, docTools, forceDocument, docKind }) {
+//   • `usageProject` — which project this turn's tokens are billed to. Omit for
+//     the ambient selected project (the normal case); pass `null` for calls
+//     that aren't project work at all (the personal Mail tab).
+//   • `usageAction` — the project_ai_usage action bucket for this turn.
+export async function askProjectAi({ messages, projectName, fileNames, model, tools, docTools, forceDocument, docKind, usageProject, usageAction = 'chat' }) {
   const body = { action: 'ask', messages, projectName, fileNames, model };
   if (tools === false) body.tools = false;
   if (docTools) body.docTools = true;
@@ -72,9 +77,15 @@ export async function askProjectAi({ messages, projectName, fileNames, model, to
   const { data, error } = await supabase.functions.invoke('project-ai', { body });
   const res = unwrap(data, error);
   if (res.error) return res;
+  const usage = res.data.usage || { input_tokens: 0, output_tokens: 0 };
+  // Every project-ai `ask` turn — chat, the Doc Viewer advisor, AI file
+  // indexing, AI search, the timeline council — funnels through here, so this
+  // one line is what makes the per-project token total real. Fire-and-forget:
+  // it must not delay or fail the answer.
+  recordAiTokens({ projectId: usageProject, usage, action: usageAction, model: model || null });
   return {
     text: res.data.text || '',
-    usage: res.data.usage || { input_tokens: 0, output_tokens: 0 },
+    usage,
     stopReason: res.data.stopReason || null,
     tool: res.data.tool || null,
     toolUse: res.data.toolUse || null,

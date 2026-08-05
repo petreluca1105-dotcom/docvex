@@ -104,7 +104,9 @@
      past the sidebar with a matching right gap, seated flush under the title bar
      (the chromeless Versions route has --sv-chrome-h = 0). */
   top: calc(var(--titlebar-h, 0px) + var(--chrome-inset, 6.4px) + var(--sv-chrome-h, 0px));
-  left: calc(var(--sidebar-width, 0px) + var(--chrome-inset, 6.4px) + var(--content-left-gap, 0px));
+  /* No --content-left-gap term: the bar sits flush against the sidebar rail
+     (its title lands at the content edge), matching Activity / Newsletter. */
+  left: calc(var(--sidebar-width, 0px) + var(--chrome-inset, 6.4px));
   right: var(--chrome-inset, 6.4px);
   z-index: 30;
   height: 40px;
@@ -138,7 +140,10 @@
    right inset. */
 @media (min-width: 1024px) {
   .updates-page .versions-compact {
-    right: max(17.6px, 100vw - var(--sidebar-width, 192px) - var(--chrome-inset, 6.4px) - var(--content-left-gap, 0px) - var(--content-max-width, 1280px));
+    /* Grown 11.2px past the content column's right edge (and the clamp down
+       from 17.6px to one --chrome-inset), so the bar reads a touch wider
+       than the content below it. */
+    right: max(6.4px, 100vw - var(--sidebar-width, 192px) - var(--chrome-inset, 6.4px) - var(--content-left-gap, 0px) - var(--content-max-width, 1280px) - 11.2px);
   }
 }
 .updates-page .versions-compact.is-visible {

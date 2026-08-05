@@ -24,6 +24,13 @@ const electronAPI =
 export const isElectron = !!electronAPI;
 export const isWebBuild = import.meta.env.VITE_TARGET === 'web';
 
+// Web build served from localhost — gates dev-only conveniences (the Debug
+// tab, the demo seed-files button) in the BUILT web app, where
+// import.meta.env.DEV is false.
+export const isLocalhostWeb = !isElectron
+  && typeof window !== 'undefined'
+  && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
 // Synchronous OS guess from the userAgent — available before first paint (the
 // async getPlatformInfo() IPC isn't). Electron's renderer userAgent always
 // reports "Macintosh; Intel Mac OS X" on macOS (both Intel and Apple Silicon),
@@ -47,7 +54,7 @@ export const isAuxWindow =
   (() => {
     try {
       const q = new URLSearchParams(window.location.search);
-      return ['docViewer', 'snip', 'snipPanel', 'snipCountdown'].some((k) => q.get(k) === '1');
+      return ['docViewer', 'snip', 'snipPanel', 'snipCountdown', 'trayMenu'].some((k) => q.get(k) === '1');
     } catch {
       return false;
     }
@@ -117,11 +124,30 @@ export async function windowIsFullscreen() {
   return electronAPI?.windowIsFullscreen ? electronAPI.windowIsFullscreen() : false;
 }
 
-// Drive the window sizing for the signed-out screen (no-op on web — the browser
-// owns the window there). 'locked' = pin to default size, non-resizable;
-// 'app' = restore resizing + maximize; 'unlock' = restore resizing only.
-export function setAuthWindowState(state) {
-  electronAPI?.setAuthWindowState?.(state);
+// True in the dedicated sign-in window (main.js openAuthWindow boots the same
+// renderer with ?authWindow=1). Everything else — the app window, the doc
+// viewer, the tray menu — is false, and on web it's always false: a browser tab
+// can't open a second window, so the web build keeps rendering /auth inline.
+export const isAuthWindow = (() => {
+  try {
+    return isElectron && new URLSearchParams(window.location.search).get('authWindow') === '1';
+  } catch {
+    return false;
+  }
+})();
+
+// Handover between the app window and the sign-in window. All no-ops on web.
+//   authAppReady()  — app window, signed in: reveal me, dismiss the sign-in window.
+//   authRequired()  — app window, signed out: hide me, put the sign-in window up.
+//   authCompleted() — sign-in window: a session landed, hand back to the app.
+export function authAppReady() {
+  electronAPI?.authAppReady?.();
+}
+export function authRequired() {
+  electronAPI?.authRequired?.();
+}
+export function authCompleted() {
+  electronAPI?.authCompleted?.();
 }
 
 // Quit the entire app (closes all windows). Used by a deliberate logout.
@@ -194,14 +220,45 @@ export function openFileWindow(url, fileName) {
 
 // Open a file in DocVex's document-viewer window — the file preview PLUS a
 // Legal AI panel (src/pages/DocViewer.jsx). `file` is { path, name, mime }.
-// Electron only: returns true when handled, false on web so the caller can
-// fall back to openFileWindow / openDocx.
+// Electron opens a dedicated app window; web opens the /doc-viewer route in
+// a NEW BROWSER TAB (the viewer reconnects the folder backend itself — the
+// demo workspace's OPFS restores without any permission prompt). Returns
+// true when handled. WhatsApp-export opens stay Electron-only (the zip
+// prep that produces `chatPath` never runs on web), so they fall through.
 export function openDocViewerWindow(file) {
   if (electronAPI?.openDocViewerWindow) {
     electronAPI.openDocViewerWindow(file);
     return true;
   }
+  if (typeof window !== 'undefined' && file?.path && !file?.isWhatsApp) {
+    const q = new URLSearchParams({
+      path: file.path,
+      name: file.name || '',
+      mime: file.mime || '',
+    });
+    // BASE_URL is '/demo/' on the web build, so this resolves to
+    // /demo/doc-viewer regardless of the current route. No 'noopener' —
+    // the viewer's own close paths call window.close(), which browsers
+    // only honour for script-opened tabs that kept their opener.
+    window.open(`${import.meta.env.BASE_URL}doc-viewer?${q.toString()}`, '_blank');
+    return true;
+  }
   return false;
+}
+
+// ── Pre-warmed doc-viewer window (Electron) ────────────────────────────────
+// A viewer window boots hidden and empty so the NEXT file opens instantly:
+// main hands it the file over IPC and shows it once the document has painted.
+// All three no-op on web, where each viewer is a browser tab.
+export function notifyDocViewerWarmReady() {
+  try { electronAPI?.notifyDocViewerWarmReady?.(); } catch { /* non-fatal */ }
+}
+export function notifyDocViewerFilePainted() {
+  try { electronAPI?.notifyDocViewerFilePainted?.(); } catch { /* non-fatal */ }
+}
+export function onDocViewerOpenFile(handler) {
+  if (!electronAPI?.onDocViewerOpenFile) return () => {};
+  return electronAPI.onDocViewerOpenFile(handler);
 }
 
 // Surface a known on-disk file for localfile:// preview without opening a

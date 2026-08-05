@@ -21,10 +21,11 @@
   min-height: 0;
   overflow: hidden;
   /* Full-bleed: drop the frame padding / rounded "lip" / bg so the page-bg dot
-     grid + cursor spotlight show through, matching the Files workspace — but
-     keep the shared LEFT content gap so the chat (masthead, toolbar, messages)
-     starts the same distance from the rail as every other tab. */
-  padding: 0 0 0 var(--content-left-gap, 17.6px);
+     grid + cursor spotlight show through, matching the Files workspace. The
+     shared LEFT content gap lives on .dvx-chat below (not here) so the chat's
+     clip chain reaches the rail — letting the toolbar overhang flush against
+     the sidebar. */
+  padding: 0;
   background: none;
   border-radius: 0;
 }
@@ -33,6 +34,11 @@
   min-height: 0;
   width: 100%;
   max-width: none;
+  /* The shared left content gap (moved off the frame) — as PADDING, so this
+     overflow:hidden box's clip edge sits at the rail and the toolbar's
+     negative-margin overhang (below) stays visible. Content position is
+     unchanged: masthead, messages etc. still start one gap from the rail. */
+  padding-left: var(--content-left-gap, 17.6px);
   /* Not the scroller itself — the team tab nests .dvx-scroll-area; private keeps
      its internally-scrolling columns. */
   overflow: hidden;
@@ -48,6 +54,11 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* Shift this clip layer's box out to the rail too (padding puts the
+     content back), so the sticky toolbar's overhang isn't cut off by this
+     box's own overflow clipping. */
+  margin-left: calc(-1 * var(--content-left-gap, 17.6px));
+  padding-left: var(--content-left-gap, 17.6px);
 }
 /* Match the Files tab: the CONTENT caps at the shared content ceiling
    (left-aligned, leaving the right gap only on windows wider than the cap)
@@ -59,6 +70,13 @@
      composer footer caps itself — see the .sv-footer width rule below.) */
   .dvx-scroll-area > *,
   .dvx-chat.vb-chat.is-private > * { width: min(100%, var(--content-max-width, 1280px)); }
+  /* The toolbar carries a rail-flush overhang (negative margin + padding, see
+     .dvx-toolbar) — widen its border-box cap by the same amount so its RIGHT
+     edge (and the tools inside) stay exactly where the capped content ends. */
+  .dvx-scroll-area > .dvx-toolbar,
+  .dvx-chat.vb-chat.is-private > .dvx-toolbar {
+    width: calc(min(100%, var(--content-max-width, 1280px)) + var(--content-left-gap, 17.6px));
+  }
 }
 
 /* ───── Big masthead (Versions / Files-style hero) ────────────────────
@@ -117,6 +135,13 @@
   top: var(--chrome-inset, 6.4px);
   z-index: 30;
   flex: 0 0 auto;
+  /* Surface flush against the sidebar rail: pull the left edge out by the
+     full content gap, and re-inset the content by the same amount so the
+     tabs keep their exact x position at the content edge (same recipe as
+     the Activity toolbar). The clip chain above (.dvx-chat + .dvx-scroll-
+     area) is padding-shifted to the rail so this overhang stays visible. */
+  margin-left: calc(-1 * var(--content-left-gap, 17.6px));
+  padding-left: var(--content-left-gap, 17.6px);
   /* Single row, same height as the Hub button (40px): tabs left, tools right. */
   display: flex;
   flex-direction: row;
@@ -465,7 +490,11 @@
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 11.2px;
-  padding: 6.4px 8px;
+  /* Tight side inset. The content inside (textarea + toolbar) adds its own,
+     so the horizontal gutter is the sum of the two — 8px here plus the
+     textarea's 3.2px put the caret ~11px off the border, which read as a wide
+     empty margin on a full-width composer. */
+  padding: 6.4px 4.8px;
   box-shadow: var(--shadow-card);
   transition: border-color 120ms;
 }
@@ -527,7 +556,9 @@
   font-size: 0.736rem;
   line-height: 1.5;
   color: var(--text-primary);
-  padding: 4.8px 3.2px;
+  /* Vertical padding stays (it sets the single-line height); horizontal drops
+     to a hairline so the text starts close to the box edge. */
+  padding: 4.8px 1.6px;
   min-height: 19.2px;
   max-height: 96px;
   width: 100%;
@@ -1624,10 +1655,13 @@
 .sv-pane-inner:has(> .sv-footer .dvx-composer) > .sv-footer,
 .sv-single-body:has(> .sv-footer .dvx-composer) > .sv-footer {
   position: absolute;
-  left: var(--content-left-gap, 17.6px);
+  /* Flush against the sidebar rail (matches the toolbar above); the width
+     gains the gap the left inset gave up, so the RIGHT edge — and the
+     content cap — stay exactly where they were. */
+  left: 0;
   right: auto;
   bottom: 6.4px;
-  width: min(calc(100% - var(--content-left-gap, 17.6px) - 17.6px), var(--content-max-width, 1280px));
+  width: min(calc(100% - 17.6px), calc(var(--content-max-width, 1280px) + var(--content-left-gap, 17.6px)));
   z-index: 6;
 }
 
@@ -1650,8 +1684,14 @@
   border-radius: 0;
   box-shadow: none;
   background: transparent;
-  /* 22px horizontal inset matches the Files action bar. */
-  padding: 6.4px 17.6px;
+  /* This is the padding you actually see around the message field — the
+     composer is portalled in here, so this rule wins over the base
+     .dvx-composer padding. The left used to carry the shared
+     --content-left-gap on top of its own inset to line the caret up with the
+     page content above, which put ~26px of empty space in front of a text
+     field. It's a plain inset now, a little wider on the left than the right
+     so the caret has some room to breathe without drifting from the edge. */
+  padding: 6.4px 8px 6.4px 14.4px;
 }
 .sv-footer .dvx-composer::before,
 .sv-footer .dvx-composer::after { display: none; }

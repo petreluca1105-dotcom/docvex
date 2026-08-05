@@ -81,9 +81,7 @@
      edge while the frosted surface fills the gap to the rail. */
   margin-left: calc(-1 * var(--content-left-gap, 17.6px));
   padding: 0 12px 0 var(--content-left-gap, 17.6px);
-  /* Flush against the rail, the left corners lose their rounding — a radius
-     there would open tiny page-bg crescents against the sidebar's edge. */
-  border-radius: 0 9.6px 9.6px 0;
+  border-radius: 9.6px;
   /* Constant transparent border so gaining the pinned hairline doesn't
      shift the row's height. */
   border: 1.5px solid transparent;
@@ -111,61 +109,19 @@
    Hosted inside the sticky mini header: the chain stretches to the 40px
    bar's height so the underline straddles the bar's bottom edge, and
    overflow stays visible so its lower half isn't clipped. */
+/* The strip's own rules now live in components/FilterTabs.css — the project
+   Settings tab uses the same component, and a copy here would drift. What
+   stays below is what belongs to THIS surface: the mini-header host, the
+   first-tab alignment, and the per-category underline tints. */
 .avt-toolbar .activity-filters {
-  display: flex;
-  /* Breathing room between the category tabs (on top of each tab's own
-     side padding). */
-  gap: 9.6px;
   align-self: stretch;
-  align-items: stretch;
-  flex-wrap: nowrap;
-  min-width: 0;
-  overflow: visible;
-  /* Anchor for the shared sliding underline (offsetLeft/offsetTop of the
-     tab buttons are measured relative to this box). */
-  position: relative;
-}
-.activity-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: transparent;
-  border: none;
-  position: relative;
-  color: var(--text-muted);
-  font-size: 0.64rem;
-  font-weight: 500;
-  padding: 0 0.48rem;
-  height: 100%;
-  white-space: nowrap;
-  overflow: visible;
-  cursor: pointer;
-  transition: color 150ms;
-  font-family: inherit;
 }
 /* First tab ("All") loses its leading inset so its label lines up with the
    masthead and the timeline below. */
 .avt-toolbar .activity-filter:first-child { padding-left: 0; }
-.activity-filter:hover:not(.is-active) { color: var(--text-secondary); }
-.activity-filter.is-active { color: var(--text-primary); }
 
-/* Active underline — thin square bar, tinted by the active tab's category
-   via data-cat. */
-.activity-filter-underline {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 2px;
-  border-radius: 0;
-  background: var(--accent);
-  z-index: 2;
-  pointer-events: none;
-  transition:
-    transform 280ms cubic-bezier(0.16, 1, 0.3, 1),
-    width 280ms cubic-bezier(0.16, 1, 0.3, 1),
-    background 150ms;
-}
+/* Underline tinted by the active tab's category (the shared default is the
+   plain accent). */
 .activity-filter-underline[data-cat="file"]    { background: var(--cat-file); }
 .activity-filter-underline[data-cat="member"]  { background: var(--cat-member); }
 .activity-filter-underline[data-cat="project"] { background: var(--cat-project); }
@@ -278,9 +234,11 @@
   transition: background 120ms;
 }
 .avt-item:hover::before { background: color-mix(in srgb, var(--bg-elevated) 60%, transparent); }
-/* Read rows fade; unread keep full opacity (carried over from the old feed). */
-.avt-item:not(.is-unread) { opacity: 0.62; }
-.avt-item:not(.is-unread):hover { opacity: 0.92; }
+/* Read and unread rows look the SAME. They used to fade to 0.62 once read,
+   which — now that rows mark themselves read just by being looked at — meant
+   the feed visibly dimmed itself as you scrolled it. `.is-unread` is still set
+   on the row (Activity.jsx) so a future affordance can hang off it; it just no
+   longer changes how the row is painted. */
 
 /* ── Icon medallion — replaces the Events tab's plain ring: the
    notification's own contextual glyph, tinted by its category. Opaque
@@ -340,6 +298,8 @@
 }
 .avt-file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avt-file-thumb svg { width: 22.4px; height: 22.4px; }
+/* File glyphs are the Files-tab <ExtGlyph/> — a sized box the artwork fills. */
+.avt-file-thumb .fx-glyph { width: 22.4px; height: 22.4px; }
 /* Folder-event rows show the filled folder glyph in the accent colour. */
 .avt-file-thumb.is-folder { color: var(--accent); }
 /* The | — stretches to the taller of thumb/text, splitting the two. */

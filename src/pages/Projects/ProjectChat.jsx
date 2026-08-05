@@ -27,6 +27,7 @@ import {
   sendThreadReply,
   setChatMessagePin,
 } from '../../lib/chat';
+import { readCachedChat, writeCachedChat } from '../../lib/chatCache';
 import {
   listPrivateMessages,
   sendPrivateMessage,
@@ -140,10 +141,11 @@ const Icon = {
   Thread: (p) => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>),
   At: (p) => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></svg>),
   Paperclip: (p) => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.99 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>),
-  Smile: (p) => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>),
   Reply: (p) => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>),
-  Send: (p) => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>),
-  Mic: (p) => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><line x1="12" y1="18" x2="12" y2="22" /></svg>),
+  /* Up-arrow rather than a paper plane: the plane is a "mail it somewhere"
+     metaphor, and this posts a message into a thread that's right there. The
+     arrow points at where the message lands. */
+  Send: (p) => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" {...p}><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>),
   More: (p) => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>),
   Plus: (p) => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>),
   Bell: (p) => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>),
@@ -615,8 +617,6 @@ const TeamComposer = React.memo(function TeamComposer({
         />
         <div className="dvx-composer-toolbar">
           <Tooltip content="Mention someone"><button type="button" className="dvx-composer-btn" aria-label="Mention" onClick={() => textareaRef.current?.focus()}><Icon.At /></button></Tooltip>
-          <Tooltip content="Emoji (coming soon)"><button type="button" className="dvx-composer-btn" aria-label="Emoji" disabled><Icon.Smile /></button></Tooltip>
-          <Tooltip content="Voice note (coming soon)"><button type="button" className="dvx-composer-btn" aria-label="Voice note" disabled><Icon.Mic /></button></Tooltip>
           <div className="dvx-composer-toolbar-spacer" />
           <Tooltip content="Send"><button type="button" className="dvx-composer-btn dvx-composer-send" onClick={handleSend} disabled={sending || !draft.trim()} aria-label="Send"><Icon.Send /></button></Tooltip>
         </div>
@@ -700,7 +700,14 @@ export default function ProjectChat() {
   useEffect(() => {
     if (!projectId) { setMessages([]); return undefined; }
     let cancelled = false;
-    setLoading(true);
+    // Paint the thread as it was left, before the fetch has a chance to
+    // resolve. Coming back to Chat is the common case and it barely changes
+    // between visits — an empty column for the length of a round-trip made the
+    // tab feel like it was loading from scratch every time. Only when there's
+    // nothing cached does the spinner appear.
+    const cached = readCachedChat(projectId);
+    if (cached.length) { setMessages(cached); setLoading(false); }
+    else setLoading(true);
     listChatMessages(projectId).then(({ data, error }) => {
       if (cancelled) return;
       if (error) {
@@ -718,6 +725,15 @@ export default function ProjectChat() {
     });
     return () => { cancelled = true; };
   }, [projectId, notify]);
+
+  // Mirror whatever is on screen back to the cache. Keyed on the message list
+  // itself, so it captures the fetch AND every Realtime arrival / edit /
+  // delete — the next open starts from the thread as it actually stands, not
+  // as it stood when the tab was first opened. The write is debounced inside
+  // chatCache so a busy thread doesn't serialise on every event.
+  useEffect(() => {
+    if (projectId && messages.length) writeCachedChat(projectId, messages);
+  }, [projectId, messages]);
 
   // Realtime echo. Same merge pattern the BranchContext uses for
   // change_requests: dedupe INSERT by id (our optimistic insert may

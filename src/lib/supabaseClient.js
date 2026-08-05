@@ -17,6 +17,33 @@ export function realtimeSuffix() {
     : Math.random().toString(36).slice(2, 10);
 }
 
+// Per-WINDOW auth lock, replacing supabase-js's default.
+//
+// GoTrueClient picks `navigatorLock` whenever it sees `navigator.locks` — which
+// every Electron renderer has. Web Locks are held per ORIGIN, not per window,
+// so every DocVex window's auth client contends for the same
+// `lock:sb-<ref>-auth-token`: the sign-in window, the app window, each open Doc
+// Viewer. An auth call in one window then waits on a token refresh in another,
+// and since the app window now stays alive (hidden) behind the sign-in window,
+// that contention is constant rather than occasional. It shows up as OAuth
+// working most of the time and silently hanging the rest — whichever way the
+// race fell.
+//
+// This serialises auth operations within a window and lets windows proceed
+// independently, which is what Supabase's own `processLock` does for
+// non-single-tab environments. Written out rather than imported because
+// `processLock` lives in @supabase/auth-js, which we depend on only
+// transitively.
+const authLockChain = new Map();   // lock name → tail of the queue
+function windowAuthLock(name, _acquireTimeout, fn) {
+  const prev = authLockChain.get(name) || Promise.resolve();
+  // Run whether the previous holder resolved or rejected — a failed auth call
+  // must not wedge the queue behind it.
+  const run = prev.then(fn, fn);
+  authLockChain.set(name, run.then(() => {}, () => {}));
+  return run;
+}
+
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -33,6 +60,8 @@ export const supabase = createClient(
       //   (/app/auth/callback?code=…), so let supabase-js auto-detect and
       //   exchange it before any React effect runs.
       detectSessionInUrl: IS_WEB,
+      // See windowAuthLock above — must not be the cross-window Web Lock.
+      lock: windowAuthLock,
     },
   }
 );

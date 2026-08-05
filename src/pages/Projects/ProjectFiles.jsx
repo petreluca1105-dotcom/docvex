@@ -12,7 +12,7 @@ import {
   isElectronBranch,
   readLocalBlob,
 } from '../../lib/localFolder';
-import { openDocx, isDocxFile, openFileWindow, canViewInBrowser, openDocViewerWindow, prepareWhatsAppZip, prepareWhatsAppFolder, detectWhatsApp, notifyFilesRemoved, onFilesRemoved, onFilesChanged } from '../../lib/platform';
+import { openDocx, isDocxFile, openFileWindow, canViewInBrowser, openDocViewerWindow, prepareWhatsAppZip, prepareWhatsAppFolder, detectWhatsApp, notifyFilesRemoved, onFilesRemoved, onFilesChanged, allowLocalFile } from '../../lib/platform';
 import { openDocxInWindow } from '../../lib/openDocxWindow';
 import { emptyDocumentBlob, docKindFromName, mimeForKind } from '../../lib/documentGen';
 import { clearConversation, migrateConversation, migrateConversationsUnder } from '../../lib/conversationHistory';
@@ -27,6 +27,7 @@ import {
   reconcileWithFilesystem,
 } from '../../lib/localBranchMeta';
 import { getPrefetchedProjectFiles } from '../../lib/projectFilesPrefetch';
+import { prefetchMetadata } from '../../lib/metadataPrefetch';
 import { loadCaseTimeline } from '../../lib/caseTimeline';
 import './ProjectScoped.css';
 import './ProjectFiles.css';
@@ -141,15 +142,44 @@ export default function ProjectFiles({ embedded = false } = {}) {
 
   const [sidecar, setSidecar] = useState(() => seed?.sidecar || emptySidecar(projectId, seed?.folder || ''));
 
-  const [filesTab, setFilesTab] = useState('drafts');    // 'drafts' | 'trash' | 'timeline'
+  const [filesTab, setFilesTab] = useState('drafts');    // 'drafts' | 'trash'
   const [trashItems, setTrashItems] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
+  // Path of a freshly-created file that should be auto-selected + put into
+  // rename mode in the workspace (instead of opening it). Cleared once applied.
+  // MUST stay up here with the other hooks — the "no project selected" guard
+  // below returns early, so a hook declared past it would change the hook
+  // count between renders (React: "Rendered more hooks than during the
+  // previous render").
+  const [renameTargetPath, setRenameTargetPath] = useState(null);
+  // Path of a just-created folder the workspace should select (not open) —
+  // set after an archive is extracted.
+  const [selectTargetPath, setSelectTargetPath] = useState(null);
 
   // The project's saved case timeline (built in the Timeline tab, stored via
-  // lib/caseTimeline) — backs the virtual "Timeline" folder in the item model
-  // below. Re-read when the panel mode changes so opening the folder picks up
-  // a timeline generated since this page mounted.
+  // lib/caseTimeline) — used below only to surface timeline files that were
+  // picked from outside the project folder. Re-read when the panel mode
+  // changes so the listing picks up a timeline built since this page mounted.
   const caseTimeline = useMemo(() => loadCaseTimeline(projectId), [projectId, filesTab]);
+
+  // Timeline files picked from OUTSIDE the project folder need explicit
+  // localfile:// permission before their tiles can paint — the containment
+  // layer only serves folders the user has actually opened, so mounting them
+  // first makes every thumbnail 403. Register the paths, THEN let the items
+  // into the listing (see externalTimelineItems below).
+  const [timelineFilesAllowed, setTimelineFilesAllowed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const paths = Object.values(caseTimeline?.fileRefs || {})
+      .map((r) => r?.path)
+      .filter(Boolean);
+    if (!paths.length) { setTimelineFilesAllowed(true); return undefined; }
+    setTimelineFilesAllowed(false);
+    Promise.all(paths.map((p) => allowLocalFile(p)))
+      .catch(() => { /* best-effort — unregistered paths just show a glyph */ })
+      .then(() => { if (alive) setTimelineFilesAllowed(true); });
+    return () => { alive = false; };
+  }, [caseTimeline]);
 
   // Undo / redo stack for file operations (delete, rename, new folder,
   // import, restore). Each action records its own inverse; see the
@@ -341,6 +371,29 @@ export default function ProjectFiles({ embedded = false } = {}) {
   // tracks the last committed listing to diff against.
   const prevFilesRef = useRef(null);
   useEffect(() => { prevFilesRef.current = localFiles; }, [localFiles]);
+
+  // ── Metadata, extracted on arrival ────────────────────────────────────
+  // Every file in the folder gets its metadata read and cached in the
+  // background, so the Doc Viewer's Metadata tab is already filled in the
+  // first time it's opened rather than making the user press a button and
+  // wait through a whole-file hash. Uploads come through here too: a write
+  // triggers a relist, and a new file has no snapshot yet.
+  //
+  // The listing array is rebuilt every fetch, so the effect keys on a
+  // value-equal signature instead — a poll that returns identical stats must
+  // not restart the sweep. Files already cached (unchanged size+mtime) are
+  // skipped inside prefetchMetadata, so a steady folder does no work at all.
+  const localFilesRef = useRef(localFiles);
+  localFilesRef.current = localFiles;
+  const metaSweepKey = useMemo(
+    () => (localFiles || []).map((f) => `${f.path}:${f.sizeBytes}:${f.mtimeIso}`).join('|'),
+    [localFiles],
+  );
+  useEffect(() => {
+    const files = localFilesRef.current;
+    if (!files?.length) return undefined;
+    return prefetchMetadata(files.filter((f) => f?.path && !String(f.name || '').startsWith('.docvex')));
+  }, [metaSweepKey]);
   const editLogGuardRef = useRef(new Map()); // path → last logged ts
   const recordExternalEdits = useCallback((prevList, nextList) => {
     if (!Array.isArray(prevList) || prevList.length === 0) return;
@@ -423,8 +476,13 @@ export default function ProjectFiles({ embedded = false } = {}) {
   }, [projectId, localFolder, clearUndo]);
 
   // ── Browse listing for the CURRENT directory (drafts grid) ────────────
+  // Runs on BOTH backends: Electron lists the actual currentDir (real
+  // subfolder navigation); the web backend's list() ignores the dir argument
+  // and returns the flat folder listing (no subfolders on web) — without this
+  // the web grid rendered permanently empty, since draftItems reads only this
+  // browse cache (the recursive `localFiles` listing feeds counts, not the grid).
   useEffect(() => {
-    if (!supportsFolders || !localFolder) return undefined;
+    if (!localFolder) return undefined;
     let cancelled = false;
     const writeCache = (files, dirs) => {
       setBrowseCache((prev) => {
@@ -438,7 +496,7 @@ export default function ProjectFiles({ embedded = false } = {}) {
     }).catch(() => { if (!cancelled) writeCache([], []); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supportsFolders, localFolder, currentDir, browseTick]);
+  }, [localFolder, currentDir, browseTick]);
 
   // ── Sidecar: load on folder change, reconcile on listing change ───────
   useEffect(() => {
@@ -563,6 +621,20 @@ export default function ProjectFiles({ embedded = false } = {}) {
     await refetchTrash();
     return { ok: true, stored: stored || [] };
   }, [localFolder, refetchLocalFiles, refetchTrash]);
+
+  // Unpack a compressed file. A .zip lands in a sibling "<name> - unzipped"
+  // folder; every other format is handed to the OS archiver by main, which
+  // comes back as { extracted: false } — nothing changed on disk here, so
+  // there's nothing to refetch or undo.
+  const primExtractArchive = useCallback(async (srcPath) => {
+    const res = await localFolderApi.extractArchive(srcPath);
+    if (!res || res.ok === false) return { ok: false, error: res?.error };
+    if (res.extracted) {
+      setBrowseTick((t) => t + 1);
+      await refetchLocalFiles();
+    }
+    return { ok: true, extracted: !!res.extracted, path: res.path, created: !!res.created };
+  }, [refetchLocalFiles]);
 
   // Restore a batch of binned files (the inverse of primTrashFolder). Best-
   // effort: keeps going if one item can't be restored.
@@ -1226,7 +1298,6 @@ export default function ProjectFiles({ embedded = false } = {}) {
   };
   const draftItems = browseFiles.map((lf) => {
     const fid = sidecar.byFilename.get((lf.name || '').toLowerCase());
-    const localUrl = localUrlFor(lf.path, lf.mtimeIso);
     return {
       id: fid || lf.path || lf.name,
       kind: 'file',
@@ -1240,70 +1311,52 @@ export default function ProjectFiles({ embedded = false } = {}) {
       // (true/false once resolved; undefined while pending / for other types →
       // FilesWorkspace falls back to its name heuristic until the probe lands).
       isWhatsApp: lf.path ? waByPath[lf.path] : undefined,
-      descriptor: describeLocalFile({ localFile: lf, localUrl, cloud: null, bytesChanged: false, localContentHash: null }),
+      descriptor: describeLocalFile({ localFile: lf }),
       _raw: lf,
     };
   });
 
-  // ── Timeline virtual folder ──
-  // The files referenced by the project's case timeline (Timeline tab):
-  // every unique event.files name, resolved against the recursive local
-  // listing first (live size/mtime), falling back to the timeline's persisted
-  // fileRefs for files picked from outside the project folder. Names that
-  // resolve to no path are skipped. These are READ-ONLY references — rename /
-  // delete / move are withheld (they'd break the timeline's filename links).
-  const timelineFileItems = (() => {
-    if (!caseTimeline) return [];
+  // ── Case-timeline files picked from OUTSIDE the project folder ──
+  // There's no separate "Timeline" folder: a timeline's files are just files.
+  // Anything the timeline references that already lives in the local folder
+  // shows up on its own (in whichever folder it sits in). What's left are the
+  // files picked from elsewhere on disk when the timeline was built — surface
+  // those in Home so the timeline's evidence is never hidden, and treat them
+  // like every other file (same menus, rename / delete / open).
+  const externalTimelineItems = (() => {
+    if (!caseTimeline || !atRoot || !timelineFilesAllowed) return [];
     const out = [];
     const seen = new Set();
-    const byName = new Map(localFiles.map((f) => [(f.name || '').toLowerCase(), f]));
+    const known = new Set(localFiles.map((f) => (f.name || '').toLowerCase()));
+    const shownHere = new Set(browseFiles.map((f) => (f.name || '').toLowerCase()));
     for (const ev of caseTimeline.events || []) {
       for (const name of ev.files || []) {
         const key = (name || '').toLowerCase();
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        const lf = byName.get(key);
+        if (!key || seen.has(key) || known.has(key) || shownHere.has(key)) continue;
         const ref = caseTimeline.fileRefs?.[name];
-        if (!lf && !ref?.path) continue;
-        const raw = lf || { name, path: ref.path, mimeType: ref.mime };
-        const localUrl = localUrlFor(raw.path, raw.mtimeIso);
+        if (!ref?.path) continue;
+        seen.add(key);
+        const raw = { name, path: ref.path, mimeType: ref.mime };
         out.push({
-          id: `timeline:${raw.path || name}`,
+          id: ref.path,
           kind: 'file',
-          name: raw.name || name,
-          ext: fileExtOf(raw.name || name),
+          name,
+          ext: fileExtOf(name),
           sizeLabel: raw.sizeBytes != null ? formatBytes(raw.sizeBytes) : '',
           modifiedLabel: raw.mtimeIso ? formatDate(raw.mtimeIso) : '',
           author: 'You',
           status: 'synced',
-          timelineRef: true,
-          descriptor: describeLocalFile({ localFile: raw, localUrl, cloud: null, bytesChanged: false, localContentHash: null }),
+          descriptor: describeLocalFile({ localFile: raw }),
           _raw: raw,
         });
       }
     }
     return out;
   })();
-  // The Timeline entry sits beside the Trash at the root of every folder —
-  // opening it shows the timeline's files as one flat, read-only listing.
-  // Size = the referenced files' total (where a real size is known); date =
-  // the project's creation, mirroring the Trash entry.
-  const timelineBytes = timelineFileItems.reduce((sum, it) => sum + (Number(it._raw?.sizeBytes) || 0), 0);
-  const timelineEntryItem = {
-    id: '__timeline',
-    kind: 'folder',
-    name: 'Timeline',
-    empty: timelineFileItems.length === 0,
-    status: 'synced',
-    timelineEntry: true,
-    timelineCount: timelineFileItems.length,
-    sizeLabel: timelineFileItems.length > 0 ? formatBytes(timelineBytes) : '',
-    modifiedLabel: projectCreatedLabel,
-  };
-  // Surface the bin + timeline entries as the first items in every folder
-  // (each opens its one project-wide view regardless of where you are in the
-  // tree).
-  const draftFolders = [binEntryItem, timelineEntryItem, ...realDraftFolders];
+  if (externalTimelineItems.length) draftItems.push(...externalTimelineItems);
+  // Surface the bin as the first item in every folder (it opens the one
+  // project-wide view regardless of where you are in the tree).
+  const draftFolders = [binEntryItem, ...realDraftFolders];
 
   // Files deleted as part of a folder share a `folderGroup`; collapse each
   // group into ONE folder item (Windows-style) so the bin shows the deleted
@@ -1318,7 +1371,6 @@ export default function ProjectFiles({ embedded = false } = {}) {
       continue;
     }
     const synthetic = { name: t.originalName, path: t.path, mimeType: t.mimeType, mtimeIso: t.deletedAt };
-    const localUrl = localUrlFor(t.path, t.deletedAt);
     binFileItems.push({
       id: t.stored,
       kind: 'file',
@@ -1329,7 +1381,7 @@ export default function ProjectFiles({ embedded = false } = {}) {
       author: 'You',
       status: 'deleted',
       deletesInDays: daysUntilPurge(t.deletedAt),
-      descriptor: describeLocalFile({ localFile: synthetic, localUrl, cloud: null, bytesChanged: false, localContentHash: null }),
+      descriptor: describeLocalFile({ localFile: synthetic }),
       _raw: synthetic,
       _trash: t,
     });
@@ -1351,17 +1403,12 @@ export default function ProjectFiles({ embedded = false } = {}) {
     });
   }
 
-  // Breadcrumb. In the bin / timeline views, the crumb chain is Home › <view>
-  // (clicking Home exits back to drafts).
+  // Breadcrumb. In the bin view, the crumb chain is Home › Trash (clicking
+  // Home exits back to drafts).
   const fxCrumbs = filesTab === 'trash'
     ? [
         { label: 'Home', path: '__drafts' },
         { label: 'Trash', path: '__bin' },
-      ]
-    : filesTab === 'timeline'
-    ? [
-        { label: 'Home', path: '__drafts' },
-        { label: 'Timeline', path: '__timeline' },
       ]
     : [
         { label: 'Home', path: '__root' },
@@ -1372,7 +1419,6 @@ export default function ProjectFiles({ embedded = false } = {}) {
   // ── Workspace action handlers ─────────────────────────────────────────
   const fxOpen = (item) => {
     if (item.binEntry) { setFilesTab('trash'); return; }        // open the recycle bin
-    if (item.timelineEntry) { setFilesTab('timeline'); return; } // open the timeline view
     if (item.kind === 'folder') {
       // Double-clicking any folder — including a WhatsApp export — browses its
       // contents. The export's reconstructed conversation is reachable from the
@@ -1396,18 +1442,45 @@ export default function ProjectFiles({ embedded = false } = {}) {
     }
     const src = item?._raw?.path;
     if (!src) return;
-    const res = await localFolderApi.extractArchive(src);
-    if (res?.ok && res.extracted && res.path) {
-      setBrowseTick((t) => t + 1);
-      await refetchLocalFiles();
-      handleEnterFolder({ path: res.path, name: res.path.split(/[\\/]/).pop() });
-    } else if (res && !res.ok) {
+    const res = await primExtractArchive(src);
+    if (!res.ok) {
       notify({ category: 'file', variant: 'error', title: 'Couldn’t open the archive', body: res.error || 'The compressed file could not be opened.', dedupeKey: 'fx-extract-fail' });
+      return;
     }
+    // Handed to the OS archiver — nothing landed in this folder.
+    if (!res.extracted || !res.path) return;
+    // Select the new folder rather than navigating into it: extracting is a
+    // step in whatever you were doing here, not a reason to leave the folder.
+    const folderName = res.path.split(/[\\/]/).pop();
+    setSelectTargetPath(res.path);
+    notify({ category: 'file', variant: 'success', icon: 'folder-plus', title: 'Archive extracted', body: `“${item.name}” unpacked into “${folderName}”.`, silent: true, payload: actMeta('create-folder', folderName, { folder: true }) });
+    // Undoable only when the extract CREATED the folder. If it already existed
+    // we merged into it, and we can't tell the archive's files apart from the
+    // ones that were already there — so an "undo" would delete someone's work.
+    if (!res.created) return;
+    const state = { path: res.path, stored: [] };
+    pushAction({
+      label: `Extract “${item.name}”`,
+      // Undo bins the folder (30-day recycle bin) rather than deleting it, so
+      // even a failed redo can't lose the extracted files.
+      undo: async () => {
+        const r = await primTrashFolder(state.path);
+        if (r.ok) state.stored = r.stored;
+        return r.ok;
+      },
+      // Prefer restoring what undo binned — faster than unpacking again, and it
+      // brings back anything the user had added to the folder meanwhile.
+      redo: async () => {
+        if (state.stored.length) return primRestoreMany(state.stored);
+        const r = await primExtractArchive(src);
+        if (r.ok && r.path) state.path = r.path;
+        return r.ok;
+      },
+    });
   };
   const fxCrumbNav = (path) => {
-    if (path === '__drafts') { setFilesTab('drafts'); return; } // leave the bin / timeline
-    if (path === '__bin' || path === '__timeline') return;
+    if (path === '__drafts') { setFilesTab('drafts'); return; } // leave the bin
+    if (path === '__bin') return;
     if (path === '__root') handleNavigateCrumb(-1);
     else if (typeof path === 'string' && path.startsWith('__stack:')) handleNavigateCrumb(Number(path.slice(8)));
   };
@@ -1480,9 +1553,6 @@ export default function ProjectFiles({ embedded = false } = {}) {
   // generator armed (generate:true) so the user describes what they want and
   // Claude builds it. Uses a unique "Untitled" name so repeated creates don't
   // collide. Backs the "Create new file" dropdown in the Files toolbar.
-  // Path of a freshly-created file that should be auto-selected + put into
-  // rename mode in the workspace (instead of opening it). Cleared once applied.
-  const [renameTargetPath, setRenameTargetPath] = useState(null);
   const fxCreateTypedFile = async (kind) => {
     if (!localFolder) { notify({ category: 'file', variant: 'info', title: 'Connect a folder first', body: 'Choose a folder on your computer, then you can create files in it.', dedupeKey: 'fx-newfile-nofolder' }); return; }
     const ext = ['pptx', 'xlsx', 'pdf'].includes(kind) ? kind : 'docx';
@@ -1581,14 +1651,7 @@ export default function ProjectFiles({ embedded = false } = {}) {
     access: 'Stored in your local folder',
     title: 'Files',
     kicker: fxKicker,
-  }) : filesTab === 'timeline' ? {
-    eyebrow: 'Project files',
-    access: 'Case timeline',
-    title: 'Timeline',
-    kicker: timelineFileItems.length === 0
-      ? 'No timeline files yet — build a timeline in the Timeline tab and its files appear here'
-      : `${fmtCount(timelineFileItems.length)} ${timelineFileItems.length === 1 ? 'file' : 'files'} referenced by the case timeline`,
-  } : {
+  }) : {
     eyebrow: 'Project files',
     access: 'Recycle bin',
     title: 'Trash',
@@ -1601,9 +1664,9 @@ export default function ProjectFiles({ embedded = false } = {}) {
     projectId,
     masthead: filesMasthead,
     summaryText: `${localFiles.length} ${localFiles.length === 1 ? 'file' : 'files'}`,
-    // `tab` ('drafts' | 'trash' | 'timeline') is the in-panel mode: 'trash' is
-    // the recycle bin, 'timeline' the read-only case-timeline file view — each
-    // entered by opening its root folder entry and exited via the breadcrumb.
+    // `tab` ('drafts' | 'trash') is the in-panel mode: 'trash' is the recycle
+    // bin, entered by opening its root folder entry and exited via the
+    // breadcrumb.
     tab: filesTab,
     canEdit: true,
     hasLocalFolder: Boolean(localFolder),
@@ -1619,15 +1682,13 @@ export default function ProjectFiles({ embedded = false } = {}) {
     onUp: fxUp,
     canBack: fxCanUp,
     canUp: fxCanUp,
-    folders: filesTab === 'drafts' ? draftFolders : filesTab === 'timeline' ? [] : binFolderItems,
-    items: filesTab === 'drafts' ? draftItems : filesTab === 'timeline' ? timelineFileItems : binFileItems,
+    folders: filesTab === 'drafts' ? draftFolders : binFolderItems,
+    items: filesTab === 'drafts' ? draftItems : binFileItems,
     loading: filesTab === 'trash' ? trashLoading : localLoading,
     onOpen: fxOpen,
     onOpenContent: fxOpenContent,
-    // Timeline items are references — no rename/delete (a rename would break
-    // the timeline's filename links; deleting from a reference list is a trap).
-    onRename: filesTab === 'timeline' ? undefined : fxRename,
-    onDelete: filesTab === 'timeline' ? undefined : fxDelete,
+    onRename: fxRename,
+    onDelete: fxDelete,
     onRestore: fxRestore,
     onOpenLocation: fxOpenLocation,
     // No toolbar refresh button — the doc-viewer's "Files" chrome has its own
@@ -1639,6 +1700,8 @@ export default function ProjectFiles({ embedded = false } = {}) {
     onCreateTypedFile: (hasLocalFolderApi && filesTab === 'drafts' && Boolean(localFolder)) ? fxCreateTypedFile : undefined,
     renameTargetPath,
     onRenameTargetConsumed: () => setRenameTargetPath(null),
+    selectTargetPath,
+    onSelectTargetConsumed: () => setSelectTargetPath(null),
     onUpload: fxUpload,
     onUploadFolder: fxUploadFolder,
     onEmptyBin: handleEmptyBin,

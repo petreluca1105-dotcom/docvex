@@ -12,6 +12,7 @@ import { NotificationsProvider } from './context/NotificationsContext';
 import { SelectedProjectProvider } from './context/SelectedProjectContext';
 import { ChatUnreadProvider } from './context/ChatUnreadContext';
 import NotificationCenter from './components/NotificationCenter';
+import AuthWindowGate from './components/AuthWindowGate';
 import { isElectron, isMac } from './lib/platform';
 import App from './App';
 
@@ -21,13 +22,19 @@ import App from './App';
 // screenshot's path. Every other window is the main app.
 const launchParams = new URLSearchParams(window.location.search);
 const isDocViewer = launchParams.get('docViewer') === '1';
+// The dedicated sign-in window (main.js openAuthWindow) — the same renderer
+// booted straight into /auth at the Cabinet's fixed size. The app window is
+// never reshaped into a login box any more.
+const isAuthWindow = launchParams.get('authWindow') === '1';
 const isSnip = launchParams.get('snip') === '1';
 const isSnipPanel = launchParams.get('snipPanel') === '1';
 const isSnipCountdown = launchParams.get('snipCountdown') === '1';
+// The app-drawn system-tray menu (main.js anchors it to the tray icon).
+const isTrayMenu = launchParams.get('trayMenu') === '1';
 // Only the main app window shows notification toasts / runs the notification
 // source hooks — aux windows (Doc Viewer, snip overlay, snip launcher,
 // countdown) must not pop toasts over their own surfaces.
-const isMainWindow = !isDocViewer && !isSnip && !isSnipPanel && !isSnipCountdown;
+const isMainWindow = !isDocViewer && !isSnip && !isSnipPanel && !isSnipCountdown && !isTrayMenu && !isAuthWindow;
 
 // The Snipping-Tool launcher panel and the delayed-capture countdown ride in
 // TRANSPARENT windows (their cards paint themselves; everything else must
@@ -35,6 +42,8 @@ const isMainWindow = !isDocViewer && !isSnip && !isSnipPanel && !isSnipCountdown
 // the opaque page background before anything renders.
 if (isSnipPanel) document.documentElement.classList.add('is-snip-panel');
 if (isSnipCountdown) document.documentElement.classList.add('is-snip-countdown');
+// Same deal for the tray menu — only its card paints.
+if (isTrayMenu) document.documentElement.classList.add('is-tray-menu');
 
 // Frameless Electron build draws a custom title bar — flag the document
 // BEFORE first paint so the layout reserves --titlebar-h (no startup shift).
@@ -42,22 +51,30 @@ if (isSnipCountdown) document.documentElement.classList.add('is-snip-countdown')
 // overlay is chromeless edge-to-edge (the frozen screenshot must fill the
 // display exactly), so it skips the reservation too — as do the launcher
 // panel (it draws its own mini title bar) and the countdown badge.
-if (isElectron && !isSnip && !isSnipPanel && !isSnipCountdown) {
+if (isElectron && !isSnip && !isSnipPanel && !isSnipCountdown && !isTrayMenu) {
   document.documentElement.classList.add('with-titlebar');
   // macOS keeps the native traffic-light buttons (titleBarStyle:'hidden' in
   // main.js) floating over our bar, so the title bar insets its brand to clear
   // them and hides its own window controls. Flag it before first paint too.
   if (isMac) document.documentElement.classList.add('is-mac');
 }
-const initialEntries = isDocViewer
+const initialEntries = isAuthWindow
+  ? ['/auth']
+  : isDocViewer
   ? [`/doc-viewer?${launchParams.toString()}`]
+  : isTrayMenu
+  ? [`/tray-menu?${launchParams.toString()}`]
   : isSnipCountdown
     ? [`/snip-countdown?${launchParams.toString()}`]
     : isSnipPanel
       ? [`/snip-panel?${launchParams.toString()}`]
       : isSnip
         ? [`/snip?${launchParams.toString()}`]
-        : ['/'];
+        // Main window boots straight into the project's Files tab — the tab
+        // people actually work in. (Signed out, ProtectedRoute bounces to
+        // /auth; with no project selected, the page shows its "pick a project"
+        // CTA.) The Activity feed stays one click away on the sidebar's "/".
+        : ['/files'];
 
 // Provider order:
 //   AuthProvider                — session
@@ -76,6 +93,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <MemoryRouter initialEntries={initialEntries}>
       <AuthProvider>
+        {/* Signed in → reveal the app window; signed out → hide it and raise
+            the dedicated sign-in window. App window only. */}
+        {isMainWindow && <AuthWindowGate />}
         <ThemeProvider>
           <AppPrefsProvider>
             <SelectedProjectProvider>

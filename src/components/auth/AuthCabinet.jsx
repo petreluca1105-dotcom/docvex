@@ -1,8 +1,9 @@
 import React from 'react';
 import {
   GoogleButton, Field, Strength, Agreements, ReviewSummary,
-  FormMsg, CheckIcon, preventNav, woodH,
+  FormMsg, CheckIcon, woodH, SIGNUP_URL,
 } from './authBits';
+import { openExternal } from '../../lib/platform';
 import CursorSpotlight from '../CursorSpotlight';
 import brandLockup from '../../big_logo.png';
 
@@ -61,7 +62,7 @@ export default function AuthCabinet({ flow }) {
 function SignIn({ flow: f }) {
   return (
     <div className="auv-fade">
-      <h3 className="auv-h3">Welcome back</h3>
+      <h3 className="auv-h3">Welcome</h3>
       <p className="auv-sub">Sign in to your DocVex workspace.</p>
       <Field label="Email" type="email" value={f.email} onChange={f.onEmail}
         placeholder="you@firm.law" autoComplete="email" autoFocus={!f.email} />
@@ -74,7 +75,13 @@ function SignIn({ flow: f }) {
       </button>
       <div className="auv-or"><span>or</span></div>
       <GoogleButton onClick={f.google} />
-      <p className="auv-foot">New to DocVex? <button type="button" className="auv-link" onClick={f.toSignup}>Create an account</button></p>
+      {/* Sign-up lives on the website — same Supabase project, so the account
+          created there signs in here. Opens in the default browser (or a new
+          tab on web) so the half-typed sign-in form survives. This is the only
+          entry point to the in-app <SignUp/> wizard, so that wizard is now
+          dormant; it's kept intact (and still driven by useAuthFlow) so
+          onboarding can be pulled back in-app by restoring `f.toSignup` here. */}
+      <p className="auv-foot">New to DocVex? <button type="button" className="auv-link" onClick={() => openExternal(SIGNUP_URL)}>Create an account</button></p>
     </div>
   );
 }
@@ -134,7 +141,7 @@ function SignUp({ flow: f, stepDotClass }) {
             { k: 'Firm', v: f.firm || '—' },
             { k: 'Email', v: f.email || 'your email' },
           ]} />
-          <Agreements agree={f.agree} news={f.news} onAgree={f.onAgree} onNews={f.onNews} onTerms={preventNav} />
+          <Agreements agree={f.agree} news={f.news} onAgree={f.onAgree} onNews={f.onNews} />
           <FormMsg error={f.error} />
           <div className="auv-btn-row">
             <button className="auv-btn auv-btn--ghost" onClick={f.back}>Back</button>

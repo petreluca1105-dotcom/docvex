@@ -207,6 +207,18 @@ body.dv-ocr-resizing .dv-split-resize::after { background: var(--accent); }
    header), not the whole rail. */
 .dv-files-recent-list { position: relative; flex: 1; min-height: 0; display: flex; }
 .dv-page-empty { align-items: center; justify-content: center; color: var(--text-muted); }
+/* Shown for the first frames of an instant open: the pre-warmed window is now
+   revealed BEFORE it's been handed a file, so the gap has to read as
+   "opening…" rather than as an empty window. */
+.dv-boot-spinner {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 2.4px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--accent);
+  animation: dvBootSpin 720ms linear infinite;
+}
+@keyframes dvBootSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dv-boot-spinner { animation-duration: 2.4s; } }
 
 /* Ambient WHITE dot grid over the gray page backdrop. Sits BEHIND the page's
    children — which are lifted to z-index:1 — but above the page's own
@@ -3689,3 +3701,50 @@ button.dv-snip-entry-thumb { cursor: pointer; }
 .dv-snip-entry-text.is-empty { color: var(--text-muted); font-style: italic; }
 /* (No corner × — snippet actions live in the morph-pill right-click menu:
    Find / Delete-with-confirm, same interaction as the Files page tiles.) */
+
+/* ── Metadata tab (MetadataPanel) ────────────────────────────────────────
+   Reuses the extracted-text panel's masthead + scroll shell; adds the
+   extract button strip and the grouped property list below it. */
+.dv-meta-actions { flex: none; padding: 11.2px; }
+.dv-meta-error {
+  margin: 0 11.2px 8px; padding: 8px 9.6px;
+  border: 1px solid var(--danger); border-radius: 8px;
+  background: var(--danger-soft); color: var(--danger-text);
+  font-size: 10.4px; line-height: 1.45;
+}
+.dv-meta-groups { display: flex; flex-direction: column; gap: 14.4px; padding: 0 11.2px 16px; }
+.dv-meta-group-title {
+  margin: 0 0 6.4px;
+  font-size: 9.6px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.dv-meta-rows {
+  margin: 0;
+  border: 1px solid var(--border); border-radius: 9.6px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+/* Label / value pairs — two columns while they fit, stacking the value under
+   a long label rather than squeezing it (hashes and paths are long). */
+.dv-meta-row {
+  display: grid; grid-template-columns: 96px 1fr; gap: 9.6px;
+  padding: 7.2px 11.2px;
+  font-size: 10.4px; line-height: 1.45;
+}
+.dv-meta-row + .dv-meta-row { border-top: 1px solid var(--border); }
+.dv-meta-row dt { color: var(--text-muted); font-weight: 600; }
+.dv-meta-row dd {
+  margin: 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 2.4px;
+  color: var(--text-primary);
+}
+/* Values are selectable — a checksum or an author name is meant to be copied. */
+.dv-meta-value { user-select: text; cursor: text; overflow-wrap: anywhere; }
+.dv-meta-value.is-long { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.6px; }
+.dv-meta-hint { color: var(--text-muted); font-size: 9.6px; }
+.dv-meta-warnings {
+  margin: 0; padding: 8px 11.2px 8px 25.6px;
+  border: 1px solid var(--border); border-radius: 9.6px;
+  background: var(--bg-elevated);
+  color: var(--text-muted); font-size: 10px; line-height: 1.5;
+}
