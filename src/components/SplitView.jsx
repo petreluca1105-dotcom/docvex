@@ -43,7 +43,7 @@ function paneDestinations(selectedProject) {
         { label: 'Files', to: '/files', icon: NAV_ICONS.files },
         { label: 'Chat', to: '/chat', icon: NAV_ICONS.chat },
         { label: 'Timeline', to: '/events', icon: NAV_ICONS.events },
-        { label: 'AI', to: '/ai', icon: NAV_ICONS.ai },
+        { label: 'Advisor', to: '/ai', icon: NAV_ICONS.ai },
         { label: 'Updates', to: '/versions', icon: NAV_ICONS.versions },
       ]
     : [
@@ -94,7 +94,7 @@ function PaneChrome({ onRefresh }) {
     '/files': 'Project files & folders',
     '/chat': 'Team & private chat',
     '/events': 'Case timeline',
-    '/ai': 'AI dashboard & tools',
+    '/ai': 'Project advisor',
     '/todos': 'Project to-dos',
     '/mail': 'AI-drafted replies',
     '/debug': 'Developer tools',

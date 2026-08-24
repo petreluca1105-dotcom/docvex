@@ -1,5 +1,4 @@
 import React from 'react';
-import AiSphere from '../../components/AiSphere';
 
 // Lucide-style stroke icons, ported from the Claude Design AI-tab handoff.
 // The app convention is inline JSX icon constants; here a tiny factory keeps
@@ -17,10 +16,10 @@ const mk = (paths) => (props = {}) => React.createElement(
 );
 
 export const ICONS = {
-  // The AI glyph everywhere in the app is the animated "thinking" sphere.
-  // Call sites stay `I.spark({ width, height })`; the props pass straight
-  // through to <AiSphere>, so every AI-icon instance renders the sphere.
-  spark: (props = {}) => React.createElement(AiSphere, props),
+  // The app's standard AI sparkle glyph — the same stroke icon the sidebar /
+  // pane nav use for the AI destination. (The former animated AiSphere
+  // "thinking sphere" component was removed.)
+  spark: mk(['M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4z', 'M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z']),
   pen: mk(['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z']),
   shield: mk(['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z']),
   scale: mk(['m16 16 3-8 3 8c-2 1.5-4 1.5-6 0', 'm2 16 3-8 3 8c-2 1.5-4 1.5-6 0', 'M7 21h10', 'M12 3v18', 'M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2']),
@@ -31,6 +30,8 @@ export const ICONS = {
   file: mk(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', { t: 'polyline', p: { points: '14 2 14 8 20 8' } }]),
   files: mk(['M15 2H6a2 2 0 0 0-2 2v14', 'M9 18h9a2 2 0 0 0 2-2V8l-5-5H9a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z']),
   send: mk(['m22 2-7 20-4-9-9-4Z', 'M22 2 11 13']),
+  arrowUp: mk(['M12 19V5', 'm5 12 7-7 7 7']),
+  stop: mk([{ t: 'rect', p: { x: 6.5, y: 6.5, width: 11, height: 11, rx: 2 } }]),
   plus: mk(['M12 5v14', 'M5 12h14']),
   search: mk([{ t: 'circle', p: { cx: 11, cy: 11, r: 8 } }, 'm21 21-4.3-4.3']),
   copy: mk([{ t: 'rect', p: { x: 9, y: 9, width: 13, height: 13, rx: 2 } }, 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1']),

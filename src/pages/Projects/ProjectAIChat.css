@@ -1,12 +1,13 @@
-/* DocVex — AI chat page (the standalone /ai-chat assistant).
-   NOT project-scoped: a rail of saved conversations on the left + the active
-   thread on the right, with the Chat window's composer docked in the pane
-   footer. Reuses the `.ai-hub` chat bubbles (ProjectAI.css) and the
-   `.dvx-composer` footer styles (ProjectChatVariantB.css); this file owns the
-   shell + rail layout. */
+/* DocVex — the project AI tab (/ai): a Claude-style assistant laid out like
+   the Chat tab. A rail of saved conversations on the left + the active thread
+   on the right, inside the chat page's skeleton — big .dvx-mh masthead that
+   scrolls away, sticky .dvx-toolbar mini header, one page scroller
+   (.dvx-scroll-area), the composer docked in the window footer. Reuses the
+   `.ai-hub` chat bubbles (ProjectAI.css) and the `.dvx-*` chat primitives
+   (ProjectChatVariantB.css); this file owns the shell + rail layout. */
 
-/* Full-bleed: fill the pane, drop the sheet lip/padding so the rail + thread
-   reach the chrome above and the footer below (mirrors the Files page). */
+/* Full-bleed: fill the pane, drop the sheet lip/padding so the toolbar + the
+   footer reach the window edges (mirrors .project-page-frame:has(.dvx-chat)). */
 .project-page-frame:has(.ai-chat-page) {
   height: 100%;
   min-height: 0;
@@ -20,14 +21,43 @@
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 0;
+  /* The shared left content gap as PADDING (same recipe as .dvx-chat.vb-chat)
+     so this overflow-hidden box's clip edge sits at the rail and the sticky
+     toolbar's negative-margin overhang stays visible. */
+  padding: 0 0 0 var(--content-left-gap, 17.6px);
   height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  /* Anchor for the full-pane drag-over modal. */
+  overflow: hidden;
   position: relative;
 }
+/* Scrolling happens ONLY inside the thread (.aichat-main) — drop the outer
+   scroller's reserved gutter. */
+.sv-single-scroll:has(.ai-chat-page) { scrollbar-gutter: auto; }
+
+/* The .dvx-scroll-area class is kept for its shared ≥1024px width-cap rules,
+   but on this page it is NOT a scroller: a fixed flex column (masthead →
+   toolbar → shell) whose overflow is clipped — only the bubbles column
+   inside the shell scrolls. */
+.ai-chat-page .dvx-scroll-area {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+}
+
+/* Breathing room between the (static) tabs bar and the shell below it. */
+.ai-chat-page .dvx-toolbar { margin-bottom: 9.6px; }
+
+/* Content sections that fill the space below the (static) masthead + toolbar:
+   the chat shell, the empty state, the Debug placeholder. */
+.ai-chat-page .aichat-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Debug tab — intentionally empty placeholder (fills via .aichat-fill). */
+.ai-chat-page .aichat-debug { min-width: 0; }
 
 /* ── Drag-over preview modal ──────────────────────────────────────────
    Shown while a file is dragged anywhere over the AI tab. pointer-events
@@ -171,7 +201,164 @@
    the file already lives in the sidebar). The list sizes to its content (not
    the full height) and is anchored at the top, with a close button pinned to
    the panel's top-right corner. */
-.ai-chat-page .aichat-main { position: relative; }
+/* The thread column beside the rail: the scrolling bubbles list fills it and
+   the composer FLOATS over its bottom edge — messages scroll visibly behind
+   the input's frosted surface. */
+.ai-chat-page .aichat-thread-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* Anchor for the floating composer below. */
+  position: relative;
+}
+/* The composer floats over the thread bottom (the .vb-composer-wrap base is
+   already absolute; scope it to this column). The transparent padding lets
+   clicks fall through to the messages behind; the input box re-enables its
+   own pointer events. Above the window's bottom content fade (z 5) so the
+   field itself is never washed out. */
+.ai-chat-page .aichat-thread-col > .vb-composer-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  pointer-events: none;
+  padding: 6.4px 20.8px 12.8px 19.2px;
+  background: transparent;
+}
+.ai-chat-page .aichat-thread-col > .vb-composer-wrap > * { pointer-events: auto; }
+
+/* The window's tall bottom content fade would wash over the thread's last
+   lines around the floating composer — mirror the Chat/Files exception: just
+   the solid seam strip in the chrome-inset gap, content scrolls visibly
+   through the composer's frost. */
+.sv-single-body:has(.ai-chat-page)::after {
+  height: var(--chrome-inset, 6.4px);
+  background: var(--bg-page);
+}
+.ai-chat-page .aichat-thread-col .aichat-attachments { padding: 0 0 6.4px; }
+/* The ask_user question panel — rides inside the floating composer wrap, just
+   above the input box. */
+.ai-chat-page .aichat-askpanel {
+  padding: 0 0 6.4px;
+}
+
+/* The active conversation — the page's ONLY scroll container: the bubbles
+   scroll here while masthead/toolbar/rail/composer stay put. */
+.ai-chat-page .aichat-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Left inset lines the thread text up with the composer's text below it:
+     the wrap's 19.2px + the rounded box's 1px border + 4.8px padding + the
+     textarea's 1.6px = 26.6px to where the caret sits. */
+  padding: 17.6px 20.8px 17.6px 26.6px;
+  /* Bubbles dissolve at the scroller's edges via a MASK (content turns
+     transparent), so the app's dotted bg + cursor spotlight show through the
+     fade untouched. The native scrollbar would be masked too — it's hidden;
+     the custom .aichat-msg-scrollbar floats beside the scroller instead. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 32px, #000 calc(100% - 52px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 32px, #000 calc(100% - 52px), transparent 100%);
+  scrollbar-width: none;
+}
+.ai-chat-page .aichat-main::-webkit-scrollbar { width: 0; height: 0; }
+
+/* The composer's text sits a bit further from the rounded box's left edge
+   (the shared .dvx-composer-textarea keeps a hairline 1.6px inset). */
+.ai-chat-page .dvx-composer-textarea {
+  padding-left: 9.6px;
+}
+
+/* No cursor-following spotlight glow on this composer (the shared ::after
+   layer) — the frosted fill (::before) stays so text scrolls readably
+   behind the box. */
+.ai-chat-page .dvx-composer::after { display: none; }
+
+/* No drop shadow under the box; focus keeps just the accent ring. */
+.ai-chat-page .dvx-composer { box-shadow: none; }
+.ai-chat-page .dvx-composer:focus-within {
+  box-shadow: 0 0 0 2.4px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ── Created-file card ───────────────────────────────────────────────────
+   Shown under the AI's "I created …" message — a Files-tab-style tile: real
+   thumbnail, name, click-to-select ring, double-click opens the Doc Viewer. */
+.ai-chat-page .aichat-created-file {
+  margin-top: 8px;
+}
+.ai-chat-page .aichat-file-card {
+  display: flex;
+  flex-direction: column;
+  width: 128px;
+  border-radius: 9.6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  user-select: none;
+}
+.ai-chat-page .aichat-file-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
+}
+.ai-chat-page .aichat-file-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2.4px var(--accent-tint), var(--shadow-card);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+}
+.ai-chat-page .aichat-file-card-thumb {
+  height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  color: var(--accent);
+}
+.ai-chat-page .aichat-file-card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ai-chat-page .aichat-file-card-thumb .project-files-icon { width: 40%; height: 40%; color: var(--accent); }
+.ai-chat-page .aichat-file-card-name {
+  padding: 6.4px 8px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "Interrupted by user" marker (à la Claude Code) — a quiet danger-tinted
+   line left in the thread when the user stops a turn; never sent back to the
+   model. */
+.ai-chat-page .aichat-interrupted {
+  display: flex;
+  align-items: center;
+  gap: 6.4px;
+  margin: 1.6px 0 4.8px;
+  font-size: 0.656rem;
+  font-weight: 500;
+  color: var(--danger-text, var(--danger));
+}
+.ai-chat-page .aichat-interrupted-elbow {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  opacity: 0.8;
+}
+
+.ai-chat-page .aichat-main .chat {
+  /* Full-width column: AI messages anchor to the left edge and own messages
+     to the right edge. */
+  max-width: none;
+  width: 100%;
+  margin: 0;
+}
 .ai-chat-page .aichat-drop-panel {
   position: absolute;
   inset: 0;
@@ -276,9 +463,10 @@
 }
 
 .ai-chat-page .aichat-shell {
-  flex: 1 1 auto;
-  min-height: 0;
+  /* Fills the fixed area below the masthead + toolbar. The rail and the
+     thread stretch to its full height; the THREAD is the scroll container. */
   display: flex;
+  align-items: stretch;
 }
 
 /* Timeline tab — intentionally empty placeholder; fills the same area as the
@@ -347,19 +535,69 @@
   padding: 19.2px clamp(16px, 4%, 38.4px);
 }
 
-/* ── Conversation rail ──────────────────────────────────────────────── */
+/* ── Conversation rail ──────────────────────────────────────────────────
+   Fills the shell's fixed height beside the thread; the LIST inside scrolls
+   internally past its height. Width comes from an inline flex-basis — drag
+   the divider (.aichat-resizer) next to it to resize. */
 .ai-chat-page .aichat-rail {
-  flex: 0 0 201.6px;
+  flex: 0 0 216px; /* fallback; the page sets the live width inline */
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-sidebar) 88%, transparent);
-  /* Lift the rail so the overlay scrollbar (which overflows past the rail's
-     right edge, into the conversation) paints above it. */
+  /* No surface or border of its own — the page bg shows through, and the
+     hairline divider is painted by the .aichat-resizer drag handle. */
+  background: transparent;
   position: relative;
   z-index: 1;
+  border-radius: 9.6px 0 0 9.6px;
 }
+
+/* The rail's divider, now a drag handle: a 9.6px hit band spanning the shell's
+   full height, with the 1px hairline centred in it. The line brightens to the
+   accent while hovered / dragging. */
+.ai-chat-page .aichat-resizer {
+  flex: 0 0 9.6px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  z-index: 2;
+}
+.ai-chat-page .aichat-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--border);
+  transition: background 120ms ease, width 120ms ease;
+}
+.ai-chat-page .aichat-resizer:hover::before,
+.ai-chat-page .aichat-resizer.is-active::before {
+  width: 2.4px;
+  transform: translateX(-1.2px);
+  background: var(--accent);
+}
+/* The chat list's scroll INDICATOR — rides ON the divider (centred over the
+   hairline), height/offset written inline by the page. Display-only: no
+   pointer interaction (the whole band drags the rail width); it sits OUTSIDE
+   the list's fade overlays, so it never washes out. */
+.ai-chat-page .aichat-resizer-thumb {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 4.8px;
+  margin-left: -2.4px;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+  z-index: 3;
+}
+.ai-chat-page .aichat-resizer-thumb.is-visible { opacity: 1; }
 .ai-chat-page .aichat-newbtn {
   width: 100%;
   display: inline-flex;
@@ -394,16 +632,40 @@
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  /* Symmetric padding — no reserved gutter; the custom scrollbar overlays.
-     Minimal top padding so the "Chats" header + first items sit right at the
-     top of the rail, in line with the topbar collapse toggle. */
-  padding: 0 6.4px 11.2px;
-  /* Hide the native scrollbar (Firefox); the custom one floats over content. */
+  /* Right padding 19.2px (+ the resizer's 4.8px half-band = 24px to the
+     divider line) matches the items' visual LEFT gap (the 17.6px shared
+     content gap + the 6.4px list inset), so the chat rows sit centred
+     between the window edge and the divider. Small top inset clears the
+     edge-fade band under the New-chat divider. */
+  padding: 6.4px 19.2px 11.2px 6.4px;
+  /* Native scrollbar hidden — the list scrolls via the thumb that rides on
+     the rail's drag-handle divider (.aichat-resizer-thumb). */
   scrollbar-width: none;
 }
-/* Hide the native scrollbar (WebKit/Chromium) — it would otherwise reserve
-   layout width when it appears. */
 .ai-chat-page .aichat-list::-webkit-scrollbar { width: 0; height: 0; }
+/* Edge fades: per-ROW opacity set in JS by distance from the list's edges
+   (fadeRailItems) — the rail's background (the app's dot grid / spotlight)
+   never dims, and the SELECTED row is skipped so it stays fully solid. */
+
+/* Thinking / done-thinking indicator on a rail row. */
+.ai-chat-page .aichat-item-dot {
+  flex: 0 0 auto;
+  width: 6.4px;
+  height: 6.4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ai-chat-page .aichat-item-dot.is-busy {
+  background: var(--text-muted);
+  animation: aichat-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes aichat-dot-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-chat-page .aichat-item-dot.is-busy { animation: none; opacity: 0.7; }
+}
 
 /* ── Custom overlay scrollbar ────────────────────────────────────────────
    A floating thumb that sits just OUTSIDE the sidebar's right edge (negative
@@ -437,80 +699,43 @@
   width: 7.2px;
   background: color-mix(in srgb, var(--scrollbar-thumb) 75%, var(--text-primary));
 }
-/* "Chats" header row — label on the left, New-chat button in line on the right.
-   The 8px right inset lines the New-chat button up with the chat rows' right
-   content edge (and the topbar's right gutter). */
+/* The New-chat header — a STATIC row at the top of the rail, outside the
+   scroller, so the chat items scroll under it. Side insets match the list's
+   so the button lines up with the item rows. The hairline divider splits the
+   bottom gap: button → 6.4px → line → the list (whose top fade finishes the
+   "scrolls under" read). */
 .ai-chat-page .aichat-list-head {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4.8px 19.2px 6.4px 6.4px;
+  border-bottom: 1px solid var(--border);
+}
+/* New chat — the same row shape as a chat item (height / radius / padding /
+   icon+label layout), but its RESTING style borrows the sidebar's selected
+   tab (.nav-item.active): accent-tint fill + accent ring + accent text. */
+.ai-chat-page .aichat-newchat-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 4.8px;
-  /* Right inset 0 so the New-chat button's end lines up with the chat rows' end.
-     Symmetric top/bottom inset so spacing above the button matches below. */
-  padding: 4.8px 0 4.8px 6.4px;
-  /* Pinned to the top of the list so it stays visible while the chats scroll. */
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-sidebar);
-}
-.ai-chat-page .aichat-list-label {
-  font-size: 0.544rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.ai-chat-page .aichat-list-newchat {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4.8px;
-  font: inherit;
-  font-size: 0.624rem;
-  font-weight: 600;
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border: 1px solid transparent;
-  /* 8px radius matches the chat items + the collapsed button, so every rail
-     button shares the same shape in both states. */
-  border-radius: 6.4px;
-  padding: 0 9.6px;
-  /* 40px to match the collapsed button + the chat items, so the height stays
-     identical between expanded and collapsed states. */
+  gap: 7.2px;
   height: 32px;
   box-sizing: border-box;
-  cursor: pointer;
+  padding: 6.4px 6.4px 6.4px 9.6px;
+  border-radius: 6.4px;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: left;
   white-space: nowrap;
+  cursor: pointer;
+  background: var(--accent-tint);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--accent);
   transition: background 120ms, color 120ms, border-color 120ms;
 }
-.ai-chat-page .aichat-list-newchat:hover { background: var(--accent-hover); }
-.ai-chat-page .aichat-list-newchat svg { flex: 0 0 auto; }
-/* Label hides outright when collapsed (no animation). */
-.ai-chat-page .aichat-list-newchat-label {
-  display: inline-block;
-  max-width: 72px;
-  overflow: hidden;
-  opacity: 1;
-}
-/* Collapsed rail → just the + icon, centered. Top/bottom padding (6px) matches
-   the expanded head so the gap above the first chat doesn't jump. */
-.ai-chat-page .aichat-rail.is-collapsed .aichat-list-head { justify-content: center; padding: 4.8px 0; }
-.ai-chat-page .aichat-rail.is-collapsed .aichat-list-label { display: none; }
-/* Collapsed → the + button takes the same shape/size as a collapsed chat item
-   (full width, 40px tall, 8px radius, centered icon) so it sits flush in the
-   rail column with the chats below it. */
-.ai-chat-page .aichat-rail.is-collapsed .aichat-list-newchat {
-  width: 100%;
-  height: 32px;
-  /* Centre the + in the collapsed square (the hidden label has 0 width). */
-  padding: 6.4px;
-  gap: 0;
-  border-radius: 6.4px;
-  border-color: transparent;
-  justify-content: center;
-}
-.ai-chat-page .aichat-rail.is-collapsed .aichat-list-newchat-label { max-width: 0; opacity: 0; }
+.ai-chat-page .aichat-newchat-item:hover { border-color: var(--accent); }
+.ai-chat-page .aichat-newchat-item svg { flex: 0 0 auto; }
 .ai-chat-page .aichat-item {
   position: relative;
   display: flex;
@@ -520,7 +745,7 @@
      the title / 24px action buttons are present — the title's line-height was
      nudging the expanded rows a few px taller than the collapsed ones. */
   height: 32px;
-  margin-bottom: 3.2px;
+  margin-bottom: 4.8px;
   box-sizing: border-box;
   padding: 6.4px 6.4px 6.4px 9.6px;
   /* Transparent border reserved on every row so the selected row's border
@@ -532,18 +757,6 @@
   color: var(--text-secondary);
   transition: background 120ms, color 120ms, border-color 120ms;
 }
-/* Per-chat colour code — a vertical line flush to the left edge inside the
-   item (clipped to the rounded corners via overflow:hidden), tinted by a
-   deterministic hash of the chat id. */
-.ai-chat-page .aichat-item::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2.4px;
-  background: var(--chat-accent, var(--accent));
-}
 .ai-chat-page .aichat-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
 /* Selected chat — accent-tinted row with a border matching the window-select
    dropdown above it. */
@@ -553,7 +766,6 @@
   color: var(--text-primary);
   font-weight: 600;
 }
-.ai-chat-page .aichat-item.is-active::after { width: 3.2px; }
 .ai-chat-page .aichat-item.is-active .aichat-item-ico { color: var(--accent); }
 .ai-chat-page .aichat-item-ico {
   flex: 0 0 auto;
@@ -568,6 +780,21 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Search-match highlight inside a rail item's title (Explorer-style). */
+.ai-chat-page .aichat-item-title mark {
+  background: color-mix(in srgb, var(--warning) 30%, transparent);
+  color: inherit;
+  border-radius: 2.4px;
+  padding: 0 1px;
+}
+/* Shown in place of the items when the toolbar search matches nothing. */
+.ai-chat-page .aichat-rail-noresults {
+  padding: 9.6px 9.6px 0;
+  font-size: 0.656rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-word;
 }
 .ai-chat-page .aichat-item-actions {
   flex: 0 0 auto;
@@ -1044,24 +1271,8 @@
   font-size: 0.656rem;
 }
 
-/* ── Composer ───────────────────────────────────────────────────────────
-   Uses the Chat window's `.vb-composer-wrap` / `.dvx-composer`. When portalled
-   into the pane footer, ProjectChatVariantB.css's `.sv-footer` rules flatten
-   it to fill the bar. Inline fallback (no footer) docks it as a flow row (its
-   base wrapper is position:absolute). */
-.ai-chat-page > .vb-composer-wrap {
-  position: static;
-  flex: 0 0 auto;
-  inset: auto;
-  pointer-events: auto;
-  padding: 8px 14.4px 9.6px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-sidebar);
-}
-
 /* ── Attached-file chips (dropped from the Files tab) ───────────────────── */
-.sv-footer .vb-composer-wrap.aichat-dropping,
-.ai-chat-page > .vb-composer-wrap.aichat-dropping {
+.ai-chat-page .vb-composer-wrap.aichat-dropping {
   box-shadow: inset 0 0 0 1.6px var(--accent);
   border-radius: 4.8px;
 }

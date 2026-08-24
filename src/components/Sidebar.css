@@ -765,6 +765,27 @@
   min-width: 0;
 }
 
+/* Activity dot on a nav item (the AI Advisor): pulsing while a turn is
+   thinking, solid accent once a reply is waiting to be read. */
+.nav-dot {
+  flex: 0 0 auto;
+  width: 6.4px;
+  height: 6.4px;
+  border-radius: 50%;
+}
+.nav-dot.is-done { background: var(--accent); }
+.nav-dot.is-busy {
+  background: var(--text-muted);
+  animation: nav-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes nav-dot-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-dot.is-busy { animation: none; opacity: 0.7; }
+}
+
 .nav-badge-text {
   font-size: 0.52rem;
   font-weight: 600;

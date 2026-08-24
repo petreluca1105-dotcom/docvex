@@ -28,6 +28,9 @@
   --impact-high: #F87171;
 }
 
+/* (The former .ai-masthead block moved to the chat-style .dvx-mh masthead —
+   see ProjectAIChat.css / ProjectChatVariantB.css.) */
+
 /* Page header */
 .ai-hub .ai-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .ai-hub .ai-eyebrow { font-family: var(--font-display); font-size: 8.8px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted); display: flex; align-items: center; gap: 6.4px; }

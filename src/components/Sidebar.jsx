@@ -280,6 +280,16 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
   const { selectedProjectId, selectedProject } = useSelectedProject();
   const { hasUpdate, currentVersion, latestVersion } = useUpdates();
 
+  // AI-advisor activity (dispatched by the /ai page): busy while a turn is
+  // thinking, unread once a reply landed in a non-open conversation. Drives
+  // the dot on the Advisor nav item.
+  const [advisorActivity, setAdvisorActivity] = React.useState({ busy: false, unread: false });
+  React.useEffect(() => {
+    const onEvt = (e) => setAdvisorActivity((s) => ({ ...s, ...(e.detail || {}) }));
+    window.addEventListener('docvex:advisor-activity', onEvt);
+    return () => window.removeEventListener('docvex:advisor-activity', onEvt);
+  }, []);
+
   // Which semver field the pending update bumps — drives the Versions pill
   // colour (major = red, minor = amber, patch = green).
   const parseVer = (v) => String(v || '').replace(/^v/, '').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
@@ -371,7 +381,13 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
     { to: '/files', label: 'Files', icon: FilesIcon },
     { to: '/chat', label: 'Chat', icon: ChatIcon },
     { to: '/events', label: 'Timeline', icon: TimelineIcon },
-    { to: '/ai', label: 'AI', icon: AiIcon },
+    {
+      to: '/ai',
+      label: 'Advisor',
+      icon: AiIcon,
+      // Busy = a turn is thinking; done = a reply waits in a conversation.
+      dot: advisorActivity.busy ? 'busy' : advisorActivity.unread ? 'done' : null,
+    },
   ] : [];
 
   // Personal destinations — the user's own feeds, always available.
@@ -415,7 +431,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
 
   // Render a single NavLink nav-item from a descriptor (shared by every
   // category group).
-  const renderNavItem = ({ to, label, icon, end, badge, pill, onClick, onWarm }) => (
+  const renderNavItem = ({ to, label, icon, end, badge, pill, dot, onClick, onWarm }) => (
     <NavLink
       key={to}
       to={to}
@@ -430,14 +446,17 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
     >
       <span className="icon">
         {icon}
-        {/* Collapsed rail: both the unread badge and the update pill fall back
-            to the corner dot (tinted by bump type for the pill). */}
-        {(badge || pill) && <span className={`nav-badge${pill ? ` is-${pill.kind}` : ''}`} aria-hidden="true" />}
+        {/* Collapsed rail: the unread badge, the update pill and the activity
+            dot all fall back to the corner dot. */}
+        {(badge || pill || dot) && <span className={`nav-badge${pill ? ` is-${pill.kind}` : ''}`} aria-hidden="true" />}
       </span>
       <span className="label nav-label-row">
         {label}
         {badge && <span className="nav-badge-text">{badge}</span>}
         {pill && <span className={`nav-update-pill is-${pill.kind}`}>{pill.text}</span>}
+        {/* Activity dot (e.g. the AI advisor): pulsing while busy, solid once
+            a result is waiting. */}
+        {dot && <span className={`nav-dot is-${dot}`} aria-hidden="true" />}
       </span>
     </NavLink>
   );
