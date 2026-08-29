@@ -404,6 +404,33 @@
   height: 1px;
   background: var(--border);
 }
+/* The System header, which is also its fold control. Styled to stay a quiet
+   section marker — it must not start reading as a nav row just because it can
+   be pressed. */
+.sidebar-cat-fold {
+  width: 100%; box-sizing: border-box; text-align: left;
+  border: 0; background: none;
+  font: inherit; font-size: 0.496rem; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+.sidebar-cat-fold:hover { color: var(--text-secondary); }
+/* The chevron sits after the hairline, at the rail's right edge — the fold
+   state belongs at the end of the divider, not tucked against the word. */
+.sidebar-cat-chev {
+  flex: none; display: inline-flex;
+  /* The hairline is the label's ::after, which generates after the last child —
+     `order` puts the chevron beyond it so the row reads WORD ─────── ⌄. */
+  order: 1;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sidebar-cat--end.is-folded .sidebar-cat-chev { transform: rotate(-90deg); }
+/* Collapsed rail: no room for a chevron beside a hairline, and the section is
+   already one icon tall. */
+.sidebar.is-collapsed .sidebar-cat-chev { display: none; }
+
 .sidebar-cat-items {
   display: flex;
   flex-direction: column;
@@ -1764,7 +1791,18 @@
    never shifts; only the label to its right folds away. Swapping
    justify-content / padding mid-animation is what made the icons jitter, so we
    deliberately leave them untouched. The collapsed rail width is tuned so the
-   fixed-inset icon already reads as centered. */
+   fixed-inset icon already reads as centered.
+
+   That tuning only holds while nothing else eats the width. The rail is
+   `overflow-y: auto`, so as soon as its rows are taller than the window a
+   6.4px scrollbar claims a column on the right and every icon is pushed
+   ~3px off centre — which is guaranteed in the collapsed strip, where the
+   same rows are stacked in a 60px column. So the collapsed rail scrolls
+   WITHOUT a visible bar: the content box stays the width the inset was
+   measured against, and a 60px strip of icons is scrolled with the wheel
+   anyway. (`scrollbar-width` for Firefox, the pseudo for Chromium.) */
+.sidebar.is-collapsed { scrollbar-width: none; }
+.sidebar.is-collapsed::-webkit-scrollbar { width: 0; height: 0; }
 
 /* Category headers KEEP their divider hairline in both states — collapsed, the
    line reads as a section separator between the icon groups. Tighter padding +

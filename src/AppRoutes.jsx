@@ -13,6 +13,8 @@ const Account = lazy(() => import('./pages/Account'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Updates = lazy(() => import('./pages/Updates'));
 const Newsletter = lazy(() => import('./pages/Newsletter'));
+const Roadmap = lazy(() => import('./pages/Roadmap'));
+const Playbook = lazy(() => import('./pages/Playbook'));
 const Admin = lazy(() => import('./pages/Admin'));
 const Debug = lazy(() => import('./pages/Debug'));
 // The Hub is the one lazy route we deliberately pre-warm: it's reached by a
@@ -97,6 +99,9 @@ export default function AppRoutes({ Shell, ProjectShell }) {
           <Route path="notifications" element={<Navigate to="/" replace />} />
           <Route path="invite/:token" element={<InviteAccept />} />
           <Route element={<ProtectedRoute />}>
+            {/* Protected: the Playbook holds the user's own documents and the
+                writing profile learned from them, all keyed to their account. */}
+            <Route path="playbook" element={<Playbook />} />
             <Route path="account" element={<Account />} />
             <Route path="settings" element={<Settings />} />
             <Route path="admin" element={<Admin />} />
@@ -114,6 +119,7 @@ export default function AppRoutes({ Shell, ProjectShell }) {
             <Route path="generate" element={<ProjectGenerate />} />
             <Route path="automate" element={<ProjectAutomate />} />
             <Route path="ai" element={<ProjectAI />} />
+            <Route path="roadmap" element={<Roadmap />} />
             <Route path="mail" element={<Mail />} />
           </Route>
         </Route>

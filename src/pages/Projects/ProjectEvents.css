@@ -61,6 +61,10 @@
   display: flex;
   align-items: center;
   margin-bottom: 24px;
+  /* An <ol> now — the rail reports progress rather than offering navigation. */
+  list-style: none;
+  margin-top: 0;
+  padding: 0;
 }
 .cto-step-cell {
   display: flex;
@@ -71,16 +75,14 @@
 /* Last cell only wraps its button — no trailing connector to stretch for. */
 .cto-step-cell:last-child { flex: none; }
 .cto-step {
-  appearance: none;
-  background: none;
-  border: none;
-  padding: 0;
   font-family: inherit;
   display: flex;
   align-items: center;
   gap: 10px;
-  cursor: pointer;
   min-width: 0;
+  /* Not interactive: the run advances itself. */
+  cursor: default;
+  user-select: none;
 }
 .cto-step-dot {
   width: 28px;
@@ -2882,3 +2884,61 @@
   color: #B9C0D0;
 }
 .cc-card.is-sphere .cc-ask-dismiss:hover:not(:disabled) { border-color: #DCC9A3; color: #F5F2EA; }
+
+/* ── "Filed with this story" ────────────────────────────────────────────
+   The receipt at the foot of the timeline: the identity records the council
+   wrote for every party it found, and the source files it copied into the
+   project folder. Everything here is a real file in the Files tab, and each
+   card is the way into it. */
+.cto-made {
+  margin: 48px auto 0;
+  width: 100%; max-width: 900px;
+  padding: 28px 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
+}
+.cto-made-head { margin-bottom: 20px; }
+.cto-made-title {
+  margin: 0; font-family: var(--font-display);
+  font-size: 20px; font-weight: 600; color: var(--text-primary);
+}
+.cto-made-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
+.cto-made-group + .cto-made-group { margin-top: 22px; }
+.cto-made-label {
+  margin-bottom: 9px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.cto-made-list { display: flex; flex-wrap: wrap; gap: 9px; }
+.cto-made-card {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 9px 14px 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary); font: inherit; text-align: left;
+  cursor: pointer;
+  transition: border-color 130ms ease, background 130ms ease, transform 130ms ease;
+}
+.cto-made-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+.cto-made-ico {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px;
+  background: var(--accent-tint); color: var(--accent);
+}
+.cto-made-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cto-made-name {
+  font-size: 13px; font-weight: 620;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
+}
+.cto-made-kind { font-size: 10.5px; color: var(--text-muted); }
+
+@media (max-width: 620px) {
+  .cto-made { padding: 20px; margin-top: 32px; }
+}

@@ -6,6 +6,17 @@
 
 import { supabase } from './supabaseClient';
 import { recordAiTokens } from './aiTokenMeter';
+import { getActiveJurisdiction } from './jurisdictions';
+
+// Every request carries the open project's jurisdiction so the Edge Function
+// can build a system prompt that names the right law, courts and answer
+// language (it re-resolves the code against its own allow-list — see
+// supabase/functions/_shared/jurisdictions.ts). Omitted when nothing is set,
+// which leaves the function on its Romania default.
+function withJurisdiction(body, override) {
+  const code = override === undefined ? getActiveJurisdiction() : override;
+  return code ? { ...body, jurisdiction: code } : body;
+}
 
 // Selectable Claude models, surfaced in the chat composer's model picker. The
 // `best` line is the in-UI guidance for "which model for which task". `id`s are
@@ -68,8 +79,8 @@ function unwrap(data, error) {
 //     the ambient selected project (the normal case); pass `null` for calls
 //     that aren't project work at all (the personal Mail tab).
 //   • `usageAction` — the project_ai_usage action bucket for this turn.
-export async function askProjectAi({ messages, projectName, fileNames, model, tools, docTools, forceDocument, docKind, usageProject, usageAction = 'chat' }) {
-  const body = { action: 'ask', messages, projectName, fileNames, model };
+export async function askProjectAi({ messages, projectName, fileNames, model, tools, docTools, forceDocument, docKind, jurisdiction, usageProject, usageAction = 'chat' }) {
+  const body = withJurisdiction({ action: 'ask', messages, projectName, fileNames, model }, jurisdiction);
   if (tools === false) body.tools = false;
   if (docTools) body.docTools = true;
   if (forceDocument) body.forceDocument = true;
@@ -134,9 +145,21 @@ export async function suggestFileActions({ fileName, excerpt, mimeType }) {
 }
 
 // Draft a document. Returns `{ text }` or `{ error }`.
+//
+// The user's learned writing style (Playbook) is folded into the instructions
+// rather than sent as its own field: `generate` takes free-text instructions, so
+// this works against the function as already deployed and needs nothing added
+// server-side. Lazy-imported to keep this module free of a cycle — writingStyle
+// calls askProjectAi from right here.
 export async function generateDocument({ template, instructions, projectName, fileNames }) {
+  let steered = instructions;
+  try {
+    const { styleSteer } = await import('./writingStyle');
+    const steer = await styleSteer();
+    if (steer) steered = `${instructions || ''}\n\n${steer}`.trim();
+  } catch { /* a generic voice is a worse draft, not a failed one */ }
   const { data, error } = await supabase.functions.invoke('project-ai', {
-    body: { action: 'generate', template, instructions, projectName, fileNames },
+    body: withJurisdiction({ action: 'generate', template, instructions: steered, projectName, fileNames }),
   });
   const res = unwrap(data, error);
   if (res.error) return res;
@@ -149,7 +172,7 @@ export async function generateDocument({ template, instructions, projectName, fi
 // caller falls back to the local JS builders), or `{ error }` on a hard failure.
 export async function generateOfficeFile({ kind, content, instructions, model }) {
   const { data, error } = await supabase.functions.invoke('project-ai', {
-    body: { action: 'office', kind, content, instructions, model },
+    body: withJurisdiction({ action: 'office', kind, content, instructions, model }),
   });
   if (error) return { error, detail: error.message };
   if (data?.ok && data.base64) return { base64: data.base64, kind: data.kind || kind, containerId: data.containerId || null };

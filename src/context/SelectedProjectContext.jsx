@@ -12,6 +12,7 @@ import { getProject } from '../lib/projects';
 import { markProjectAccessed, getMostRecentProjectId } from '../lib/recentProjects';
 import { isElectron } from '../lib/platform';
 import { setAiUsageProject } from '../lib/aiTokenMeter';
+import { setActiveJurisdiction } from '../lib/jurisdictions';
 import { DEMO_PROJECT, DEMO_PROJECT_ID } from '../lib/demoWorkspace';
 
 // Tracks which project the user is "working in" right now. Distinct from
@@ -128,6 +129,14 @@ export function SelectedProjectProvider({ children }) {
   // every AI helper in the app doesn't have to thread a project id down to the
   // call. Kept in sync here — this is the one place the selection changes.
   useEffect(() => { setAiUsageProject(selectedProjectId); }, [selectedProjectId]);
+  // Same idea for the project's jurisdiction (migration 033): every AI request
+  // is stamped with whichever country's law the open project is worked under,
+  // without each AI helper having to look the project up. Keyed on the value
+  // rather than the id so a change saved in Settings takes effect immediately
+  // (ProjectContext's Realtime UPDATE flows into the selected row).
+  useEffect(() => {
+    setActiveJurisdiction(selectedProject?.jurisdiction || null);
+  }, [selectedProject?.jurisdiction]);
 
   useEffect(() => {
     if (!selectedProjectId) {

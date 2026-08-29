@@ -8,7 +8,8 @@
 
 /* All matches — soft warning tint. */
 ::highlight(aichat-find),
-::highlight(teamchat-find) {
+::highlight(teamchat-find),
+::highlight(docfind-find) {
   background-color: color-mix(in srgb, var(--warning) 38%, transparent);
   color: var(--text-primary);
 }
@@ -16,7 +17,8 @@
 /* The active match (the one Enter scrolled to) — solid, like VS Code's current
    match. */
 ::highlight(aichat-find-active),
-::highlight(teamchat-find-active) {
+::highlight(teamchat-find-active),
+::highlight(docfind-find-active) {
   background-color: var(--warning);
   color: var(--color-ink);
 }

@@ -14,7 +14,9 @@ import {
   sendInvite,
   updateProject,
   updateProjectAiContext,
+  updateProjectJurisdiction,
 } from '../../lib/projects';
+import { JURISDICTIONS, DEFAULT_JURISDICTION, getJurisdiction } from '../../lib/jurisdictions';
 import { deleteCustomRole } from '../../lib/customRoles';
 import { localFolderApi, isElectronBranch } from '../../lib/localFolder';
 import { readProjectsDir } from '../../lib/projectsDir';
@@ -240,7 +242,7 @@ const WIPE_COPY = {
 
 export default function ProjectOverview() {
   const {
-    project, role, members, customRoles, loading, error,
+    project, role, members, customRoles, loading, error, refresh,
     removeMemberLocal, setMemberRoleLocal, removeCustomRoleLocal,
     refreshCustomRoles,
   } = useProject();
@@ -361,6 +363,42 @@ export default function ProjectOverview() {
   // editing for them).
   const [aiContext, setAiContext] = useState('');
   const [savingAiContext, setSavingAiContext] = useState(false);
+
+  // Jurisdiction — which country's law this project is worked under (migration
+  // 033). Unlike the context textarea this is a single choice, so it saves the
+  // moment it changes rather than through a dirty buffer + Save button. The
+  // select reads straight from the project row; `savingJurisdiction` holds the
+  // in-flight code so the control can show which value is landing.
+  const [savingJurisdiction, setSavingJurisdiction] = useState(null);
+  const jurisdictionCode = project?.jurisdiction || DEFAULT_JURISDICTION;
+  const jurisdiction = getJurisdiction(jurisdictionCode);
+  const handleJurisdictionChange = async (code) => {
+    if (savingJurisdiction || code === jurisdictionCode) return;
+    setSavingJurisdiction(code);
+    const { error: jErr } = await updateProjectJurisdiction(project.id, code);
+    setSavingJurisdiction(null);
+    if (jErr) {
+      notify({
+        category: 'project',
+        variant: 'error',
+        title: 'Could not change the jurisdiction',
+        body: jErr.message || 'The server rejected the request.',
+      });
+      return;
+    }
+    // Mirror into the selected-project row so the ambient jurisdiction every AI
+    // request is stamped with updates now, without waiting for a refetch.
+    patchSelectedProject?.({ jurisdiction: code });
+    refresh?.();
+    notify({
+      category: 'project',
+      variant: 'success',
+      icon: 'edit',
+      title: `Jurisdiction set to ${getJurisdiction(code).name}`,
+      body: 'The AI will apply this law to legal work in this project.',
+      dedupeKey: `project-jurisdiction-${project.id}`,
+    });
+  };
 
   // Real monthly AI usage aggregates for this project (get_project_ai_usage
   // RPC). null while loading / on error. Counts are genuinely zero until a
@@ -1336,6 +1374,50 @@ export default function ProjectOverview() {
                   Reset count
                 </button>
               </Tooltip>
+            </div>
+          </section>
+
+          {/* Jurisdiction — which country's law the AI applies in this project.
+              Stamped onto every AI request (lib/jurisdictions → the ambient
+              value SelectedProjectContext keeps in sync), so the model cites
+              that country's legislation and courts and answers in its
+              language. Saves on change; admin-gated like the context below. */}
+          <section className="pjd-panel pjd-juris-panel">
+            <div className="pjd-panel-head">
+              <div className="pjd-panel-title">Jurisdiction</div>
+              <span className="pjd-placeholder-note">
+                {jurisdiction.flag} {jurisdiction.name}
+              </span>
+            </div>
+            <p className="pjd-ai-help">
+              The law this project is worked under. The AI applies it to legal research,
+              document drafting and compliance checks — citing {jurisdiction.adjective} sources
+              and answering in {jurisdiction.language} by default
+              {jurisdiction.eu && jurisdiction.code !== 'EU' ? ', alongside directly applicable EU law' : ''}.
+            </p>
+            <div className="pjd-juris-row">
+              <select
+                className="pjd-juris-select"
+                value={jurisdictionCode}
+                onChange={(e) => handleJurisdictionChange(e.target.value)}
+                disabled={!isAdmin || !!savingJurisdiction}
+                aria-label="Project jurisdiction"
+              >
+                {JURISDICTIONS.map((j) => (
+                  <option key={j.code} value={j.code}>
+                    {j.flag} {j.name}
+                  </option>
+                ))}
+              </select>
+              <span className="pjd-ai-stat-hint">
+                {savingJurisdiction
+                  ? 'Saving…'
+                  : isAdmin
+                    ? project?.jurisdiction
+                      ? 'Applies to everyone working in this project.'
+                      : `Not set — defaulting to ${getJurisdiction(DEFAULT_JURISDICTION).name}.`
+                    : 'Admins choose the jurisdiction.'}
+              </span>
             </div>
           </section>
 

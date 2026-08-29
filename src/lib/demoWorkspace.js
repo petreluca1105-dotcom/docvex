@@ -23,6 +23,9 @@ export const DEMO_PROJECT = Object.freeze({
   name: 'Demo Workspace',
   description: 'A sample matter with starter files — explore DocVex freely. Nothing here leaves your browser.',
   created_by: 'demo',
+  // The sample matter is a Bucharest firm's, so the demo shows the jurisdiction
+  // setting populated rather than sitting on the implicit default.
+  jurisdiction: 'RO',
   created_at: '2026-01-05T09:00:00.000Z',
   updated_at: '2026-07-01T09:00:00.000Z',
 });

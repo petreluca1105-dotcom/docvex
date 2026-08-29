@@ -46,6 +46,113 @@
   border-radius: 0;
   overflow: hidden;
 }
+/* ── Find in this document ──────────────────────────────────────────────
+   The Files tab's search field, verbatim: same box, same 224 → 288px widen on
+   focus, same accent ring, same magnifier that picks up the accent once the
+   field is engaged, same ⌘+F chips that fade out to make room for typing.
+   Deliberately a copy rather than a shared class — the Doc Viewer is its own
+   window and does not load FilesWorkspace.css — so if that field is restyled,
+   restyle this one with it (.fx-search in FilesWorkspace.css).
+
+   The one addition is the match position and the two arrows for walking it,
+   which occupy the same slot the clear button does over there. */
+.dv-find {
+  position: absolute;
+  top: 9.6px;
+  /* Top-LEFT of the document area, just past the floating side panel's
+     footprint (8px inset + --dv-advisor-w + 8px gutter) — the same left edge
+     the zoom pill, the tool stack and the document itself line up on, so the
+     field starts where the content starts. It tracks the panel as it is
+     resized, because that width is the live inline variable.
+
+     It no longer needs the --dv-fields-pad dodge: that offset existed to keep
+     it clear of the blanks panel, which floats over the opposite corner. */
+  left: calc(var(--dv-advisor-w, 296px) + 24px);
+  z-index: 6;
+  display: flex; align-items: center; gap: 6.4px;
+  padding: 4px 6.4px 4px 8.8px;
+  border: 1px solid var(--border);
+  border-radius: 5.6px;
+  background: var(--bg-input);
+  width: 224px;
+  box-sizing: border-box;
+  font-family: var(--font-body);
+  font-size: 10.4px;
+  color: var(--text-muted);
+  /* Quiet by default; widens + lifts on focus so search feels deliberate. */
+  transition: width 220ms cubic-bezier(.16, 1, .3, 1),
+              border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.dv-find:hover { border-color: var(--border-strong); }
+.dv-find:focus-within {
+  width: 288px;
+  border-color: var(--accent);
+  background: var(--bg-card);
+  box-shadow: 0 0 0 2.4px var(--accent-tint);
+}
+/* A query keeps the field wide even after focus moves to an arrow. */
+.dv-find.is-active { width: 288px; }
+.dv-find-glyph {
+  color: var(--text-muted); flex: 0 0 auto;
+  display: inline-flex; transition: color 140ms ease;
+}
+.dv-find:focus-within .dv-find-glyph,
+.dv-find.is-active .dv-find-glyph { color: var(--accent); }
+.dv-find input {
+  border: 0; background: transparent; outline: none;
+  font: inherit; color: var(--text-primary); width: 100%; min-width: 0;
+}
+.dv-find input::placeholder { color: var(--text-muted); }
+
+/* Keyboard hint — each key is its own chip; the + sits between them with no
+   background. Fades out on focus to make room for typing. */
+.dv-find-kbd {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 2.4px;
+  font-family: var(--font-body);
+  transition: opacity 120ms ease;
+}
+.dv-find-kbd kbd {
+  display: inline-flex; align-items: center;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  font-family: inherit;
+  font-size: 8.4px; font-weight: 600; line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.dv-find-kbd-plus { margin: 0 2.4px; font-size: 8px; font-weight: 600; color: var(--text-muted); }
+.dv-find:focus-within .dv-find-kbd { opacity: 0; }
+
+/* Match position — "3/17", or the honest answer when there isn't one. */
+.dv-find-count {
+  flex: 0 0 auto;
+  font-size: 9.6px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap; user-select: none;
+  color: var(--text-muted);
+}
+.dv-find-count.is-empty { color: var(--danger-text, var(--danger)); }
+
+/* Prev / next / clear — the Files clear button's exact footprint. */
+.dv-find-btn {
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  width: 16px; height: 16px;
+  padding: 0; border: 0; cursor: pointer;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+.dv-find-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  color: var(--text-primary);
+}
+.dv-find-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* Audio viewer: drop the rounded card frame so the player + lyrics read as an
    open section rather than a boxed card. */
 .dv-doc-card.is-audio-doc { border: none; border-radius: 0; }
@@ -101,6 +208,15 @@
 }
 .dv-advisor-resize:hover::after { background: color-mix(in srgb, var(--accent) 55%, transparent); }
 body.dv-ocr-resizing .dv-advisor-resize::after { background: var(--accent); }
+
+/* ── Blanks-panel layout ─────────────────────────────────────────────────
+   Picking a paragraph that carries blanks brings a panel in on the RIGHT; the
+   preview narrows to make room. The advisor deliberately stays where it is:
+   picking a paragraph is also how you aim a question at it, and sliding the
+   advisor away would take the composer that question is typed into with it.
+   The preview's shift is a padding transition, armed by `.is-shifting` only
+   while the panel opens or closes so it can't fight the resize drag. */
+
 
 /* Footer region: holds the Open-files card + the Files-browser card side by
    side (each its own rounded card). Height is set inline (resizable via the top
@@ -391,6 +507,33 @@ body.dv-ocr-resizing .dv-split-resize::after { background: var(--accent); }
 .dv-doc-body .file-preview-image,
 .dv-doc-body .file-preview-video,
 .dv-doc-body .file-preview-pdf-static { height: 100%; }
+/* pdf.js text layer — a transparent copy of the page's text, positioned over
+   the canvas in the page's own coordinates. The canvas is pixels: nothing in it
+   can be selected, searched, or read aloud. This is what makes a PDF behave
+   like a document rather than a picture of one, and it is what the find bar's
+   ::highlight() ranges land on — since ::highlight() honours background-color,
+   a matched run shows as a tint over the glyphs the canvas drew underneath. */
+.file-preview-pdf-stack { position: relative; display: inline-block; line-height: 0; }
+.file-preview-pdf-text {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-align: initial;
+  user-select: text;
+  /* Never in the way of the click that opens the file — only the runs
+     themselves take the pointer, so text can still be selected. */
+  pointer-events: none;
+}
+.file-preview-pdf-text span,
+.file-preview-pdf-text br {
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  color: transparent;
+  pointer-events: auto;
+}
+.file-preview-pdf-text ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 
 /* Document split: preview + shared Extract-text panel as a flex row (mirrors
    the media pane's stage + OCR panel). The body itself runs flush; the inner
@@ -1521,7 +1664,14 @@ img.dv-wa-media { cursor: pointer; }
 .dv-wa.is-docvex .dv-wa-system span,
 .dv-wa.is-docvex .dv-wa-encryption { border: 1px solid var(--border); box-shadow: none; }
 
-.dv-docx-error { color: var(--text-muted); padding: 19.2px; text-align: center; }
+/* Render failure, shown in place of the (empty) document host. */
+.dv-docx-error {
+  color: var(--text-muted); padding: 32px 19.2px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.dv-docx-error-title { margin: 0; color: var(--text-primary); font-weight: 600; }
+.dv-docx-error-sub { margin: 0; max-width: 380px; font-size: 13px; line-height: 1.5; }
+.dv-docx-error-actions { display: flex; gap: 8px; margin-top: 8px; }
 .dv-loading { color: var(--text-muted); padding: 19.2px; text-align: center; }
 
 /* Extracted .doc text rendered as a document page (formatting isn't recoverable
@@ -1572,6 +1722,10 @@ img.dv-wa-media { cursor: pointer; }
   background: var(--color-sand); border-color: var(--color-cognac); color: var(--color-ink);
 }
 .dv-pgtoggle-hash { font-weight: 700; opacity: 0.75; }
+/* Icon-led toggles in the same bar (Complete data) — match the '#' glyph's
+   weight next to a 10px label. */
+.dv-docview-pgtoggle svg { width: 12px; height: 12px; flex: none; opacity: 0.8; }
+.dv-docview-pgtoggle.is-active svg { opacity: 1; }
 
 /* Push the Convert-to-PDF button to the right of a document/slide toolbar. */
 .dv-docview-spacer { flex: 1 1 auto; }
@@ -1590,15 +1744,42 @@ img.dv-wa-media { cursor: pointer; }
 
 /* Top notice bar — just the centred reconstruction pill. Collapses when empty
    (Electron: the pill portals into the title bar, leaving this with no child). */
-.dv-docview-topbar { position: relative; min-height: 27.2px; flex: none; }
-.dv-docview-topbar:empty { display: none; }
 
 /* Bottom toolbar — page-numbers toggle (left) + Convert-to-PDF (right), docked
    below the scrolling document body. */
+/* Whole-document actions — page numbers, Open in Word, Convert to PDF. Stacked
+   vertically in the bottom-left of the preview, just clear of the floating side
+   panel, rather than as a bar across the foot: they are occasional, and a full
+   row of chrome under every page cost a line of the document to say so. The
+   pane is already inset past the panel, so `left: 0` IS the panel's right edge.
+   Out of flow, so the page sheets keep the full height. */
 .dv-docview-toolbar--foot {
-  flex: none; display: flex; align-items: center; gap: 6.4px;
-  padding-top: 8px; border-top: 1px solid var(--border);
+  position: absolute; left: 0; bottom: 12.8px; z-index: 6;
+  flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 4.8px;
+  /* The base .dv-docview-toolbar carries a bottom margin for the in-flow
+     variant; out of flow it would just offset the stack. */
+  margin: 0;
+  padding: 0;
+  border-top: none;
 }
+/* One width for the stack, so the three read as a list rather than a ragged
+   pile. The spacer between the toggle and the two hand-offs is meaningless in a
+   column. */
+.dv-docview-toolbar--foot > * { width: 100%; justify-content: flex-start; }
+.dv-docview-toolbar--foot .dv-docview-spacer { display: none; }
+
+/* Open in Word / PowerPoint / Excel — same footprint as the PDF button beside
+   it, quieter fill (it hands off rather than produces something). */
+.dv-open-native {
+  display: inline-flex; align-items: center; gap: 5.6px;
+  padding: 4.8px 9.6px; border-radius: 6.4px;
+  border: 1px solid var(--color-sand); background: var(--color-cream);
+  color: var(--color-ink); font: inherit; font-size: 10px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.dv-open-native:hover { background: var(--color-sand); border-color: var(--color-cognac); }
+.dv-open-native svg { flex: none; }
 
 /* Convert / Export to PDF button — accent-tinted, with a small status dot that
    turns green on success / red on failure. Lives in each office preview toolbar. */
@@ -1643,36 +1824,12 @@ img.dv-wa-media { cursor: pointer; }
   display: flex; flex-direction: column; overflow: hidden; padding: 0;
 }
 .dv-doc-main:has(.dv-docview) .dv-docview { padding: 11.2px 14.4px 0; }
-.dv-doc-main:has(.dv-docview) .dv-docview-topbar { margin: 0 0 8px; }
 .dv-doc-main:has(.dv-docview) .dv-docview-toolbar--foot { margin: 0; }
 .dv-doc-main:has(.dv-docview) .dv-docview-body {
   padding-bottom: 9.6px;
 }
 
-/* Reconstruction notice — a centred pill at the top of each office preview's
-   toolbar, flagging that the in-app render may differ from the real Office app. */
-.dv-recon-pill {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  z-index: 1; display: inline-flex; align-items: center; gap: 7.2px;
-  max-width: min(68%, 432px);
-  padding: 5.6px 14.4px; border-radius: 999px;
-  background: var(--accent-tint);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent); font-size: 10.4px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.dv-recon-pill::before {
-  content: ''; width: 5.6px; height: 5.6px; border-radius: 50%;
-  background: var(--color-cognac); flex: 0 0 5.6px;
-}
-/* Portalled into the window title bar — static (the slot centres it), compact to
-   fit the bar height. */
-.dv-recon-pill--titlebar {
-  position: static; transform: none; max-width: none;
-  padding: 3.2px 11.2px; font-size: 9.6px; gap: 5.6px;
-}
-.dv-recon-pill--titlebar::before { width: 4.8px; height: 4.8px; flex-basis: 4.8px; }
-/* Spreadsheet bar hosts the pill the same way. */
+/* Anchors the bar's own absolutely-positioned children. */
 .dv-sheet-bar { position: relative; }
 .dv-docview-plain {
   flex: 1; min-height: 0; margin: 0; overflow: auto;
@@ -1707,6 +1864,213 @@ img.dv-wa-media { cursor: pointer; }
      current Word default; Calibri (the prior default) and Carlito (a metric-
      compatible substitute) cover hosts without Aptos. */
   font-family: 'Aptos', 'Calibri', 'Carlito', 'Segoe UI', Arial, sans-serif;
+}
+
+/* Paragraph picking. paginateDocx stamps `.dv-docx-para` on every text block,
+   so each paragraph reads as its own target: hovering tints it, clicking keeps
+   the tint (shift-click extends a range, ctrl/cmd-click adds one). The tint is
+   painted with a matching box-shadow spread so the highlight looks padded
+   without changing the block's layout — the page must still paginate exactly as
+   it measured. Colours are mixed against the white page, not the app surface. */
+.dv-docx-para {
+  border-radius: 3.2px; cursor: pointer;
+  transition: background 110ms ease, box-shadow 110ms ease, opacity 160ms ease;
+}
+/* Brand cognac rather than `--accent`: the page sheet is always white in both
+   themes, and Ink's accent (sand) would be invisible on it. `!important` so a
+   paragraph the document itself shades still shows the hover/pick state. */
+/* The highlight's "padding" is box-shadow spread rather than real padding: the
+   page was measured and sliced into sheets at its natural height, so growing a
+   block on hover would reflow the page under the cursor. Spread paints outside
+   the box without touching layout, and rounds to radius + spread. */
+.dv-docx-para:hover {
+  background: color-mix(in srgb, var(--color-cognac) 12%, transparent) !important;
+  box-shadow: 0 0 0 4.8px color-mix(in srgb, var(--color-cognac) 12%, transparent);
+}
+/* Picked: a tight tint around the text, then a gap of bare page, then the
+   rounded border sitting outside it. The border is an `outline` rather than
+   another box-shadow layer precisely so the gap can show through — stacked
+   box-shadows paint solid bands back-to-front, which would fill the gap in.
+   `outline-offset` keeps the corners rounded (radius + offset). */
+.dv-docx-para.is-selected,
+.dv-docx-para.is-selected:hover {
+  background: color-mix(in srgb, var(--color-cognac) 16%, transparent) !important;
+  box-shadow: 0 0 0 4.8px color-mix(in srgb, var(--color-cognac) 16%, transparent);
+  outline: 1.2px solid color-mix(in srgb, var(--color-cognac) 45%, transparent);
+  outline-offset: 11.2px;
+}
+
+/* An editable paragraph: it IS an input now, so it takes a text caret and a
+   focus ring that reads as a field without moving anything (the ring is the
+   same detached outline the pick uses, so focusing doesn't shift the layout).
+   `white-space: normal` is pinned deliberately — Chromium's editing UA styles
+   lean towards pre-wrap, which would render the TAB inside a Word list marker
+   as a real 8-character tab stop and open a gap between the bullet and its text
+   the moment the paragraph is picked. */
+.dv-docx-para[contenteditable] { cursor: text; white-space: normal; }
+.dv-docx-para[contenteditable]:focus { outline-color: var(--color-cognac); }
+.dv-docx-para[contenteditable]:focus-visible { outline-color: var(--color-cognac); }
+/* Edited but not yet saved — a warm underline marks what differs from the AI's
+   text, and survives losing the pick so the edit can't be forgotten. */
+.dv-docx-para.is-edited {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-cognac) 60%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+.dv-docx.has-pick .dv-docx-para.is-edited { opacity: 1; }
+
+/* While anything is picked, the rest of the document recedes so the picked
+   passage reads as the subject. Everything in the page's flow dims — tables and
+   images included, not just the tagged paragraphs — and the picked blocks are
+   pulled back to full strength on top of it. */
+.dv-docx.has-pick .dv-docx-page > article > * { opacity: 0.38; transition: opacity 160ms ease; }
+.dv-docx.has-pick .dv-docx-para.is-selected { opacity: 1; }
+
+/* ── Document / Paragraph sub-tabs ──────────────────────────────────────
+   A second, quieter row under the panel's main tab strip, shown only while a
+   paragraph is picked. Deliberately NOT the same shape as the strip above it:
+   pills on a track rather than underlined tabs, so the two rows read as a
+   hierarchy (which pane · which conversation) instead of as two tab bars
+   competing for the same job. */
+.dv-advisor-subtabs {
+  flex: none;
+  display: flex; gap: 2.4px;
+  margin: 8px 11.2px;
+  padding: 2.4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-page);
+}
+.dv-advisor-subtab {
+  flex: 1 1 0; min-width: 0;
+  appearance: none; border: none; background: transparent;
+  padding: 4.8px 9.6px; border-radius: 999px;
+  font: inherit; font-size: 10.4px; font-weight: 600;
+  color: var(--text-secondary); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background 140ms ease, color 140ms ease;
+}
+.dv-advisor-subtab:hover:not(.is-active) { color: var(--text-primary); }
+.dv-advisor-subtab.is-active { background: var(--accent); color: var(--text-on-accent); }
+
+/* ── The picked paragraph's action bar, docked ──────────────────────────
+   An empty node at the head of the Paragraph sub-tab's thread: the document
+   pane portals its action bar in here, because it owns the pick and every
+   handler that acts on it. All this side supplies is the box and its padding. */
+.dv-para-panel {
+  flex: none;
+  padding: 0 11.2px 8px;
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+}
+
+/* Action bar for the picked paragraphs — floats above the foot toolbar and
+   stays put while the page scrolls. */
+.dv-docx-parabar {
+  position: absolute; left: 50%; bottom: 48px; z-index: 7;
+  transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 6.4px;
+  max-width: calc(100% - 28px); flex-wrap: wrap; justify-content: center;
+  padding: 5.6px 6.4px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-elevated); box-shadow: var(--shadow-elev);
+  animation: dv-parabar-in 140ms ease-out;
+}
+@keyframes dv-parabar-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+/* Inside the panel it isn't a pill floating over a page any more — it is the
+   pane's content. Drop the fixed placement, the pill radius and the lift, and
+   let the controls wrap down the panel's narrow column instead of along a bar. */
+.dv-docx-parabar.is-docked {
+  position: static;
+  transform: none;
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6.4px;
+  padding: 9.6px;
+  border-radius: 9.6px;
+  background: var(--bg-card);
+  box-shadow: none;
+  animation: dv-parabar-dock-in 140ms ease-out;
+}
+@keyframes dv-parabar-dock-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* The prompt field is the point of the pane — give it the full width rather
+   than the sliver left over beside the buttons. */
+.dv-docx-parabar.is-docked .dv-docx-parabar-ask { flex: 1 0 100%; }
+.dv-docx-parabar.is-docked .dv-docx-parabar-input { width: 100%; }
+.dv-docx-parabar.is-docked .dv-docx-parabar-btn.is-primary { flex: 1 0 100%; }
+.dv-docx-parabar-btn {
+  appearance: none; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-body); font-size: 10.4px; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.dv-docx-parabar-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.dv-docx-parabar-btn.is-primary {
+  background: var(--accent); border-color: var(--accent); color: var(--text-on-accent);
+}
+.dv-docx-parabar-btn.is-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.dv-docx-parabar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.dv-docx-parabar-btn:disabled:hover { background: var(--bg-card); border-color: var(--border); }
+/* Icon-only (revert) — square footprint so it reads as an action, not a label. */
+.dv-docx-parabar-btn.is-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; padding: 0;
+}
+
+/* Word-style formatting toggles for the selected words. */
+/* Prompt the AI about the selection, without leaving the document. */
+.dv-docx-parabar-ask {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 2px 2px 10px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-input);
+}
+.dv-docx-parabar-input {
+  appearance: none; border: 0; background: transparent; outline: none;
+  width: 210px; padding: 3px 0;
+  color: var(--text-primary);
+  font-family: var(--font-body); font-size: 10.4px;
+}
+.dv-docx-parabar-input::placeholder { color: var(--text-muted); }
+.dv-docx-parabar-input:disabled { opacity: 0.55; }
+.dv-docx-parabar-send {
+  appearance: none; width: 22px; height: 22px; padding: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%;
+  background: var(--accent); color: var(--text-on-accent); cursor: pointer;
+  transition: background 120ms ease, opacity 120ms ease;
+}
+.dv-docx-parabar-send:hover:not(:disabled) { background: var(--accent-hover); }
+.dv-docx-parabar-send:disabled { background: transparent; color: var(--text-muted); cursor: not-allowed; }
+
+/* Why a save was refused. Pinned just under the action bar. */
+.dv-docx-parabar-err {
+  position: absolute; left: 50%; bottom: 82px; z-index: 7;
+  transform: translateX(-50%);
+  max-width: min(88%, 420px);
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--danger); background: var(--danger-soft); color: var(--danger-text);
+  font-family: var(--font-body); font-size: 10.4px; font-weight: 600; text-align: center;
+}
+/* Docked with the bar it explains — in the panel it is a block in the column,
+   not a pill pinned above a floating bar. */
+.dv-docx-parabar-err.is-docked {
+  position: static;
+  transform: none;
+  max-width: none;
+  text-align: left;
 }
 
 /* Per-page pagination chip — a black pill with white text pinned to the
@@ -2114,7 +2478,7 @@ body.dv-media-panning, body.dv-media-panning * { cursor: grabbing !important; }
 /* ── Selection-tool options — under the Extract-text tab's header ─────────
    (Moved here from the old on-stage pill's dropdown.) Sidebar surface, so
    colours route through tokens; the options sit one next to the other.
-   Insets match the header above (.dv-ocr-history-head). */
+   Insets match the status line above (.dv-ocr-history-meta). */
 .dv-ocr-side-tools {
   flex: 0 0 auto;
   padding: 9.6px 11.2px;
@@ -2214,16 +2578,19 @@ body.dv-ocr-resizing .dv-ocr-resize::after { background: var(--accent); }
    and the compact header takes over (mirrors the Versions page). */
 .dv-ocr-history-scroll { flex: 1; min-height: 0; overflow: auto; }
 
-/* Masthead — accent eyebrow + display title + meta, matching the Versions page
-   header's colouring + spacing (scaled to the panel). */
-.dv-ocr-history-head {
-  flex: none; display: flex; flex-direction: column; gap: 8px;
-  padding: 14.4px 11.2px 11.2px;
-  position: relative;
+/* Status line — what this pane currently holds, plus its one action. All that
+   is left of the old masthead: the side panel's tab strip already names the
+   pane, so the eyebrow + display title above this row were a second label for
+   the same thing and took the height the content wanted. It carries the
+   masthead's insets and its hairline (a pseudo, since a border can't be inset
+   from the edges). */
+.dv-ocr-history-meta {
+  flex: none; position: relative;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9.6px 11.2px;
+  font-size: 9.6px; color: var(--text-secondary);
 }
-/* Hairline above the selection-tool buttons — inset from both edges (a
-   border can't carry margins, so it's a pseudo). */
-.dv-ocr-history-head::after {
+.dv-ocr-history-meta::after {
   content: '';
   position: absolute;
   left: 11.2px;
@@ -2231,20 +2598,6 @@ body.dv-ocr-resizing .dv-ocr-resize::after { background: var(--accent); }
   bottom: 0;
   height: 1px;
   background: var(--border);
-}
-.dv-ocr-history-eyebrow {
-  display: flex; align-items: center; gap: 6.4px; flex-wrap: wrap;
-  font-size: 8px; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700;
-  color: var(--accent);
-}
-.dv-ocr-history-eyebrow-muted { color: var(--text-muted); font-weight: 500; }
-.dv-ocr-history-title {
-  margin: 0; font-family: var(--font-display); font-size: 18.4px; font-weight: 700;
-  letter-spacing: -0.025em; line-height: 1.04; color: var(--text-primary);
-}
-.dv-ocr-history-meta {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  font-size: 9.6px; color: var(--text-secondary);
 }
 .dv-ocr-history-count strong { color: var(--text-primary); font-weight: 600; }
 .dv-ocr-history-clear {
@@ -2522,9 +2875,15 @@ button.dv-ocr-history-thumb.is-active img { box-shadow: 0 0 0 1.6px var(--accent
   flex: none; display: flex; align-items: stretch; gap: 0; padding: 0;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
+  /* "Selected paragraph" appears alongside the standing tabs and is long
+     enough to overrun a narrow panel — let the strip scroll rather than let a
+     label wrap and change the bar's height. */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.dv-side-tabs::-webkit-scrollbar { height: 0; }
 .dv-side-tab {
-  appearance: none;
+  appearance: none; flex: none; white-space: nowrap;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
   background: transparent; border: none;
   border-bottom: 2.4px solid transparent; margin-bottom: -1px;
@@ -2652,6 +3011,8 @@ button.dv-ocr-history-thumb.is-active img { box-shadow: 0 0 0 1.6px var(--accent
 .dv-advisor { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .dv-advisor-scroll {
   flex: 1; min-height: 0; overflow: auto;
+  /* The ground the empty state centres itself against. */
+  position: relative;
   /* The bottom gap that clears the floating composer lives on the chat content
      (.dv-advisor-chat padding-bottom) rather than here — padding-bottom on an
      overflow:auto container isn't reliably part of the scrollable overflow at
@@ -2662,6 +3023,58 @@ button.dv-ocr-history-thumb.is-active img { box-shadow: 0 0 0 1.6px var(--accent
   scrollbar-width: none;
 }
 .dv-advisor-scroll::-webkit-scrollbar { width: 0; height: 0; }
+/* ── Before there is a thread ────────────────────────────────────────────
+   Centred in the pane, and OUT of flow: the first reply has to arrive in the
+   thread's own place, not below wherever the heading happened to end. Not
+   interactive — the composer under it is what you actually reach for — so it
+   never eats a click meant for the pane. */
+.dv-advisor-empty {
+  /* Centred in the PANE — anchored to the scroller's own box and given its full
+     height, so the block sits on the middle of the visible area rather than
+     wherever the (empty) content happens to end. */
+  position: absolute; inset: 0; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 24px 28px;
+  text-align: center; pointer-events: none;
+  animation: dv-advisor-empty-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* The glyph alone — no frame. A bordered tile around it made a THIRD object to
+   read before the sentence underneath, and the whole point of this state is the
+   sentence. Bigger and thinner-stroked instead, so it carries at a glance
+   without asking to be looked at. */
+.dv-advisor-empty-mark {
+  display: grid; place-items: center;
+  margin-bottom: 4px;
+  color: var(--accent);
+}
+.dv-advisor-empty-title {
+  margin: 0;
+  font-family: var(--font-display); font-size: 15.2px; font-weight: 600;
+  color: var(--text-primary);
+}
+.dv-advisor-empty-sub {
+  margin: 0; max-width: 30ch;
+  font-size: 11.6px; line-height: 1.55; color: var(--text-muted);
+  text-wrap: balance;
+}
+@keyframes dv-advisor-empty-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Sending the first message. It lifts as it goes rather than blinking out, so
+   the eye follows it away and back down to the reply landing underneath. */
+.dv-advisor-empty.is-leaving {
+  animation: dv-advisor-empty-out 260ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+@keyframes dv-advisor-empty-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-10px) scale(0.985); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dv-advisor-empty { animation: none; }
+  .dv-advisor-empty.is-leaving { animation: none; opacity: 0; }
+}
+
 /* Blur + dim the thread while an ask_user panel is waiting for an answer. */
 .dv-advisor-scroll.is-asking {
   filter: blur(2.4px); opacity: 0.6; pointer-events: none;
@@ -2693,64 +3106,8 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
 }
 /* Compact header that fades in once the full masthead scrolls away — a frosted
    bar pinned to the top of the pane (content scrolls under it). */
-/* Styled to match the main app's compact-on-scroll header (.pmh-compact in
-   PageMasthead.css): a blur(20px) saturate(180%) translucent bar, display-font
-   title in --text-primary · muted eyebrow. */
-.dv-advisor-minihead {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 4;
-  display: flex; align-items: center; gap: 6.4px;
-  height: 38.4px; padding: 0 14.4px;
-  background: color-mix(in srgb, var(--bg-page) 62%, transparent);
-  backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-  opacity: 0; transform: translateY(-8px); pointer-events: none;
-  transition: opacity 240ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.dv-advisor-minihead.is-visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
-.dv-advisor-minihead-title {
-  /* "Generate" — the prominent display-font label (matches .pmh-compact-title). */
-  font-family: var(--font-display); font-size: 13.6px; font-weight: 700;
-  letter-spacing: -0.01em; color: var(--text-primary);
-}
-/* Separator dot (matches .pmh-compact-sep) — breathing room on each side of the
-   "middle circle". */
-.dv-advisor-minihead-dot { color: var(--text-muted); font-weight: 600; margin: 0 4px; }
-.dv-advisor-minihead-eyebrow {
-  /* "Document AI" (matches .pmh-compact-eyebrow). */
-  font-size: 10.4px; font-weight: 600; color: var(--text-muted); white-space: nowrap;
-}
-
-/* Generate-pane full masthead — iOS-style (mirrors the Settings / Newsletter
-   header): eyebrow · muted, big display title, one-line subtitle. No divider.
-   Lives at the top of the scroll so it scrolls away. */
-.dv-advisor-head {
-  flex: none; padding: 14.4px 14.4px 12.8px;
-  display: flex; flex-direction: column; gap: 1px;
-  position: relative;
-}
-/* Divider under the header with both ends faded out (a masked line, since a
-   plain border-bottom can't fade at its edges). */
-.dv-advisor-head::after {
-  content: ''; position: absolute; left: 14.4px; right: 14.4px; bottom: 0; height: 1px;
-  background: var(--border);
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
-          mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
-}
-.dv-advisor-head-eyebrow {
-  display: inline-flex; align-items: center; gap: 4.8px;
-  font-size: 8.8px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
-  color: var(--accent);
-}
-.dv-advisor-head-muted { color: var(--text-muted); font-weight: 600; letter-spacing: 0.04em; }
-.dv-advisor-head-title {
-  margin: 2.4px 0 0; font-family: var(--font-display);
-  font-size: 20.8px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1;
-  color: var(--text-primary);
-}
-.dv-advisor-head-sub {
-  margin: 4px 0 0; font-size: 10.4px; line-height: 1.45;
-  color: var(--text-secondary); max-width: 46ch;
-}
+/* The Generate pane has no masthead and no compact-on-scroll bar — the side
+   panel's tab strip names it, and the thread gets the height back. */
 /* Branch nav — pills for each split conversation, under the header. */
 .dv-branch-nav {
   display: flex; flex-wrap: wrap; gap: 4.8px;
@@ -2830,36 +3187,85 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
 /* Compact, self-sized chip (icon left · "Version N" + format stacked right).
    Clamped so it doesn't stretch across the chat column. */
 .dv-doc-version {
-  display: inline-flex; align-items: center; gap: 4.8px;
+  /* A column: the clickable body, then the footer actions under it. */
+  display: inline-flex; flex-direction: column; align-items: stretch;
   align-self: flex-start; width: auto; min-width: 224px; max-width: 368px;
   /* Above the split-detection hit strip (the branch-anchor extends upward over
      this card); keeps the card fully hoverable/clickable. */
   position: relative; z-index: 4;
   margin-top: -8px;
-  padding: 4.8px 17.6px 4.8px 8.8px; border-radius: 11.2px;
+  border-radius: 11.2px;
+  overflow: hidden;
   border: 1px solid var(--border); background: var(--bg-card);
-  color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+  color: var(--text-primary); font: inherit; text-align: left;
   transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
-.dv-doc-version:hover:not(:disabled) { border-color: var(--border-strong); background: var(--bg-elevated); }
-.dv-doc-version:disabled { cursor: default; opacity: 0.7; }
+.dv-doc-version:hover:not(.is-disabled) { border-color: var(--border-strong); background: var(--bg-elevated); }
+.dv-doc-version.is-disabled { cursor: default; opacity: 0.7; }
+
+/* Clickable body — selecting it makes this version the file on disk. The icon
+   is positioned against THIS box (not the whole card), so it stays in the
+   corner of the text area rather than colliding with the footer.
+   Left padding clears that icon: the icon is out of the flow, so this is the
+   only thing setting where the text starts. */
+.dv-doc-version-main {
+  position: relative; overflow: hidden;
+  /* Top-aligned: the body is shorter than the card's floor, and centring it
+     left a wide band of empty space above "Version N". */
+  display: flex; align-items: flex-start; gap: 4.8px;
+  /* Floor on the body rather than the whole card, so the footer stays tucked
+     directly under it instead of leaving a gap when the text is short. */
+  min-height: 68px;
+  padding: 9.6px 17.6px 4.8px 66px;
+  cursor: pointer;
+}
+.dv-doc-version.is-disabled .dv-doc-version-main { cursor: default; }
+.dv-doc-version-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Footer actions, sharing the row under the body. */
+.dv-doc-version-actions {
+  display: flex; border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+}
+.dv-doc-version-action {
+  flex: 1; min-width: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5.6px 8px; border: 0; background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: 9.6px; font-weight: 600;
+  cursor: pointer; transition: background 120ms ease, color 120ms ease;
+}
+.dv-doc-version-action + .dv-doc-version-action { border-left: 1px solid var(--border); }
+.dv-doc-version-action:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.dv-doc-version-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.dv-doc-version-action svg { width: 11px; height: 11px; flex: none; }
 .dv-doc-version.is-active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
+/* Decoration in the bottom-left corner, pulled INWARD from it so most of the
+   glyph reads (the card's `overflow: hidden` trims the rest). Absolutely
+   positioned and z-indexed under the text: it takes no space in the flex row, so
+   the name / format / hint sit exactly where they would with no icon at all. */
 .dv-doc-version-icon {
-  flex: 0 0 auto; display: grid; place-items: center;
-  width: 52.8px; height: 52.8px; border-radius: 8px;
+  position: absolute; left: 0; bottom: 0;
+  transform: translate(-30%, 38%);
+  z-index: 0;
+  display: grid; place-items: center;
+  width: 120px; height: 120px; border-radius: 8px;
   background: transparent; color: var(--accent);
+  /* Held back so it reads as a watermark behind the card's text rather than
+     competing with it. */
+  opacity: 0.55;
+  pointer-events: none;
 }
-.dv-doc-version-icon svg { width: 32px; height: 32px; }
+.dv-doc-version-icon svg { width: 96px; height: 96px; }
 /* Tint the icon by document type (same palette as the Files view). */
 .dv-doc-version-icon.is-doc { color: #2b6cb0; }
 .dv-doc-version-icon.is-ppt { color: #c2410c; }
 .dv-doc-version-icon.is-xls { color: #15803d; }
 .dv-doc-version-icon.is-pdf { color: #b91c1c; }
-.dv-doc-version-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dv-doc-version-body { position: relative; z-index: 1; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .dv-doc-version-name {
   font-size: 10.4px; font-weight: 600; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
@@ -2868,15 +3274,14 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
   font-size: 8.4px; font-weight: 700; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--text-muted);
 }
-/* CTA line: tells the user clicking makes this version the on-disk file. */
-.dv-doc-version-hint {
-  margin-top: 2.4px; font-size: 9.2px; font-weight: 500;
-  color: var(--text-secondary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-}
-.dv-doc-version.is-active .dv-doc-version-hint { color: var(--accent); }
+/* "This is the live version" marker, tucked into the body's top-right corner
+   rather than riding in the flex row, so it reads as a status pip on the card
+   instead of another item in the line. */
 .dv-doc-version-dot {
-  flex: 0 0 auto; width: 6.4px; height: 6.4px; border-radius: 50%;
+  /* One value for both insets, so the gap to the top edge and the gap to the
+     right edge are the same number by construction. */
+  position: absolute; top: 8px; right: 8px;
+  width: 6.4px; height: 6.4px; border-radius: 50%;
   background: var(--accent);
 }
 
@@ -2907,14 +3312,26 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
   /* z-index above the custom scrollbar (2) so the divider's right end paints
      ON TOP of the scrollbar instead of tucking behind it. */
   position: relative; display: block; width: 100%; height: 0; z-index: 3;
-  opacity: 0; transition: opacity 70ms ease;
+  opacity: 0; transition: opacity 70ms ease, height 340ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+/* Dwelled on: the seam opens, pushing the messages above and below apart to
+   make room for the button that sits on the divider. Height (rather than
+   margin) so the growth is animatable and the line can stay centred in it. */
+.dv-branch-anchor.is-open { height: 40px; }
 /* Full-width invisible hit strip sitting ABOVE the seam — it starts at the
-   divider and extends UPWARD (over the message/card just above). Nothing is
-   detected below the divider. */
+   divider and extends UPWARD (over the message/card just above), plus whatever
+   height the seam itself currently has.
+
+   Pinned by TOP, not by bottom. The seam's top edge is fixed (opening it pushes
+   the content below downward, it never moves itself), whereas its bottom edge
+   travels the full 52px as it opens. A bottom-anchored strip therefore slid out
+   from under the pointer mid-animation, firing mouseleave — the seam closed,
+   which shrank it back, which re-entered it: a flicker loop. Anchored to the
+   top, the hot zone only ever GROWS downward as the seam opens, so the pointer
+   that triggered it stays inside for the whole animation. */
 .dv-branch-anchor::before {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0;
-  height: 51.2px; transform: none;
+  content: ''; position: absolute; left: 0; right: 0;
+  top: -51.2px; bottom: 0; height: auto; transform: none;
 }
 /* Reveal on hovering a chat bubble above or the strip itself. Version cards are
    intentionally NOT a trigger — the divider only appears from the seam after. */
@@ -2924,25 +3341,36 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
 .dv-branch-anchor.is-active { opacity: 1; }
 .dv-branch-line {
   /* Right end extends past the chat content's 16px right padding so it reaches
-     the section's right edge (under the scrollbar); left end stays inset/faded. */
-  position: absolute; left: 0; right: -12.8px; top: 0; height: 1.6px;
-  /* Opacity ramps from reduced on the LEFT to full (1) on the RIGHT, where it
-     meets the button/connector. */
-  background: linear-gradient(to right, color-mix(in srgb, var(--color-sand) 45%, transparent), var(--color-sand));
-  /* Fade only the LEFT edge; the right edge stays solid to the scrollbar. */
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14%, #000 100%);
-          mask-image: linear-gradient(to right, transparent 0, #000 14%, #000 100%);
-  transition: background 130ms ease;
-}
-/* Hovering the floating pill brightens its divider to match (cognac, full). */
-.dv-branch-anchor.is-pill-hover .dv-branch-line {
-  background: linear-gradient(to right, color-mix(in srgb, var(--color-cognac) 55%, transparent), var(--color-cognac));
-}
-.dv-branch--float:hover::before { background: var(--color-cognac); }
-.dv-branch {
-  /* Base pill look. Positioning is set by the .dv-branch--float modifier, which
-     is portalled to <body> and placed at the hovered seam (see DocViewer.jsx). */
+     the section's right edge (under the scrollbar). */
+  position: absolute; left: 0; right: -12.8px; top: 50%; height: 1.6px;
+  /* Centred in whatever height the seam currently has: 0 while it's just a
+     hover line, half of 52px once it has opened. */
   transform: translateY(-50%);
+  /* Closed (no button yet): a flat white rule, held well back — it marks where
+     the split WOULD land without competing with the messages around it. */
+  background: rgba(255, 255, 255, 0.32);
+  /* Symmetric fade: both ends dissolve identically, so the line reads as a
+     hairline centred on the thread rather than one anchored to an edge. (It
+     used to fade on the left only, because its right end had to meet the
+     floating pill that sat out in the gutter — that pill is gone.) */
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14%, #000 86%, transparent 100%);
+          mask-image: linear-gradient(to right, transparent 0, #000 14%, #000 86%, transparent 100%);
+  /* Paced with the seam's height so the colour shift and the opening read as
+     one movement. */
+  transition: background 300ms ease;
+}
+/* An opened seam brightens its divider, so the line and the button read as one
+   control rather than two things that happen to overlap. */
+.dv-branch-anchor.is-open .dv-branch-line {
+  /* Flat, not a left-to-right ramp: the button sits in the MIDDLE of the line
+     now, and the mask above fades both ends equally — a directional gradient
+     under a symmetric mask reads lopsided. */
+  background: var(--color-cognac);
+}
+/* The button rides ON the divider, centred in the gap the seam just opened. */
+.dv-branch-split {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
   appearance: none; cursor: pointer;
   display: inline-flex; align-items: center; gap: 6.4px;
   padding: 6.4px 14.4px; border-radius: 999px;
@@ -2953,26 +3381,13 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
   color: var(--color-ink); font: inherit; font-size: 10.4px; font-weight: 600;
   white-space: nowrap; box-shadow: var(--shadow-elev);
   transition: color 130ms ease, background 130ms ease;
+  animation: dv-branch-split-in 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.dv-branch svg { width: 12px; height: 12px; }
-.dv-branch:hover { color: var(--color-cream); background: var(--color-cognac); }
-/* Floating pill — fixed to the viewport (portalled to <body>) so it overflows
-   past the sidebar edge, into the gutter toward the document. Its left edge is
-   placed flush with the scrollbar's right edge. */
-.dv-branch--float {
-  position: fixed; z-index: 1000; margin-left: 9.6px;
-  animation: dv-branch-float-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-/* Cream connector bridging the gutter gap between the divider (ends at the
-   section edge) and the floating pill, so the line reads as continuous. */
-.dv-branch--float::before {
-  content: ''; position: absolute; right: 100%; top: 50%;
-  width: 14.4px; height: 1.6px; transform: translateY(-50%);
-  background: var(--color-sand);
-}
-@keyframes dv-branch-float-in {
-  from { opacity: 0; transform: translateY(-50%) translateX(-5.6px); }
-  to   { opacity: 1; transform: translateY(-50%) translateX(0); }
+.dv-branch-split svg { width: 12px; height: 12px; }
+.dv-branch-split:hover { color: var(--color-cream); background: var(--color-cognac); }
+@keyframes dv-branch-split-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 /* Right-click menu on a version pill — "Open in <software>". Portalled to
@@ -3234,6 +3649,51 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
 
 /* Targeted-passage chip — the doc section the user highlighted, shown above the
    textarea. The next message is applied to this excerpt. */
+/* The passage a sent message was aimed at, shown under the user's bubble.
+   Reads as a quiet quote of the composer's "Editing selection" chip — same
+   accent rail, no clear button (it's history now, not a pending target). */
+/* An answered ask_user turn: the question the AI put, with the reply under it,
+   inside the user's own bubble. Without this the thread only kept the answer,
+   and the question vanished with the panel that asked it. */
+.dv-bubble-qa { display: flex; flex-direction: column; gap: 8px; }
+.dv-bubble-qa-item { display: flex; flex-direction: column; gap: 2px; }
+.dv-bubble-qa-q {
+  font-size: 0.72em; font-weight: 600; line-height: 1.35;
+  opacity: 0.62;
+}
+/* The reply is the message proper — full weight, inheriting the bubble's size,
+   sitting directly under the question it answers. */
+.dv-bubble-qa-a { line-height: 1.4; }
+
+/* Per-message token cost, under an assistant bubble. Deliberately quieter than
+   the selected-passage chip beside it — it's a footnote, not a label. */
+.dv-bubble-tokens {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  margin: 4px 0 0; padding: 0 1px;
+  font-size: 0.6rem; color: var(--text-muted);
+  letter-spacing: 0.01em; cursor: default;
+}
+.dv-bubble-tokens-n { font-variant-numeric: tabular-nums; font-weight: 600; }
+.dv-bubble-tokens-label { opacity: 0.75; }
+
+.dv-bubble-selchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin: 5px 0 0; padding: 3px 8px;
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-left: 2.5px solid var(--accent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 0.62rem; color: var(--text-secondary);
+  text-align: left; cursor: default;
+}
+.dv-bubble-selchip-ico { flex: none; display: inline-flex; color: var(--accent); }
+.dv-bubble-selchip-label { flex: none; font-weight: 700; color: var(--accent); }
+.dv-bubble-selchip-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-style: italic; opacity: 0.9;
+}
+
 .dv-advisor-selchip {
   display: flex; align-items: center; gap: 6px;
   margin: 0 0 6px; padding: 4px 4px 4px 8px;
@@ -3257,27 +3717,6 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
   color: var(--text-muted); transition: background 120ms, color 120ms;
 }
 .dv-advisor-selchip-x:hover { background: var(--danger-soft); color: var(--danger-text); }
-
-/* Floating "edit this passage with AI" button anchored above a text selection in
-   the rendered document. */
-.dv-docx-seltip {
-  z-index: 9999;
-  transform: translate(-50%, calc(-100% - 8px));
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 10px;
-  border: 0; border-radius: 999px;
-  background: var(--accent); color: var(--text-on-accent);
-  font-family: var(--font-body); font-size: 0.68rem; font-weight: 600;
-  white-space: nowrap; cursor: pointer;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, rgba(0,0,0,0.35));
-  animation: dv-seltip-in 120ms ease-out;
-}
-.dv-docx-seltip:hover { background: var(--accent-hover); }
-.dv-docx-seltip svg { flex: none; }
-@keyframes dv-seltip-in {
-  from { opacity: 0; transform: translate(-50%, calc(-100% - 2px)); }
-  to   { opacity: 1; transform: translate(-50%, calc(-100% - 8px)); }
-}
 
 .dv-advisor-composer-toolbar { display: flex; align-items: center; gap: 3.2px; }
 .dv-advisor-composer-spacer { flex: 1; }
@@ -3568,6 +4007,22 @@ body.dv-advisor-sb-dragging .dv-advisor-sb-thumb {
 .dv-doc-main:has(.dv-docview) {
   padding-left: calc(var(--dv-advisor-w, 296px) + 24px);
 }
+/* Mirror image on the right: 0 until the blanks panel is open, its footprint
+   once it is, so the page sheets stay centred in what's left of the window. */
+.dv-doc-body:not(.is-split):not(.is-flush):not(.is-media),
+.dv-doc-main,
+.dv-doc-main:has(.dv-docview) {
+  padding-right: var(--dv-fields-pad, 0px);
+}
+/* Armed for the ~400ms the mode takes to toggle and dropped again, so the
+   advisor's resize drag still tracks the cursor 1:1. */
+.dv-main-row.is-shifting .dv-media-stage,
+.dv-main-row.is-shifting .dv-doc-body,
+.dv-main-row.is-shifting .dv-doc-main,
+.dv-main-row.is-shifting .dvi-pane,
+.dv-main-row.is-shifting .dv-text-pane {
+  transition: padding 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 /* The text pane (WhatsApp chat, plain text, markdown) is FLUSH
    (.dv-doc-main.is-flush zeroes the padding), so without its own inset its
    content slides behind the floating side panel. Reserve the same footprint on
@@ -3748,3 +4203,1150 @@ button.dv-snip-entry-thumb { cursor: pointer; }
   background: var(--bg-elevated);
   color: var(--text-muted); font-size: 10px; line-height: 1.5;
 }
+
+/* ── Blanks in the document ─────────────────────────────────────────────
+   An unfilled blank is drawn the way paper draws one: a ruled slot. Dotted rule
+   under muted italic text, with a small cognac tick at its head — the shape of
+   a form waiting to be completed, legible at a glance down a page without being
+   a highlight.
+
+   That distinction is the whole design. Marking every blank with a coloured
+   fill turned a contract template into a wall of yellow strips and made the
+   document unreadable AS a document. A rule sits in the typography instead of
+   on top of it: you can read the clause straight through and still see, in
+   peripheral vision, which parts of it are still open.
+
+   Colour is reserved for the two states that have actually changed something —
+   picked (warning) and filled (success) — so it means something when it
+   appears. The page sheet paints its own palette (see .dv-docx-page), which is
+   why these use the brand constants rather than the theme's semantic tokens:
+   the page is white in Cream and in Ink alike. */
+.dv-docx .dv-field {
+  border-radius: 3.2px;
+  padding: 0 3.2px;
+  background: transparent;
+  box-shadow: none;
+  transition: background 140ms ease, box-shadow 140ms ease,
+              border-color 140ms ease, color 140ms ease;
+}
+.dv-docx .dv-field:not(.is-filled) {
+  /* Set apart from the drafted text without shouting: lighter, italic, and
+     sitting on a dotted baseline.
+
+     Everything here costs ZERO horizontal space, and that is a constraint, not
+     a coincidence. The document is paginated by measuring the flow BEFORE the
+     blanks are wrapped (see the render effect: paginateDocx, then
+     scanDocFields), so any width a marker adds is applied to page sheets whose
+     heights are already fixed — and the sheets clip. A colour, a slant and a
+     bottom rule change nothing about how the line lays out; a leading dot or a
+     margin would have quietly pushed the last line off the bottom of a page in
+     any clause carrying a few blanks. */
+  color: color-mix(in srgb, var(--color-ink) 62%, transparent);
+  font-style: italic;
+  border-bottom: 1.5px dotted color-mix(in srgb, var(--color-cognac) 65%, transparent);
+}
+/* Pointing at one firms the rule up — an affordance, still not a fill. */
+.dv-docx .dv-field:not(.is-filled):hover {
+  color: var(--color-ink);
+  border-bottom-style: solid;
+  border-bottom-color: var(--color-cognac);
+}
+/* Filled: no longer an empty space but real text, so it keeps its mark down the
+   whole page — that's how you see what has already been answered. */
+.dv-docx .dv-field.is-filled {
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  box-shadow: inset 0 -1.6px 0 color-mix(in srgb, var(--success) 65%, transparent);
+}
+
+/* Inside the paragraph you have picked, the blanks are the point — they light up
+   as the things still to answer (the has-pick dimming has already pushed the
+   rest of the page back). */
+.dv-docx .dv-docx-para.is-selected .dv-field {
+  background: color-mix(in srgb, var(--warning) 34%, transparent);
+  box-shadow: inset 0 -2px 0 var(--warning);
+}
+/* Picked: the tint says everything the rule was saying, so the rule stands
+   down — one marking per blank, or they start to read as two states. */
+.dv-docx .dv-docx-para.is-selected .dv-field:not(.is-filled) {
+  color: var(--color-ink);
+  font-style: normal;
+  border-bottom: none;
+}
+.dv-docx .dv-docx-para.is-selected .dv-field.is-filled {
+  background: color-mix(in srgb, var(--success) 26%, transparent);
+  box-shadow: inset 0 -2px 0 var(--success);
+}
+/* The blank currently being worked on, marked for as long as its card is
+   selected — a flash alone had faded by the time you looked from the panel to
+   the page. Ring + lift, so it reads as picked rather than merely coloured.
+   Scoped through `.dv-docx-para.is-selected` for two reasons: it matches the
+   picked-paragraph rules above on specificity and wins on source order (a
+   looser selector lost to them and never painted), and it can't outlive the
+   pick — dropping the paragraph takes the ring with it even if the class is
+   still on the span. */
+.dv-docx .dv-docx-para.is-selected .dv-field.is-active {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 2px 10px color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 4px;
+}
+.dv-docx .dv-docx-para.is-selected .dv-field.is-active.is-filled {
+  background: color-mix(in srgb, var(--success) 28%, transparent);
+  box-shadow:
+    0 0 0 2px var(--success),
+    0 2px 10px color-mix(in srgb, var(--success) 40%, transparent);
+}
+
+/* Previewing a party: the blank is showing borrowed text, not an answer. Reads
+   as provisional — accent tint under a dashed rule — so it can't be mistaken for
+   something already filled in, and it paints regardless of the pick scoping
+   above, because a preview the user asked for should be visible immediately. */
+.dv-docx .dv-field.is-preview,
+.dv-docx .dv-docx-para.is-selected .dv-field.is-preview {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: none;
+  border-bottom: 1.5px dashed var(--accent);
+  /* Borrowed text is still text — drop the empty-slot treatment or the preview
+     reads as an unanswered blank. */
+  color: var(--color-ink);
+  font-style: normal;
+}
+
+/* Clicking a field in the panel scrolls to the blank and flashes it, so you can
+   see which one you're about to answer. */
+@keyframes dv-field-flash {
+  0%, 100% { background: color-mix(in srgb, var(--warning) 34%, transparent); }
+  35%      { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+}
+.dv-docx .dv-field.is-flash { animation: dv-field-flash 1.1s ease; }
+
+/* The blanks panel — the advisor's mirror image on the right edge, same
+   frosted material and inset so the two read as one pair of surfaces. */
+.dv-fields-card {
+  position: absolute; right: 8px; top: 8px; bottom: 8px; z-index: 10;
+  width: var(--dv-fields-w, 380px);
+  display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--bg-page) 90%, transparent);
+  backdrop-filter: blur(32px) saturate(1.4);
+  -webkit-backdrop-filter: blur(32px) saturate(1.4);
+  border: 1px solid var(--border);
+  border-radius: 11.2px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  /* Fades and slides in from the window edge; `visibility` keeps it out of the
+     tab order while closed, since it stays mounted to preserve an in-flight
+     suggestion run. */
+  opacity: 0; visibility: hidden;
+  transform: translateX(24px);
+  pointer-events: none;
+  transition: opacity 220ms ease, transform 340ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 340ms;
+}
+.dv-main-row.is-completing .dv-fields-card {
+  opacity: 1; visibility: visible;
+  transform: none;
+  pointer-events: auto;
+  transition: opacity 260ms ease 60ms, transform 340ms cubic-bezier(0.22, 1, 0.36, 1) 60ms, visibility 0s;
+}
+
+.dv-fields-head {
+  flex: none; display: flex; align-items: flex-start; gap: 8px;
+  padding: 14.4px 14.4px 11.2px;
+  border-bottom: 1px solid var(--border);
+}
+.dv-fields-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dv-fields-eyebrow {
+  font-size: 9.6px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent);
+}
+.dv-fields-title { margin: 0; font-family: var(--font-display); font-size: 17.6px; font-weight: 600; color: var(--text-primary); }
+.dv-fields-close {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6.4px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+  cursor: pointer; transition: background 120ms ease, color 120ms ease;
+}
+.dv-fields-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+.dv-fields-body { flex: 1; min-height: 0; overflow: auto; padding: 11.2px; display: flex; flex-direction: column; gap: 9.6px; }
+.dv-fields-empty { margin: 0; font-size: 11.2px; line-height: 1.5; color: var(--text-muted); }
+.dv-fields-error { margin: 0; font-size: 11.2px; line-height: 1.5; color: var(--danger-text); }
+.dv-fields-loading { display: flex; align-items: center; gap: 8px; font-size: 11.2px; color: var(--text-secondary); }
+.dv-fields-spinner {
+  flex: none; width: 12.8px; height: 12.8px; border-radius: 50%;
+  border: 1.6px solid var(--border-strong); border-top-color: var(--accent);
+  animation: dv-fields-spin 700ms linear infinite;
+}
+@keyframes dv-fields-spin { to { transform: rotate(360deg); } }
+
+/* ── Fill from a party ──────────────────────────────────────────────────
+   Sits at the head of the blanks panel: one chip per identity record in the
+   project that can answer some of this paragraph's blanks. Clicking fills them
+   all; the per-field cards below stay for anything it missed or got wrong. */
+.dv-fields-parties {
+  display: flex; flex-direction: column; gap: 6.4px;
+  padding: 9.6px; border-radius: 9.6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.dv-fields-parties-label {
+  display: flex; align-items: baseline; gap: 6.4px; flex-wrap: wrap;
+  font-size: 8.8px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* How much of the paragraph this can even reach — so a chip that fills 2 of 9
+   doesn't read as a promise to finish the job. */
+.dv-fields-parties-hint {
+  letter-spacing: 0.02em; text-transform: none; font-weight: 500;
+  color: color-mix(in srgb, var(--text-muted) 80%, transparent);
+}
+.dv-fields-party-group { display: flex; flex-direction: column; gap: 4.8px; }
+/* The party a group of blanks named, when the document named one. */
+.dv-fields-party-role {
+  font-size: 9.6px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--accent); text-transform: capitalize;
+}
+.dv-fields-parties-list { display: flex; flex-wrap: wrap; gap: 6.4px; }
+.dv-fields-party {
+  display: inline-flex; align-items: center; gap: 7.2px;
+  padding: 5.6px 11.2px 5.6px 6.4px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  font: inherit; color: var(--text-primary); cursor: pointer; text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.dv-fields-party:hover { border-color: var(--accent); background: var(--accent-soft); }
+/* The same monogram the identity card uses for its portrait panel, so a party
+   is recognisable in both places. */
+.dv-fields-party-mono {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: color-mix(in srgb, var(--color-cognac) 18%, transparent);
+  color: var(--color-cognac);
+  font-family: var(--font-display); font-size: 10.4px; font-weight: 700;
+}
+.dv-fields-party-text { display: flex; flex-direction: column; min-width: 0; }
+.dv-fields-party-name { font-size: 11.2px; font-weight: 650; line-height: 1.25; }
+.dv-fields-party-meta { font-size: 9.2px; line-height: 1.3; color: var(--text-muted); }
+
+/* One card per blank: what it is, where it sits, what to put in it. */
+.dv-field-card {
+  display: flex; flex-direction: column; gap: 6.4px;
+  padding: 9.6px; border-radius: 9.6px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.dv-field-card.is-filled { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); }
+/* Pointed at — from either end. The card lights when the pointer is on it OR
+   on the gap it fills, back in the document; nothing is selected and nothing
+   stays lit once the pointer moves on. */
+.dv-field-card.is-active {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.dv-field-label {
+  display: flex; align-items: baseline; gap: 6.4px;
+  padding: 0; border: 0; background: transparent; text-align: left;
+  color: var(--text-primary); font: inherit; cursor: pointer;
+}
+.dv-field-label:hover .dv-field-label-text { color: var(--accent); }
+.dv-field-label-text { font-size: 12.8px; font-weight: 650; transition: color 120ms ease; }
+
+/* Suggestions, grouped by where they came from. The dot is the whole legend:
+   accent for what the document implies, cognac for what was read out of a file. */
+.dv-field-group { display: flex; flex-direction: column; gap: 4px; }
+.dv-field-group-head {
+  display: flex; align-items: center; gap: 4.8px;
+  font-size: 9.6px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.dv-field-group-dot { width: 5.6px; height: 5.6px; border-radius: 50%; flex: none; }
+.dv-field-group-dot.is-context { background: var(--accent); }
+.dv-field-group-dot.is-file { background: var(--color-cognac); }
+.dv-field-sugg {
+  display: flex; flex-direction: column; gap: 1.6px; align-items: flex-start;
+  padding: 5.6px 8px; border-radius: 6.4px;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.dv-field-sugg:hover { border-color: var(--accent); background: var(--accent-soft); }
+.dv-field-sugg.is-picked { border-color: var(--accent); background: var(--accent-tint); }
+.dv-field-sugg-val { font-size: 11.2px; line-height: 1.4; }
+.dv-field-sugg-src {
+  font-size: 9.6px; font-weight: 600; color: var(--color-cognac);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dv-field-sugg-why { font-size: 9.6px; color: var(--text-muted); }
+.dv-field-input {
+  width: 100%; box-sizing: border-box;
+  padding: 5.6px 8px; border-radius: 6.4px;
+  border: 1px solid var(--border); background: var(--bg-input);
+  color: var(--text-primary); font: inherit; font-size: 11.2px;
+}
+.dv-field-input::placeholder { color: var(--text-muted); }
+.dv-field-input:focus { outline: none; border-color: var(--accent); }
+
+.dv-fields-foot {
+  flex: none; display: flex; gap: 8px; padding: 11.2px 14.4px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+}
+.dv-fields-btn {
+  flex: 1; min-width: 0;
+  padding: 6.4px 11.2px; border-radius: 6.4px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-primary); font: inherit; font-size: 11.2px; font-weight: 600;
+  cursor: pointer; transition: background 120ms ease, border-color 120ms ease;
+}
+.dv-fields-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.dv-fields-btn.is-primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+.dv-fields-btn.is-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.dv-fields-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Identity record (.dvx) ─────────────────────────────────────────────
+   A party to the case, shown as the form it is rather than the JSON it is
+   stored as. Laid out like a document sheet so it sits in the viewer next to
+   the Word and PDF panes rather than reading as a settings screen. */
+/* The identity pane is FLUSH (.dv-doc-main.is-flush zeroes the padding), and the
+   Multitool panel FLOATS over the preview's left side — so without its own
+   inset the card sat UNDER the panel and ignored its width entirely. Reserve
+   the same footprint the text pane reserves, off the same variable, which
+   .dv-main-row updates live while the resize gutter is dragged. */
+.dvi-pane {
+  flex: 1 1 auto; min-height: 0; min-width: 0;
+  display: flex; flex-direction: column;
+  position: relative;
+  padding-left: calc(var(--dv-advisor-w, 296px) + 24px);
+  padding-right: var(--dv-fields-pad, 0px);
+  box-sizing: border-box;
+}
+/* The card's own band: fixed at the top of the pane, never scrolled and never
+   compressed. `flex: none` is the fix for the clipping — as an ordinary flex
+   item in the scroller it was free to shrink below its content height, and the
+   card's rounded frame (overflow: hidden) cut the difference off. */
+.dvi-cardwrap {
+  flex: none;
+  container: dvi-card / inline-size;
+  /* Left-aligned rather than centred, and on a slim inset: the record should sit
+     against the side panel the way the document pane does, not float in the
+     middle of the window with a corridor beside it. `max-width` with `width:
+     100%` is what makes it track the panel — dragging the resize gutter narrows
+     the available space and the card follows it live, since the card's width is
+     a share of the pane rather than a fixed 780. */
+  width: 100%; max-width: 780px; margin: 0;
+  padding: 16px 16px 9.6px 0;
+  box-sizing: border-box;
+}
+/* The form under it — the only thing that scrolls. Same inset, so the card and
+   the fields share one left edge. */
+.dvi-sheet {
+  flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto;
+  width: 100%; max-width: 780px; margin: 0;
+  padding: 6.4px 16px 40px 0;
+  display: flex; flex-direction: column; gap: 17.6px;
+  box-sizing: border-box;
+}
+/* ── The data page ──────────────────────────────────────────────────────
+   A read-out of the record shaped like an ID card / passport data page: dark
+   issuing band, portrait panel, small-caps field labels over their values, and
+   a machine-readable strip along the foot.
+
+   It paints its OWN palette from the brand constants rather than the semantic
+   theme tokens — like `.dv-docx-page`, this is a document sitting in the
+   viewer, and a document doesn't repaint itself when the app switches to Ink.
+   That's also why the type sizes here are absolute rather than inherited. */
+.dvi-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  flex: none;
+  /* One height for every record, so switching between a person and a company —
+     which carry a different number of rows — doesn't resize the page under the
+     form. `min-height` rather than `height`, so an unusually long address grows
+     the card instead of being clipped by it. */
+  min-height: 196px;
+  display: flex; flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 22%, transparent);
+  background: var(--color-cream);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-card);
+}
+/* Security-print texture: two repeating radial rulings, offset and rotated
+   against each other, moiré into something close to a guilloche without an
+   image. Kept faint — it must read as paper, never as a pattern. */
+.dvi-card-guilloche {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    repeating-radial-gradient(circle at 12% 120%,
+      transparent 0 11px,
+      color-mix(in srgb, var(--color-cognac) 22%, transparent) 11px 11.8px),
+    repeating-radial-gradient(circle at 96% -18%,
+      transparent 0 13px,
+      color-mix(in srgb, var(--color-slate) 16%, transparent) 13px 13.8px),
+    linear-gradient(118deg,
+      color-mix(in srgb, var(--color-sand) 34%, transparent),
+      transparent 46%);
+}
+
+/* Issuing band — the dark strip a card carries its authority on. */
+.dvi-card-band {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9.6px;
+  padding: 9.6px 17.6px;
+  background: var(--color-ink);
+  color: var(--color-cream);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.dvi-card-issuer { color: var(--color-sand); }
+/* Pushed to the far edge so the band reads issuer-left / document-right. */
+.dvi-card-doc { margin-left: auto; opacity: 0.8; }
+.dvi-card-origin {
+  padding: 2.4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-cognac) 70%, transparent);
+  letter-spacing: 0.08em;
+}
+/* The org variant swaps the band's accent so the two kinds are tellable apart
+   at a glance in a folder full of them. */
+.dvi-card.is-org .dvi-card-band { background: var(--color-slate); }
+.dvi-card.is-org .dvi-card-issuer { color: var(--color-cream); }
+
+.dvi-card-body {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  padding: 19.2px 17.6px 16px;
+}
+
+.dvi-card-main { flex: 1 1 auto; min-width: 0; }
+.dvi-card-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4.8px 9.6px;
+  padding-bottom: 9.6px;
+  margin-bottom: 11.2px;
+  border-bottom: 1.5px solid color-mix(in srgb, var(--color-cognac) 45%, transparent);
+}
+.dvi-card-name {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 25.6px;
+  font-weight: 600;
+  line-height: 1.12;
+  color: var(--color-ink);
+}
+.dvi-card-role {
+  padding: 2.4px 9.6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-cognac) 55%, transparent);
+  background: color-mix(in srgb, var(--color-cognac) 12%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-cognac);
+}
+
+/* Field grid — label above value, the way a data page prints them. */
+.dvi-card-data {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10.4px 17.6px;
+}
+.dvi-card-datum { min-width: 0; }
+.dvi-card-datum.is-wide { grid-column: 1 / -1; }
+.dvi-card-datum dt {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-ink) 52%, transparent);
+}
+.dvi-card-datum dd {
+  margin: 2.4px 0 0;
+  font-size: 13.6px;
+  line-height: 1.35;
+  font-weight: 550;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+/* Nothing recorded yet — the line still prints, faintly, so the gap is visible
+   as a gap rather than the field silently disappearing. */
+.dvi-card-datum dd.is-blank {
+  color: color-mix(in srgb, var(--color-ink) 32%, transparent);
+  font-weight: 450;
+}
+
+/* Auto-complete — bottom-right of the card, over the machine strip. Sits on the
+   card rather than in the form because it acts on the whole record, and the
+   card is what the whole record looks like; on the right because that is the
+   edge the drawer it opens comes in from. */
+.dvi-card-action {
+  position: absolute; right: 14.4px; bottom: 11.2px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 5.6px;
+  padding: 4px 11.2px 4px 9.6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 22%, transparent);
+  background: color-mix(in srgb, var(--color-cream) 88%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: var(--color-cognac);
+  font-family: var(--font-body); font-size: 10.4px; font-weight: 650;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.dvi-card-action:hover {
+  border-color: var(--color-cognac);
+  background: var(--color-cream);
+}
+.dvi-card-action.is-on {
+  background: var(--color-cognac);
+  border-color: var(--color-cognac);
+  color: var(--color-cream);
+}
+
+/* ── Fill-from-a-picture picker ─────────────────────────────────────────
+   The project's files in a modal over the viewer, at half the window so the
+   record stays visible around it — picking a photo fills the fields behind the
+   scrim, and seeing them populate is most of the reassurance that the right
+   picture was chosen. */
+.dvi-modal-scrim {
+  /* Portalled to <body>, so this z-index is against the document root rather
+     than trapped in the document card's stacking context. Above the floating
+     side panel (10) and the window's own chrome, below the toast stack. */
+  position: fixed; inset: 0; z-index: 9000;
+  display: grid; place-items: center;
+  padding: 24px;
+  /* Black and blurred: the panel above is frosted glass, so what it samples has
+     to be dark and formless or the document behind reads THROUGH the picker and
+     competes with the grid. Pure black rather than the palette's ink, which is a
+     dark BROWN and tints the frost.
+
+     Held at 58% — enough to put the viewer behind glass, not so much that the
+     window disappears. It was near-opaque when the panel itself was translucent
+     page-tone and needed a formless ground; the panel carries the deeper sidebar
+     tone now, so the scrim no longer has to do that work alone.
+
+     The alpha lives in the COLOUR, not in `opacity`: the modal is a child of
+     this element, and an opacity here would fade the panel along with what it
+     covers. */
+  background: color-mix(in srgb, #000 58%, transparent);
+  backdrop-filter: blur(8px) saturate(0.6);
+  -webkit-backdrop-filter: blur(8px) saturate(0.6);
+  animation: dvi-modal-fade 160ms ease-out;
+}
+@keyframes dvi-modal-fade { from { opacity: 0; } to { opacity: 1; } }
+/* Leaving. Kept mounted for MODAL_EXIT_MS (DocViewer.jsx) so the panel can be
+   seen to go rather than blinking out — `forwards` holds the last frame for the
+   few milliseconds between the animation ending and React unmounting, which is
+   what stops it flashing back to full opacity first. */
+@keyframes dvi-modal-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes dvi-modal-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(6px) scale(0.99); }
+}
+.dvi-modal-scrim.is-closing {
+  animation: dvi-modal-fade-out 180ms ease-in forwards;
+  /* Not dismissable, and not in the way of whatever is underneath. */
+  pointer-events: none;
+}
+.dvi-modal-scrim.is-closing .dvi-modal {
+  /* Slightly quicker than the scrim, so the panel is gone before the ground
+     lifts — the other order looks like the panel was left behind. */
+  animation: dvi-modal-out 150ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+.dvi-modal {
+  /* Room to browse a folder properly — the grid was the point, and at half the
+     window it showed four tiles a row. Capped against the viewport so it stays
+     a modal on a small screen rather than growing past the edges. */
+  width: min(94vw, 1800px);
+  height: min(92vh, 930px);
+  display: flex; flex-direction: column;
+  /* The side panel's own material — .dv-advisor-card above: translucent frosted
+     glass over the page, same blur, same saturation, same hairline. It is the
+     same window, so it should be made of the same thing. `data-theme="ink"` on
+     this element re-points every semantic token inside it, which is what makes
+     the tokens here the DARK ones and the Files tiles inside come out dark
+     with it — no tile, field or crumb is restyled.
+
+     The panel takes the SIDEBAR tone and the path bar below takes the page —
+     the reverse of the first pass. Chrome sits on the deeper of the two, and
+     the grid it frames is the lighter surface, so the tiles read as content on
+     a sheet rather than as content in a well. */
+  background: color-mix(in srgb, var(--bg-sidebar) 90%, transparent);
+  backdrop-filter: blur(32px) saturate(1.4);
+  -webkit-backdrop-filter: blur(32px) saturate(1.4);
+  border: 1px solid var(--border);
+  border-radius: 11.2px;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-elev);
+  overflow: hidden;
+  isolation: isolate;
+  animation: dvi-modal-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes dvi-modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.dvi-modal-head {
+  flex: none; display: flex; align-items: flex-start; gap: 9.6px;
+  padding: 14.4px 16px 11.2px;
+  border-bottom: 1px solid var(--border);
+}
+.dvi-modal-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1.6px; }
+.dvi-modal-eyebrow {
+  font-size: 8.8px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent);
+}
+.dvi-modal-title {
+  margin: 0; font-family: var(--font-display); font-size: 17.6px; font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dvi-modal-close {
+  flex: none; display: grid; place-items: center;
+  width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 8px; background: transparent;
+  color: var(--text-muted); cursor: pointer;
+}
+.dvi-modal-close:hover { background: var(--bg-card); color: var(--text-primary); }
+/* Path bar — the Files tab's, in the same shape: where you are on the left,
+   the folder search on the right. */
+.dvi-modal-bar {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 12.8px;
+  padding: 9.6px 16px;
+  /* One step off the ground, so the path bar reads as chrome above the grid
+     rather than as more of the same surface. Translucent, so the frost behind
+     it still shows. */
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-page) 55%, transparent);
+}
+/* Navigation and crumbs use the Files tab's own classes — .fx-pathbar-nav,
+   .fx-crumbs, .fx-crumb — styled in FilesWorkspace.css, which loads with the
+   ItemThumbnail import. Nothing is redefined here: a copy would drift the first
+   time either side was restyled. The crumb row just needs room to shrink
+   between the arrows and the tools. */
+.dvi-modal-bar .fx-crumbs { flex: 1 1 auto; min-width: 0; }
+
+.dvi-modal-bar-tools { display: flex; align-items: center; gap: 8px; }
+/* The native picker is the control; this is the thing you actually press. */
+.dvi-modal-file { display: none; }
+.dvi-modal-import {
+  display: inline-flex; align-items: center; gap: 5.6px;
+  padding: 5.6px 11.2px 5.6px 9.6px;
+  border: 1px solid var(--border); border-radius: 5.6px;
+  background: var(--bg-input);
+  font: inherit; font-size: 10.4px; font-weight: 600;
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.dvi-modal-import:hover:not(:disabled) {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--text-primary);
+}
+.dvi-modal-import:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* The Files tab's search field, to the pixel — see .fx-search in
+   FilesWorkspace.css. A copy rather than a shared class: the Doc Viewer is its
+   own window and does not load that stylesheet, so if one is restyled, restyle
+   the other with it. */
+.dvi-modal-search {
+  display: flex; align-items: center; gap: 6.4px;
+  padding: 4px 6.4px 4px 8.8px;
+  border: 1px solid var(--border);
+  border-radius: 5.6px;
+  background: var(--bg-input);
+  width: 224px;
+  font-size: 10.4px;
+  color: var(--text-muted);
+  transition: width 220ms cubic-bezier(.16, 1, .3, 1),
+              border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.dvi-modal-search:hover { border-color: var(--border-strong); }
+.dvi-modal-search:focus-within {
+  width: 288px;
+  border-color: var(--accent);
+  background: var(--bg-card);
+  box-shadow: 0 0 0 2.4px var(--accent-tint);
+}
+.dvi-modal-search-glyph { color: var(--text-muted); flex: 0 0 auto; transition: color 140ms ease; }
+.dvi-modal-search:focus-within .dvi-modal-search-glyph,
+.dvi-modal-search.is-active .dvi-modal-search-glyph { color: var(--accent); }
+.dvi-modal-search input {
+  border: 0; background: transparent; outline: none;
+  font: inherit; color: var(--text-primary); width: 100%; min-width: 0;
+}
+.dvi-modal-search input::placeholder { color: var(--text-muted); }
+.dvi-modal-search-kbd {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2.4px;
+  font-family: var(--font-body); transition: opacity 120ms ease;
+}
+.dvi-modal-search-kbd kbd {
+  display: inline-flex; align-items: center;
+  padding: 1px 4px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-elevated);
+  font-family: inherit; font-size: 8.4px; font-weight: 600; line-height: 1.5;
+  letter-spacing: 0.02em; color: var(--text-muted);
+}
+.dvi-modal-search-plus { margin: 0 2.4px; font-size: 8px; font-weight: 600; color: var(--text-muted); }
+.dvi-modal-search:focus-within .dvi-modal-search-kbd { opacity: 0; }
+.dvi-modal-search-clear {
+  flex: 0 0 auto; display: grid; place-items: center;
+  width: 16px; height: 16px; padding: 0; border: 0; cursor: pointer;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
+  transition: background 120ms ease, color 120ms ease;
+}
+.dvi-modal-search-clear:hover {
+  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  color: var(--text-primary);
+}
+
+/* The modal's action row. The grid above chooses a picture; this reads it —
+   two acts, so two places. The button is bottom-RIGHT, where the one that
+   commits a dialog goes; what it will act on (or, once a read has finished, how
+   it went) is stated to its left and takes whatever width is left over. */
+.dvi-modal-foot {
+  flex: none;
+  display: flex; align-items: center; gap: 12.8px;
+  padding: 11.2px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-page) 55%, transparent);
+}
+.dvi-modal-scan {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 6.4px;
+  padding: 7.2px 16px 7.2px 12.8px;
+  border: 0; border-radius: 8px;
+  background: var(--accent); color: var(--text-on-accent);
+  font: inherit; font-size: 12px; font-weight: 650; cursor: pointer;
+  transition: background 120ms ease, opacity 120ms ease;
+}
+.dvi-modal-scan:hover:not(:disabled) { background: var(--accent-hover); }
+.dvi-modal-scan:disabled {
+  /* Not merely faded: with nothing chosen it is not a button that failed, it is
+     a button with no subject yet — so it drops to the flat surface tone. */
+  background: var(--bg-input); color: var(--text-muted);
+  cursor: not-allowed; opacity: 0.7;
+}
+.dvi-modal-scan-spin {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: dvi-scan-spin 700ms linear infinite;
+}
+@keyframes dvi-scan-spin { to { transform: rotate(360deg); } }
+/* What it will read. */
+.dvi-modal-picked { display: flex; align-items: baseline; gap: 6.4px; min-width: 0; }
+.dvi-modal-picked-name {
+  font-size: 11.2px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dvi-modal-picked-tag {
+  flex: none; padding: 1.6px 6.4px; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  font-size: 9.6px; font-weight: 600; color: var(--text-muted); white-space: nowrap;
+}
+.dvi-modal-foot-hint { font-size: 11.2px; color: var(--text-muted); }
+/* Everything left of the button. It takes the slack, so the button stays pinned
+   to the right edge whether there is a filename, a message or nothing at all. */
+.dvi-modal-foot-status {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+}
+
+.dvi-modal-note {
+  flex: none; margin: 11.2px 16px 0;
+  padding: 7.2px 11.2px; border-radius: 8px;
+  font-size: 11.2px; line-height: 1.45;
+}
+.dvi-modal-foot .dvi-modal-note { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dvi-modal-note.is-ok { background: var(--success-soft); color: var(--text-primary); }
+.dvi-modal-note.is-error { background: var(--danger-soft); color: var(--danger-text); }
+/* No fill of its own — the card's frost IS the background. */
+.dvi-modal-body { flex: 1; min-height: 0; overflow: auto; padding: 12.8px 16px 16px; }
+.dvi-modal-empty { margin: 6.4px 0; font-size: 11.2px; line-height: 1.5; color: var(--text-muted); }
+
+/* The Files tab's own grid and tiles (.fx-grid / .fx-tile, styled in
+   FilesWorkspace.css, which loads with the ItemThumbnail import). Only the
+   density is set here — this is a picker, so it packs tighter than a full
+   workspace. */
+.dvi-modal-grid {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  padding: 0;
+}
+/* A file the picker cannot read — anything that is not a picture. It stays
+   listed, because hiding half the folder would leave the user hunting for a
+   file that is right there, but it fades back so the pictures are what the eye
+   lands on. Keyed on the CLASS, not `:disabled`: the tile stays enabled so it
+   can still raise the hover pill that explains itself. */
+.dvi-modal-grid .fx-tile.is-unreadable {
+  opacity: 0.34;
+  cursor: default;
+  filter: grayscale(0.7);
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+/* No hover response at all: reacting to the pointer is what a target does, and
+   this one cannot be picked. The hover pill still says why — that is the only
+   thing pointing at it should produce. */
+.dvi-modal-grid .fx-tile.is-unreadable:hover {
+  opacity: 0.34;
+  filter: grayscale(0.7);
+  background: transparent;
+  border-color: transparent;
+  transform: none;
+}
+/* While one tile is being read every other is genuinely disabled; a lighter
+   fade keeps that distinct from "cannot be used at all". */
+.dvi-modal-grid .fx-tile:disabled:not(.is-unreadable) { opacity: 0.6; cursor: default; }
+
+/* The reason, stacked under the name in the hover pill. */
+.dvi-hover-why { flex-direction: column; align-items: flex-start; gap: 2.4px; }
+.dvi-hover-note { font-size: 0.86em; font-weight: 500; opacity: 0.72; }
+/* While one tile is being read, the others step back so it is obvious which. */
+.dvi-modal-grid .fx-tile.is-selected { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dvi-modal, .dvi-modal-scrim { animation: none; }
+  /* Still has to END hidden — with the animation off, `forwards` is what was
+     holding it there, so state it outright. */
+  .dvi-modal-scrim.is-closing { opacity: 0; }
+}
+
+/* Machine-readable strip. Monospace, wide tracking, on its own paler band —
+   the detail that makes the whole thing read as a travel document. */
+.dvi-card-mrz {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6px;
+  padding: 9.6px 17.6px 11.2px;
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  background: color-mix(in srgb, var(--color-sand) 14%, var(--color-cream));
+  font-family: 'SF Mono', 'Menlo', 'Consolas', ui-monospace, monospace;
+  font-size: 11.2px;
+  line-height: 1.25;
+  letter-spacing: 0.16em;
+  color: color-mix(in srgb, var(--color-ink) 82%, transparent);
+  /* One long unbroken run of characters — let it scroll rather than wrap, so
+     the two lines stay the two lines a real strip has. */
+  overflow-x: auto;
+  white-space: pre;
+  scrollbar-width: none;
+}
+.dvi-card-mrz::-webkit-scrollbar { height: 0; }
+
+/* Narrow pane: the portrait drops out of the row and the card stacks. */
+
+
+.dvi-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 9.6px; }
+.dvi-kind {
+  display: flex; flex-direction: column; gap: 2.4px; align-items: flex-start;
+  padding: 11px 12.8px; border-radius: 9.6px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.dvi-kind:hover { border-color: var(--border-strong); }
+.dvi-kind.is-on { border-color: var(--accent); background: var(--accent-tint); }
+.dvi-kind-label { font-size: 12.8px; font-weight: 650; }
+.dvi-kind-hint { font-size: 10.8px; line-height: 1.4; color: var(--text-muted); }
+
+.dvi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12.8px 14.4px; }
+/* A short closed set — three buttons on one track, so the options are visible
+   rather than something to guess at. Clicking the chosen one clears it back to
+   "not specified", which is why there is no fourth button for it. */
+.dvi-choice {
+  display: flex; gap: 2.4px;
+  padding: 2.4px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-input);
+}
+.dvi-choice-opt {
+  flex: 1 1 0; min-width: 0;
+  appearance: none; border: 0; background: transparent;
+  padding: 5.6px 8px; border-radius: 6.4px;
+  font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--text-secondary); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background 140ms ease, color 140ms ease;
+}
+.dvi-choice-opt:hover:not(.is-on) { color: var(--text-primary); }
+.dvi-choice-opt.is-on { background: var(--accent); color: var(--text-on-accent); }
+.dvi-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dvi-field.is-wide { grid-column: 1 / -1; }
+.dvi-label { font-size: 11px; font-weight: 650; color: var(--text-secondary); }
+.dvi-hint { font-size: 10.4px; line-height: 1.4; color: var(--text-muted); }
+/* What the address parse understood, under the field it read. One chip per part
+   it found — a line it got wrong is then visible at the moment it is typed,
+   instead of surfacing later as a clause filled with the wrong thing. */
+.dvi-parsed { display: flex; flex-wrap: wrap; gap: 4px 6.4px; margin-top: 2.4px; }
+.dvi-parsed-bit {
+  display: inline-flex; align-items: baseline; gap: 3.2px;
+  padding: 1.6px 6.4px; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  font-size: 10px; color: var(--text-secondary);
+}
+.dvi-parsed-key { font-size: 8.8px; font-weight: 700; color: var(--text-muted); }
+/* Typed, but not something the app can act on. Not an error — a foreign region
+   is a perfectly good thing to record — just a note that the document's
+   "județul/sectorul" will be left as drafted. */
+.dvi-parsed-bit.is-unknown {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: var(--text-muted);
+}
+/* ── What the photograph said ────────────────────────────────────────────
+   A reading is a CLAIM about the record, not a fact in it, so it is printed
+   under the field it concerns and left there until someone agrees. Deliberately
+   quieter than an input and clearly not one: a dashed edge, the accent tint, no
+   fill of its own — nothing about it should read as a value already kept. */
+.dvi-sugg {
+  display: flex; align-items: center; gap: 6.4px;
+  margin-top: 2.4px; padding: 4px 4px 4px 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 8px;
+  background: var(--accent-tint);
+  min-width: 0;
+}
+.dvi-sugg-mark { display: grid; place-items: center; flex: none; color: var(--accent); }
+.dvi-sugg-body { display: flex; align-items: baseline; gap: 6.4px; flex: 1; min-width: 0; }
+.dvi-sugg-value {
+  font-size: 12px; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The field is not empty — taking this reading throws away something typed. The
+   warning tone is the whole point of showing it rather than skipping it. */
+.dvi-sugg.is-conflict {
+  border-color: color-mix(in srgb, var(--warning) 60%, var(--border));
+  background: var(--warning-soft);
+}
+.dvi-sugg-note {
+  flex: none; font-size: 9.6px; font-weight: 600; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%;
+}
+.dvi-sugg-use {
+  flex: none; padding: 3.2px 9.6px;
+  border: 0; border-radius: 5.6px;
+  background: var(--accent); color: var(--text-on-accent);
+  font: inherit; font-size: 10.4px; font-weight: 650; cursor: pointer;
+  transition: background 120ms ease;
+}
+.dvi-sugg-use:hover { background: var(--accent-hover); }
+.dvi-sugg-drop {
+  flex: none; display: grid; place-items: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 5.6px; background: transparent;
+  color: var(--text-muted); cursor: pointer;
+}
+.dvi-sugg-drop:hover { background: var(--bg-card); color: var(--text-primary); }
+
+/* The set of them, at the top of the sheet: how many, off what, and the way out
+   of accepting them one at a time when they are all right. */
+.dvi-suggbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 12.8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 9.6px;
+  background: var(--accent-tint);
+}
+.dvi-suggbar-text { flex: 1; min-width: 0; font-size: 11.2px; line-height: 1.45; color: var(--text-secondary); }
+.dvi-suggbar-text strong { color: var(--text-primary); }
+.dvi-suggbar-src { font-weight: 600; color: var(--text-primary); }
+.dvi-suggbar-all {
+  flex: none; padding: 4.8px 12.8px;
+  border: 0; border-radius: 6.4px;
+  background: var(--accent); color: var(--text-on-accent);
+  font: inherit; font-size: 11.2px; font-weight: 650; cursor: pointer;
+  transition: background 120ms ease;
+}
+.dvi-suggbar-all:hover { background: var(--accent-hover); }
+.dvi-suggbar-drop {
+  flex: none; display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 6.4px; background: transparent;
+  color: var(--text-muted); cursor: pointer;
+}
+.dvi-suggbar-drop:hover { background: var(--bg-card); color: var(--text-primary); }
+
+.dvi-input {
+  width: 100%; box-sizing: border-box;
+  padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-input);
+  color: var(--text-primary); font: inherit; font-size: 13px;
+}
+.dvi-input::placeholder { color: var(--text-muted); }
+.dvi-input:focus { outline: none; border-color: var(--accent); }
+.dvi-textarea { resize: vertical; line-height: 1.55; }
+/* Origin picker — the field shell, with room for the chevron the platform
+   draws. A disabled option greys itself out; this just makes sure the closed
+   state reads as the same kind of control as everything around it. */
+.dvi-select {
+  appearance: none;
+  padding-right: 28px;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.dvi-select:focus { border-color: var(--accent); }
+.dvi-select option:disabled { color: var(--text-muted); }
+
+.dvi-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.dvi-source {
+  padding: 3.2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  font-size: 10.8px; color: var(--text-secondary);
+}
+
+/* Save bar — pinned to the foot of the pane so it is reachable without
+   scrolling back up from a long notes field. */
+/* Save state, as a pill over the corner of the sheet rather than a shelf across
+   the foot of it. The record autosaves, so this is a passing remark, not a
+   control — it should cost no layout and take no row from the form. */
+.dvi-pill {
+  position: absolute; right: 16px; bottom: 16px; z-index: 4;
+  display: inline-flex; align-items: center; gap: 7.2px;
+  padding: 5.6px 12.8px 5.6px 11.2px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-card);
+  font-size: 11.2px; font-weight: 600; color: var(--text-secondary);
+  pointer-events: none;
+  animation: dvi-pill-in 180ms ease-out;
+}
+@keyframes dvi-pill-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* The dot carries the state; the halo is the app's standard status-pill shape. */
+.dvi-pill-dot {
+  flex: none; width: 6.4px; height: 6.4px; border-radius: 50%;
+  background: var(--text-muted);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-muted) 18%, transparent);
+}
+.dvi-pill.is-busy .dvi-pill-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
+  animation: dvi-pill-pulse 1.1s ease-in-out infinite;
+}
+@keyframes dvi-pill-pulse { 50% { opacity: 0.35; } }
+.dvi-pill.is-ok { color: var(--text-primary); }
+.dvi-pill.is-ok .dvi-pill-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 22%, transparent);
+}
+.dvi-pill.is-error {
+  border-color: var(--danger); color: var(--danger-text);
+  /* The one state that is not a passing remark — it needs reading. */
+  max-width: min(360px, calc(100% - 32px));
+}
+.dvi-pill.is-error .dvi-pill-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+.dvi-pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .dvi-pill { animation: none; }
+  .dvi-pill.is-busy .dvi-pill-dot { animation: none; }
+}
+
+@media (max-width: 620px) {
+  .dvi-kinds, .dvi-grid { grid-template-columns: 1fr; }
+}
+
+/* ── "What do you want to make?" ────────────────────────────────────────
+   Stands in for the whole workspace while a document is still blank: no side
+   panel, no preview, just the question and its answers. Centred on the dark
+   dot-grid the viewer paints, so it reads as a step in the flow rather than as
+   an empty state. */
+.dvt-root {
+  flex: 1; min-height: 0; min-width: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px 32px;
+  overflow: auto;
+}
+.dvt-inner { width: 100%; max-width: 940px; }
+.dvt-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 5vw, 52px);
+  font-weight: 600; line-height: 1.08; letter-spacing: -0.02em;
+  color: var(--text-primary);
+  text-align: center;
+}
+.dvt-sub {
+  margin: 12px auto 0; max-width: 560px;
+  font-size: 14.4px; line-height: 1.55; color: var(--text-muted);
+  text-align: center;
+}
+.dvt-grid {
+  margin-top: 36px;
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.dvt-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 20px; border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  backdrop-filter: blur(18px);
+  color: var(--text-primary); font: inherit; text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+.dvt-card:hover:not(:disabled):not(.dvt-card-other) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-2px);
+}
+.dvt-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.dvt-card-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; margin-bottom: 6px;
+  border-radius: 11px;
+  background: var(--accent-tint); color: var(--accent);
+}
+.dvt-card-label { font-size: 16px; font-weight: 650; }
+.dvt-card-blurb { font-size: 12.8px; line-height: 1.5; color: var(--text-muted); }
+
+/* The "something else" card holds an input, so it never lifts on hover the way
+   a clickable card does — the thing you press is inside it. */
+.dvt-card-other { cursor: default; }
+.dvt-card-other.is-busy { opacity: 0.5; pointer-events: none; }
+.dvt-other-row { margin-top: 12px; display: flex; gap: 6px; width: 100%; }
+.dvt-other-input {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  padding: 8px 11px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--bg-input);
+  color: var(--text-primary); font: inherit; font-size: 13px;
+}
+.dvt-other-input::placeholder { color: var(--text-muted); }
+.dvt-other-input:focus { outline: none; border-color: var(--accent); }
+.dvt-other-go {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; border-radius: 9px;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--text-on-accent);
+  cursor: pointer; transition: background 120ms ease;
+}
+.dvt-other-go:hover:not(:disabled) { background: var(--accent-hover); }
+.dvt-other-go:disabled { opacity: 0.4; cursor: not-allowed; }

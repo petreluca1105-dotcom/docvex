@@ -27,9 +27,25 @@ import TokenUsagePill from '../components/TokenUsagePill';
 import { docKindFromName, buildDocumentBlobSmart, mimeForKind, inferDocKind, withKindExtension, labelForKind } from '../lib/documentGen';
 import { renderedOfficeToPdfBlob } from '../lib/exportPdf';
 import { loadConversation, saveConversation, clearConversation } from '../lib/conversationHistory';
-import { isElectron, extractDocText, openExternal, onFilesRemoved, notifyFilesChanged, setDocViewerAiStatus, onDocViewerOpenFile, notifyDocViewerWarmReady, notifyDocViewerFilePainted } from '../lib/platform';
+import { withStyleSteer } from '../lib/writingStyle';
+import { isElectron, extractDocText, openExternal, onFilesRemoved, notifyFilesChanged, openDocViewerWindow, setDocViewerAiStatus, onDocViewerOpenFile, notifyDocViewerWarmReady, notifyDocViewerFilePainted } from '../lib/platform';
 import { useSelectedProject } from '../context/SelectedProjectContext';
+import { useAuth } from '../context/AuthContext';
+import { readProjectsDir } from '../lib/projectsDir';
 import { extractFileText } from '../lib/extractFileText';
+import { readIdentityFromImage } from '../lib/identityExtract';
+import { ItemThumbnail, FolderOrBinGlyph, Icon as FxIcon } from '../components/FilesWorkspace';
+import { describeLocalFile } from '../lib/thumbnailDescriptor';
+import { useChatFind } from '../lib/useChatFind';
+import { DOC_TEMPLATES, templatePrompt, customPrompt } from '../lib/docTemplates';
+import {
+  IDENTITY_KINDS, IDENTITY_ROLES, IDENTITY_ORIGINS, IDENTITY_ID_TYPES, IDENTITY_LEGAL_FORMS,
+  fieldsFor, parseIdentity, saveIdentityAt, isIdentityFile,
+  identityMrz, identityInitials, identityNameParts, looksLikeIdentityJson, isInIdentityFolder,
+  listProjectIdentities, resolveIdentityFields, identityValueForField, classifyCounty,
+  APARTMENT_ONLY_FIELDS, addressIsApartment, applyGenderToText, IDENTITY_GENDERS,
+  addressHasSectors, applyLocalityToText,
+} from '../lib/identities';
 import { extractFileMetadata } from '../lib/fileMetadata';
 import { loadMetadata, saveMetadata } from '../lib/metadataHistory';
 import { parseWhatsAppChat, splitTimestamp } from '../lib/whatsappChat';
@@ -421,9 +437,17 @@ function DateRangeButton({ from, to, active, open, onClick }) {
   );
 }
 
-function classify(mime, name) {
+function classify(mime, name, path) {
   const m = (mime || '').toLowerCase();
   const e = extOf(name);
+  // DocVex's own record format — a party to the case. Checked FIRST: the bytes
+  // are JSON, so the text branch below would otherwise claim it and show the
+  // raw record instead of the form. `.json` counts too when the file sits in the
+  // Identities folder; one that doesn't is caught by the content sniff in
+  // DocPane, which is the only other way a record can be named.
+  if (e === 'dvx' || isIdentityFile(name) || (e === 'json' && isInIdentityFolder(path))) {
+    return { kind: 'identity', mime: 'application/json' };
+  }
   if (m === 'application/pdf' || e === 'pdf') return { kind: 'pdf', mime: 'application/pdf' };
   if (e === 'docx' || m === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return { kind: 'docx', mime: m };
   // Legacy binary Word (.doc / .dot): can't render in-browser — extract text.
@@ -2903,7 +2927,7 @@ function writeDvLayout(patch) {
 // sideTabsForKind: Text extraction is for images + video, AI captions for
 // audio + video, and the AI advisor is available for every file type. All three
 // live in ONE tabbed side panel (the "AI advisor" panel) beside the document.
-const SIDE_TAB_LABELS = { extract: 'Extract text', captions: 'Captions', advisor: 'Generate', metadata: 'Metadata' };
+const SIDE_TAB_LABELS = { extract: 'Extract text', captions: 'Captions', advisor: 'Advisor', metadata: 'Metadata' };
 // The Multitool always shows all three tools; each pane renders a graceful empty
 // state for a tool that doesn't apply to its file type. Metadata is last and
 // applies to everything — every file has facts to report.
@@ -2974,9 +2998,13 @@ function MetadataPanel({ file }) {
         if (st && !st.error) stamp = { size: st.sizeBytes, mtime: st.mtimeIso };
       } catch { /* no stat — fall back to whatever was cached */ }
       const cached = loadMetadata(path, stamp);
-      if (!alive || !cached) return;
-      setData(cached);
-      setStatus('done');
+      if (!alive) return;
+      if (cached) { setData(cached); setStatus('done'); return; }
+      // Nothing cached for this file (or the snapshot no longer describes it):
+      // read it now rather than waiting to be asked. There was a button here
+      // whose only answer was "yes" — opening the Metadata tab IS the request,
+      // and the work is a local read of a file already on disk.
+      runRef.current?.();
     })();
     return () => { alive = false; };
   }, [file.storage_path]);
@@ -3006,6 +3034,11 @@ function MetadataPanel({ file }) {
     }
   }, [file.name, file.storage_path, file.mime_type]);
 
+  // The open effect fires before `run` exists in that render's scope; a ref is
+  // how it reaches the current one.
+  const runRef = useRef(run);
+  useEffect(() => { runRef.current = run; }, [run]);
+
   const copyAll = async () => {
     if (!data) return;
     const text = data.groups
@@ -3022,43 +3055,45 @@ function MetadataPanel({ file }) {
 
   return (
     <div className="dv-ocr-history-scroll">
-      <header className="dv-ocr-history-head">
-        <div className="dv-ocr-history-eyebrow">
-          <span>Metadata</span>
-          <span className="dv-ocr-history-eyebrow-muted">· from this file</span>
-        </div>
-        <h2 className="dv-ocr-history-title">File metadata</h2>
-        <div className="dv-ocr-history-meta">
-          <span className="dv-ocr-history-count">
-            {status === 'done'
-              ? <><strong>{rowCount}</strong> {rowCount === 1 ? 'property' : 'properties'}</>
-              : 'Not extracted yet'}
-          </span>
-          {status === 'done' && (
-            <button type="button" className="dv-ocr-history-clear" onClick={copyAll}>
-              {copied ? 'Copied' : 'Copy all'}
-            </button>
-          )}
-        </div>
-      </header>
-
-      <div className="dv-meta-actions">
-        <button type="button" className="dv-doc-extract-btn" onClick={run} disabled={status === 'working'}>
-          {MetaGlyph}
-          <span>
-            {status === 'working' ? 'Reading file…' : status === 'done' ? 'Re-extract metadata' : 'Extract metadata'}
-          </span>
-        </button>
+      <div className="dv-ocr-history-meta">
+        <span className="dv-ocr-history-count">
+          {status === 'done'
+            ? <><strong>{rowCount}</strong> {rowCount === 1 ? 'property' : 'properties'}</>
+            : 'Not extracted yet'}
+        </span>
+        {status === 'done' && (
+          <button type="button" className="dv-ocr-history-clear" onClick={copyAll}>
+            {copied ? 'Copied' : 'Copy all'}
+          </button>
+        )}
       </div>
+
+      {/* Only Re-extract. The first read happens on open — a button whose one
+          answer was always "yes" is a question not worth asking — and this
+          remains for the case that isn't automatic: a file changed on disk
+          since the snapshot was taken. */}
+      {status !== 'idle' && (
+        <div className="dv-meta-actions">
+          <button type="button" className="dv-doc-extract-btn" onClick={run} disabled={status === 'working'}>
+            {MetaGlyph}
+            <span>{status === 'working' ? 'Reading file…' : 'Re-extract metadata'}</span>
+          </button>
+        </div>
+      )}
 
       {error && <p className="dv-meta-error" role="alert">{error}</p>}
 
-      {status === 'idle' && !error && (
+      {status === 'working' && !error && (
         <p className="dv-ocr-history-empty">
-          Reads the file’s dates, size and permissions, whatever properties the format itself
+          Reading the file’s dates, size and permissions, whatever properties the format itself
           carries (camera EXIF, PDF and Office document properties, media duration), and a
           SHA-256 fingerprint of the bytes.
         </p>
+      )}
+      {/* Only reachable when the read failed and left nothing behind — the
+          button above is the way back. */}
+      {status === 'idle' && !error && data === null && (
+        <p className="dv-ocr-history-empty">Nothing read from this file yet.</p>
       )}
 
       {data && (
@@ -3299,11 +3334,48 @@ function buildGenMessages(displayed, file, versions, activeVersion) {
 // the DocViewer level: portals keep the React tree intact, so the advisor thread
 // (portalled into the Multitool slot) still sees this context. Backed by the
 // project-ai Edge Function (askProjectAi); resets when the active file changes.
+// Apply a manual paragraph edit to a document version's SOURCE text.
+//
+// The preview is rendered from the real .docx, but a version is stored as the
+// markdown-ish source the model wrote and the builder turns into a file — so a
+// paragraph edited in the preview has to be found in that source and replaced
+// there, not in the rendered DOM. Matching is on normalised text (markdown
+// markers, entities and runs of whitespace removed) because the rendered
+// paragraph has already lost its `**` and `#` decoration.
+//
+// Returns the patched source, or null when the paragraph can't be located —
+// the caller surfaces that rather than writing a document that silently
+// dropped the user's edit.
+function patchVersionParagraph(src, before, after) {
+  const norm = (t) => String(t || '')
+    .replace(/[*_`~]/g, '')
+    .replace(/^\s*(?:#{1,6}\s+|[-*•]\s+|\d+[.)]\s+)/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const target = norm(before);
+  if (!target) return null;
+  const lines = String(src || '').split('\n');
+  let idx = lines.findIndex((l) => norm(l) === target);
+  // A long paragraph may have been split or lightly reflowed by the renderer;
+  // fall back to containment, but only when the text is distinctive enough that
+  // a partial match can't hit the wrong line.
+  if (idx < 0 && target.length > 24) idx = lines.findIndex((l) => norm(l).includes(target));
+  if (idx < 0) return null;
+  // Keep whatever marker opened the line (heading hashes, bullet, numbering) so
+  // an edited list item stays a list item.
+  const marker = /^(\s*(?:#{1,6}\s+|[-*•]\s+|\d+[.)]\s+)?)/.exec(lines[idx]);
+  lines[idx] = `${marker ? marker[1] : ''}${String(after || '').trim()}`;
+  return lines.join('\n');
+}
+
 const MultitoolAdvisorContext = React.createContext(null);
 function useMultitoolAdvisor() { return useContext(MultitoolAdvisorContext); }
 
-function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false, onDocWritten, onRenameFile, children }) {
+function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false, onDocWritten, onRenameFile, completing = false, setCompleting, children }) {
   const { notify } = useNotifications();
+  const { session } = useAuth();
+  const { selectedProject } = useSelectedProject();
   const [messages, setMessages] = useState([]); // [{ role, content } | { role:'artifact', version, instructions }]
   // Split-conversation branches. Splitting from a message keeps the ORIGINAL
   // thread intact and starts a new branch; nav pills under the header switch
@@ -3313,6 +3385,37 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
   const [activeBranchId, setActiveBranchId] = useState('main');
   const branchStoreRef = useRef({ main: [] });
   const branchSeqRef = useRef(0);
+
+  // ── The picked paragraph, and which conversation it opens ──────────────
+  // Declared at the top of the provider because everything downstream reads it:
+  // the thread mirror, `switchScope`, the persist effect, and `send` (which
+  // decides from the scope what a prompt is aimed at).
+  const [paraPicked, setParaPicked] = useState(false);
+  // The picked paragraph's text, published by the document pane, so the
+  // composer can aim a prompt at it without reaching into the document's DOM.
+  const [paraText, setParaText] = useState('');
+  // WHICH paragraph it is — its document-order index (or the joined indices of a
+  // multi-paragraph pick). This is what a paragraph's conversation is filed
+  // under, and it survives both a re-render and a new version of the file.
+  const [paraKey, setParaKey] = useState('');
+  const paraScope = paraKey ? `para:${paraKey}` : '';
+
+  // 'document' is the thread about the file as a whole — the one that carries
+  // the split branches. A `para:<indices>` scope is a thread about ONE
+  // paragraph, isolated from the document's and from every other paragraph's:
+  // asking "shorten this" in paragraph 7 must not drag paragraph 3's argument
+  // along, and must not bury the document-level conversation either.
+  //
+  // Version cards need no special handling — they are messages, so a version
+  // produced from a paragraph's thread lands in that paragraph's thread.
+  const [threadScope, setThreadScope] = useState('document');
+  const paraThreadsRef = useRef({});   // 'para:<indices>' → messages[]
+
+  const threadScopeRef = useRef('document');
+  useEffect(() => { threadScopeRef.current = threadScope; }, [threadScope]);
+  const paraTextRef = useRef('');
+  useEffect(() => { paraTextRef.current = paraText; }, [paraText]);
+
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   // Report AI busy/idle to the main app so its "Open files" sidebar can mark
@@ -3360,6 +3463,7 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
     if (t) setSelection(t);
   }, []);
   const clearSelection = useCallback(() => setSelection(null), []);
+
   // Which document engine builds the file: 'skills' (Anthropic Agent Skills —
   // high-fidelity, = claude.ai) or 'local' (instant themed local builder).
   // Persisted so the choice sticks across files/sessions.
@@ -3419,6 +3523,8 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
       setMessages(msgs);
       branchSeqRef.current = 0;
     }
+    paraThreadsRef.current = saved?.paraThreads ? { ...saved.paraThreads } : {};
+    setThreadScope('document');
     setVersions(vers);
     versionCountRef.current = vers.reduce((mx, v) => Math.max(mx, v.n || 0), 0);
     // The last generated iteration is what's currently on disk.
@@ -3426,20 +3532,49 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id]);
 
-  // Keep the active branch's messages mirrored into the store so a branch switch
-  // (or persist) always sees the latest thread.
-  useEffect(() => { branchStoreRef.current[activeBranchId] = messages; }, [messages, activeBranchId]);
+  // Keep the live thread mirrored into whichever store owns the current scope,
+  // so a switch (branch OR paragraph) and every persist see the latest.
+  useEffect(() => {
+    if (threadScope === 'document') branchStoreRef.current[activeBranchId] = messages;
+    else paraThreadsRef.current[threadScope] = messages;
+  }, [messages, activeBranchId, threadScope]);
+
+  // Move the conversation to another scope. The mirror above already stashed the
+  // outgoing thread, so this only has to swap in the incoming one.
+  const switchScope = useCallback((next) => {
+    if (busy || !next || next === threadScope) return;
+    setOptions([]);
+    setPendingAsk(null);
+    setThreadScope(next);
+    setMessages(next === 'document'
+      ? (branchStoreRef.current[activeBranchId] || [])
+      : (paraThreadsRef.current[next] || []));
+  }, [busy, threadScope, activeBranchId]);
+
+  // Picking a paragraph moves the conversation to that paragraph's thread —
+  // that is what the click meant. Dropping the pick returns to the document's.
+  const switchScopeRef = useRef(switchScope);
+  useEffect(() => { switchScopeRef.current = switchScope; }, [switchScope]);
+  useEffect(() => {
+    switchScopeRef.current?.(paraScope || 'document');
+  }, [paraScope]);
 
   // Persist the thread + versions + every branch whenever they change so
   // reopening the file restores all split conversations.
   useEffect(() => {
     if (!file?.path) return;
+    // While a paragraph thread is on screen, `messages` is NOT the active
+    // branch's — read every branch from the store instead.
+    const onDoc = threadScope === 'document';
     const branchRecords = branches.map((b) => ({
       id: b.id, label: b.label, splits: b.splits || [],
-      messages: b.id === activeBranchId ? messages : (branchStoreRef.current[b.id] || []),
+      messages: (onDoc && b.id === activeBranchId) ? messages : (branchStoreRef.current[b.id] || []),
     }));
-    saveConversation(file.path, { messages, versions, branches: branchRecords, activeBranchId });
-  }, [file?.path, messages, versions, branches, activeBranchId]);
+    saveConversation(file.path, {
+      messages, versions, branches: branchRecords, activeBranchId,
+      paraThreads: paraThreadsRef.current,
+    });
+  }, [file?.path, messages, versions, branches, activeBranchId, threadScope]);
 
   // Build `text` into `kind`, write it to disk, and reload the preview. If the
   // file's current name doesn't already carry `kind`'s extension (a wildcard, or
@@ -3500,7 +3635,7 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
       const note = (res.text && res.text.trim())
         || (input.summary && String(input.summary).trim())
         || (versionCountRef.current ? 'Here’s an updated version.' : 'Here’s your document.');
-      setMessages((m) => [...m, { role: 'assistant', content: note, at: Date.now() }]);
+      setMessages((m) => [...m, { role: 'assistant', content: note, at: Date.now(), usage: res.usage }]);
       try {
         await writeDoc(String(input.content || ''), kind);
         const n = versionCountRef.current + 1;
@@ -3514,22 +3649,166 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
       return;
     }
     if (res.tool === 'ask_user' && res.askUser) {
-      setMessages((m) => [...m, { role: 'assistant', content: res.text || 'A couple of quick questions first.', at: Date.now() }]);
+      setMessages((m) => [...m, { role: 'assistant', content: res.text || 'A couple of quick questions first.', at: Date.now(), usage: res.usage }]);
       setPendingAsk({ id: res.askUser.id, input: res.askUser.input, assistantContent: res.assistantContent, base: baseMsgs, gen: true });
       return;
     }
     // A pure conversational answer (a question that doesn't change the document).
-    setMessages((m) => [...m, { role: 'assistant', content: res.text || '', at: Date.now() }]);
+    setMessages((m) => [...m, { role: 'assistant', content: res.text || '', at: Date.now(), usage: res.usage }]);
   }, [file, writeDoc]);
+
+  // Commit manual paragraph edits made directly in the document preview.
+  //
+  // Each edit is `{ before, after }` — the paragraph's text as the AI wrote it
+  // and as the user has since typed it. They're patched into the ACTIVE
+  // version's source, the file is rebuilt from that source, and the result is
+  // saved as a new version with its own card in the thread, exactly like an AI
+  // revision. Edits whose paragraph can't be located in the source are reported
+  // back rather than dropped.
+  const applyManualEdit = useCallback(async (edits) => {
+    const list = (edits || []).filter((e) => e && e.before && e.after !== e.before);
+    if (!list.length) return { error: 'no_edits' };
+    const active = versions.find((v) => v.n === activeVersion)
+      || (versions.length ? versions[versions.length - 1] : null);
+    // Without a version there's no source to patch: the file on disk was not
+    // written by the AI, and rebuilding it from the rendered preview would
+    // flatten formatting the reconstruction never captured.
+    if (!active) return { error: 'no_version' };
+
+    let text = active.text;
+    let applied = 0;
+    const missed = [];
+    for (const e of list) {
+      const next = patchVersionParagraph(text, e.before, e.after);
+      if (next == null) { missed.push(e.before); continue; }
+      text = next;
+      applied += 1;
+    }
+    if (!applied) return { error: 'not_found', missed };
+
+    const kind = active.kind || docKindFromName(file?.name || '') || 'docx';
+    try {
+      await writeDoc(text, kind);
+    } catch {
+      return { error: 'write_failed' };
+    }
+    const n = versionCountRef.current + 1;
+    versionCountRef.current = n;
+    const label = applied === 1 ? 'Your edit to one paragraph' : `Your edits to ${applied} paragraphs`;
+    setVersions((v) => [...v, { n, text, instructions: label, kind, manual: true }]);
+    setActiveVersion(n);
+    setMessages((m) => [...m, { role: 'artifact', version: n, instructions: label, at: Date.now(), manual: true }]);
+    return { ok: true, version: n, applied, missed };
+  }, [versions, activeVersion, file?.name, writeDoc]);
 
   // One assistant turn. In generate-mode the model drives the file through the
   // `write_document` tool: every create/change request saves a NEW version, and
   // the user can iterate without limit. We pin tool_choice to write_document when
   // the request clearly wants a document, so it can never refuse or drift to prose.
   // `convo` is the visible thread up to and including the latest user message.
+  // ── The project's other files ──────────────────────────────────────────
+  // The advisor is looking at ONE document, but the answer often lives in
+  // another file in the same project ("does this match the signed contract?").
+  // So every turn carries an inventory of what is in the Files tab, and any file
+  // the user NAMES has its text pulled in whole.
+  //
+  // Both ride transiently on the request and are never written onto the stored
+  // message: the folder changes, and a file's text baked into the thread would
+  // be replayed on every later turn and persisted to localStorage with it.
+  const projectListRef = useRef({ at: 0, files: [] });
+  const listProjectFiles = useCallback(async () => {
+    const cached = projectListRef.current;
+    if (cached.at && Date.now() - cached.at < PROJECT_LIST_TTL_MS) return cached;
+    try {
+      const projectId = selectedProject?.id;
+      if (!projectId) return { at: Date.now(), files: [] };
+      const baseDir = readProjectsDir(session?.user?.id || '_anonymous') || undefined;
+      const { path } = await localFolderApi.projectDir(projectId, selectedProject?.name, baseDir);
+      const { files: list } = await localFolderApi.listAll(path || undefined);
+      const files = (list || [])
+        .filter((f) => f?.name && !f.name.startsWith('.'))
+        .map((f) => ({ name: f.name, folder: f.folderPath || '', path: f.path || f.name }));
+      const next = { at: Date.now(), files };
+      projectListRef.current = next;
+      return next;
+    } catch {
+      // No folder connected, or it went away — say nothing rather than claiming
+      // the project is empty.
+      return cached;
+    }
+  }, [selectedProject?.id, selectedProject?.name, session?.user?.id]);
+
+  // The project's identity records, for the fields panel's "fill every blank
+  // about this party at once". Cached like the folder listing: adding a record
+  // in the Files tab is rare next to how often the panel re-renders.
+  const identitiesRef = useRef({ at: 0, list: [] });
+  const loadIdentities = useCallback(async () => {
+    const cached = identitiesRef.current;
+    if (cached.at && Date.now() - cached.at < IDENTITY_LIST_TTL_MS) return cached.list;
+    try {
+      const projectId = selectedProject?.id;
+      if (!projectId) return [];
+      const baseDir = readProjectsDir(session?.user?.id || '_anonymous') || undefined;
+      const { path } = await localFolderApi.projectDir(projectId, selectedProject?.name, baseDir);
+      const list = await listProjectIdentities(path || undefined);
+      identitiesRef.current = { at: Date.now(), list };
+      return list;
+    } catch {
+      return cached.list;
+    }
+  }, [selectedProject?.id, selectedProject?.name, session?.user?.id]);
+
+  const buildProjectFilesNote = useCallback(async (userText) => {
+    const { files } = await listProjectFiles();
+    const others = files.filter((f) => f.name !== file?.name);
+    if (!others.length) return '';
+    const shown = others.slice(0, PROJECT_FILE_LIST_MAX);
+    const inventory = shown
+      .map((f) => (f.folder ? `${f.folder}/${f.name}` : f.name))
+      .join('\n');
+    const parts = [
+      `[Project files — the other files in this project's Files tab (${others.length} in total`
+      + `${others.length > shown.length ? `, ${shown.length} listed` : ''}):\n${inventory}\n\n`
+      + 'You can read any of these: name the one you need and its text will be included with the next message. '
+      + 'Never invent what a file you have not been shown contains.]',
+    ];
+    // Which of them did the user actually name? Match the whole filename, or the
+    // bare stem when it is long enough that a chance word will not match it.
+    const hay = String(userText || '').toLowerCase();
+    const named = others.filter((f) => {
+      const n = f.name.toLowerCase();
+      if (hay.includes(n)) return true;
+      const stem = n.replace(/\.[^.]+$/, '');
+      return stem.length >= 4 && hay.includes(stem);
+    }).slice(0, PROJECT_FILE_READ_MAX);
+    for (const f of named) {
+      try {
+        const blob = await readLocalBlob(f.path);
+        if (!blob) continue;
+        const res = await extractFileText(blob, f.name);
+        const text = (res?.text || '').trim();
+        if (!text) continue;
+        const cut = text.length > REF_FILE_CHARS;
+        parts.push(`[Contents of "${f.name}"${cut ? ' (truncated)' : ''}:\n${text.slice(0, REF_FILE_CHARS)}\n]`);
+      } catch { /* unreadable (an image, a locked file) — the inventory still names it */ }
+    }
+    return parts.join('\n\n');
+  }, [file?.name, listProjectFiles]);
+
   const runTurn = useCallback(async (convo, lastUserText) => {
     const seq = ++turnSeqRef.current;
     const stopped = () => turnSeqRef.current !== seq;
+    // What the Files tab holds, plus the full text of anything the user named.
+    // Attached to the OUTGOING copy of the last user message only — see
+    // buildProjectFilesNote for why it must not touch the stored thread.
+    const filesNote = await buildProjectFilesNote(lastUserText);
+    const withFiles = (msgs) => (filesNote
+      ? msgs.map((m, i) => (
+        i === msgs.length - 1 && m.role === 'user' && typeof m.content === 'string'
+          ? { ...m, content: `${m.content}\n\n${filesNote}` }
+          : m
+      ))
+      : msgs);
     if (genMode) {
       const baseMsgs = buildGenMessages(convo, file, versions, activeVersion);
       const k = docKindFromName(file?.name || '') || '';
@@ -3545,7 +3824,11 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
           ? { ...m, content: `${m.content}\n\n${steer}` }
           : m
       ));
-      const res = await askProjectAi({ messages: askMsgs, fileNames: [], model, docTools: true, docKind: k || undefined });
+      // …and the user's own writing style on top of it, learned from the
+      // documents they imported in the Playbook. This is the path that WRITES
+      // the file, so it is the one that most has to sound like them.
+      const sentMsgs = await withStyleSteer(withFiles(askMsgs));
+      const res = await askProjectAi({ messages: sentMsgs, fileNames: [], model, docTools: true, docKind: k || undefined });
       if (res.error) {
         setError(res.error.message === 'ai_not_configured' ? 'The AI isn’t configured to generate documents.' : 'Couldn’t reach the AI right now.');
         return;
@@ -3554,7 +3837,7 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
       if (stopped()) return;
       // Resume from exactly what the model saw (askMsgs carries the steer note) so
       // an ask_user follow-up replays coherently.
-      await applyGenResult(res, lastUserText, askMsgs);
+      await applyGenResult(res, lastUserText, sentMsgs);
       return;
     }
     // Non-generate "ask about this file" mode — prepend a Claude-like persona so
@@ -3565,19 +3848,19 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
       { role: 'assistant', content: 'Understood — I’ll be direct and genuinely helpful.' },
       ...convo.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => ({ role: m.role, content: m.apiText || m.content })),
     ];
-    const res = await askProjectAi({ messages: apiMsgs, fileNames: [file?.name], model });
+    const res = await askProjectAi({ messages: withFiles(apiMsgs), fileNames: [file?.name], model });
     if (stopped()) return;
     if (res.error) { setError('The AI advisor is unavailable right now.'); return; }
     addUsage(res.usage);
     // The model asked an interactive question via the ask_user tool — surface it
     // above the composer and pause until the user answers.
     if (res.stopReason === 'tool_use' && res.askUser) {
-      setMessages((m) => [...m, { role: 'assistant', content: res.text || 'I have a quick question.', at: Date.now() }]);
+      setMessages((m) => [...m, { role: 'assistant', content: res.text || 'I have a quick question.', at: Date.now(), usage: res.usage }]);
       setPendingAsk({ id: res.askUser.id, input: res.askUser.input, assistantContent: res.assistantContent, base: apiMsgs });
       return;
     }
-    setMessages((m) => [...m, { role: 'assistant', content: res.text, at: Date.now() }]);
-  }, [genMode, file, versions, activeVersion, model, addUsage, applyGenResult]);
+    setMessages((m) => [...m, { role: 'assistant', content: res.text, at: Date.now(), usage: res.usage }]);
+  }, [genMode, file, versions, activeVersion, model, addUsage, applyGenResult, buildProjectFilesNote]);
 
   // Stop the in-flight turn: invalidate its result (so nothing lands in the
   // thread when the request returns) and drop the thinking state immediately.
@@ -3597,7 +3880,22 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
       : opts.typedText != null
         ? { answers: questions.map((qq) => ({ question_id: qq.id, response_type: 'free_text', text: opts.typedText })) }
         : makeAskAnswers(questions, opts.perQuestion || {});
-    setMessages((m) => [...m, { role: 'user', content: opts.dismissed ? 'Skipped.' : (opts.typedText || 'Answered.'), at: Date.now() }]);
+    // Pair each question with what was answered, so the thread shows WHAT was
+    // asked above the reply instead of a bare "Answered." — once the panel
+    // collapses, the questions are otherwise gone from the conversation.
+    const qa = opts.dismissed
+      ? []
+      : questions.map((qq, qi) => ({ prompt: qq.prompt, answer: askAnswerText(qq, answers.answers?.[qi]) }));
+    setMessages((m) => [...m, {
+      role: 'user',
+      // Flattened for anything that reads message text (history rebuilds, the
+      // resumed thread); the bubble renders `qa` structurally instead.
+      content: opts.dismissed
+        ? 'Skipped.'
+        : (qa.map((x) => `${x.prompt}\n${x.answer}`).join('\n\n') || opts.typedText || 'Answered.'),
+      qa,
+      at: Date.now(),
+    }]);
     const pa = pendingAsk;
     setPendingAsk(null);
     setBusy(true); setError(null);
@@ -3623,24 +3921,54 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
     if (res.error) { setError('The AI advisor is unavailable right now.'); return; }
     addUsage(res.usage);
     if (res.stopReason === 'tool_use' && res.askUser) {
-      setMessages((m) => [...m, { role: 'assistant', content: res.text || 'I have a quick question.', at: Date.now() }]);
+      setMessages((m) => [...m, { role: 'assistant', content: res.text || 'I have a quick question.', at: Date.now(), usage: res.usage }]);
       setPendingAsk({ id: res.askUser.id, input: res.askUser.input, assistantContent: res.assistantContent, base: apiMsgs });
       return;
     }
-    setMessages((m) => [...m, { role: 'assistant', content: res.text, at: Date.now() }]);
+    setMessages((m) => [...m, { role: 'assistant', content: res.text, at: Date.now(), usage: res.usage }]);
   }, [pendingAsk, busy, file, model, addUsage, applyGenResult]);
 
-  const send = useCallback(async () => {
-    const q = input.trim();
+  // `send()` with no arguments sends whatever is in the composer — that's the
+  // composer's own binding (it's also used as an onClick handler, so a click
+  // event landing in the first slot is ignored). The document preview calls it
+  // with an explicit prompt AND the passage it applies to, straight from the bar
+  // over the selection: passing both in avoids a round-trip through `input` /
+  // `selection` state, which this closure couldn't read until the next render.
+  // `opts.apiText` lets a caller show one thing and send another — the template
+  // chooser puts "Make a Contract NDA." in the thread while the model receives
+  // the whole section outline. Without it the reader's first bubble would be a
+  // wall of instructions they never wrote.
+  const send = useCallback(async (overrideText, overridePassage, opts = {}) => {
+    const q = (typeof overrideText === 'string' ? overrideText : input).trim();
     if (!q || busy) return;
     // While a question is pending, a typed message answers it (free-text).
     if (pendingAsk) { setInput(''); resolveAsk({ typedText: q }); return; }
     // If the user pointed at a passage in the document, append it to the API text
     // (not the visible bubble) so the model knows exactly which part to change.
-    const apiText = selection
-      ? `${q}\n\nThe user selected this exact passage from the document and wants the request applied to it. Change only what's needed here; leave the rest of the document unchanged unless asked otherwise:\n"""\n${selection}\n"""`
-      : undefined;
-    const userMsg = { role: 'user', content: q, ...(apiText ? { apiText } : {}), at: Date.now() };
+    // Most specific wins: an explicit passage from a caller, then a passage the
+    // user highlighted by hand, then — failing both — the paragraph whose
+    // thread this is. The document thread has no passage, which is what the
+    // model already reads as "the whole thing".
+    const scopePassage = (threadScopeRef.current !== 'document' && paraTextRef.current.trim())
+      ? paraTextRef.current.trim()
+      : null;
+    const passage = (typeof overridePassage === 'string' && overridePassage.trim())
+      ? overridePassage.trim()
+      : (selection || scopePassage);
+    const explicitApi = typeof opts.apiText === 'string' && opts.apiText.trim() ? opts.apiText.trim() : null;
+    const apiText = explicitApi || (passage
+      ? `${q}\n\nThe user selected this exact passage from the document and wants the request applied to it. Change only what's needed here; leave the rest of the document unchanged unless asked otherwise:\n"""\n${passage}\n"""`
+      : undefined);
+    // `passage` is kept on the message purely so the thread can show, under the
+    // bubble, which part of the document the request was aimed at. The model
+    // reads it through `apiText`; this copy is for the reader.
+    const userMsg = {
+      role: 'user',
+      content: q,
+      ...(apiText ? { apiText } : {}),
+      ...(passage ? { passage } : {}),
+      at: Date.now(),
+    };
     const next = [...messages, userMsg];
     setMessages(next);
     setInput('');
@@ -3648,7 +3976,7 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
     setBusy(true);
     setError(null);
     setOptions([]);
-    await runTurn(next, q);
+    await runTurn(next, explicitApi || q);
     setBusy(false);
   }, [input, busy, messages, runTurn, pendingAsk, resolveAsk, selection]);
 
@@ -3679,6 +4007,9 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
   // including) that message and drop everything after, so the thread continues
   // in a new direction from that point. Clears any pending question/options.
   const branchFrom = useCallback((index) => {
+    // Splits are a document-thread feature: a paragraph's conversation is
+    // already the narrow one, and its store has no branch dimension.
+    if (threadScopeRef.current !== 'document') return;
     if (busy) return;
     setOptions([]);
     setPendingAsk(null);
@@ -3776,9 +4107,202 @@ function MultitoolAdvisorProvider({ file, footSlot = null, generateMode = false,
     setBusy(false);
   }, [busy, messages, runTurn]);
 
+  // ── "Complete data" ────────────────────────────────────────────────────
+  // The document pane owns the blanks (they're spans in DOM it renders), so it
+  // registers a small API here and publishes what it found. The side panel and
+  // the version card both drive the mode through this context, which is the
+  // only thing the two of them share.
+  // The side panel's "Selected paragraph" tab hands back the node to draw the
+  // pick's controls into; the document pane portals its bar there. (The pick
+  // state itself is declared above `send`, which needs it.)
+  const [paraSlot, setParaSlot] = useState(null);
+
+  // Which blank the pointer is over, wherever the pointer happens to be. The
+  // document publishes it when you hover a marked gap; the fields panel
+  // publishes it when you hover a card. Both sides then highlight the same
+  // blank, so the two views are always pointing at each other.
+  const [hoverField, setHoverField] = useState(null);
+
+  const fieldsApiRef = useRef(null);
+  const [fields, setFields] = useState([]);
+  // Identifies WHICH document the current blanks came from, so a new version
+  // invalidates the answers while merely closing and reopening the panel does
+  // not. Set alongside the field list by the pane that found them.
+  const [fieldsSig, setFieldsSig] = useState('');
+  // Every blank in the document, as opposed to `fields` (only the ones in the
+  // paragraph you picked). Suggestions are always asked for the WHOLE document
+  // in one call — asking per paragraph would re-read the project folder and pay
+  // for a round trip on every click.
+  const [allFields, setAllFields] = useState([]);
+  const registerFieldsApi = useCallback((api) => { fieldsApiRef.current = api; }, []);
+  const publishFields = useCallback((list, sig, all) => {
+    setFields(list || []);
+    setFieldsSig(sig || '');
+    if (Array.isArray(all)) setAllFields(all);
+  }, []);
+  const setFieldValue = useCallback((id, v) => fieldsApiRef.current?.setValue?.(id, v), []);
+  const focusField = useCallback((id) => fieldsApiRef.current?.focus?.(id), []);
+  const applyFields = useCallback(() => fieldsApiRef.current?.apply?.(), []);
+  // Hover-preview of a party's details, straight into the document's blanks.
+  const dropFields = useCallback((ids) => fieldsApiRef.current?.dropFields?.(ids), []);
+  const applyGender = useCallback((g) => fieldsApiRef.current?.applyGender?.(g), []);
+  const applyLocality = useCallback((h) => fieldsApiRef.current?.applyLocality?.(h), []);
+  const previewFields = useCallback((map, opts) => fieldsApiRef.current?.previewValues?.(map, opts), []);
+  const endFieldPreview = useCallback((commit) => fieldsApiRef.current?.endPreview?.(commit), []);
+  // Closing the panel means dropping the paragraph that opened it — the panel
+  // has no existence of its own any more.
+  const clearPick = useCallback(() => fieldsApiRef.current?.clearPick?.(), []);
+  const getDocumentText = useCallback(() => fieldsApiRef.current?.documentText?.() || '', []);
+
+  // Text of the project's OTHER files. Reading a folder of PDFs is slow, so it
+  // happens once and is then reused for the life of the window — re-extracted
+  // only when the folder's contents actually change. The folder LISTING is
+  // cheap and always re-read; its signature (name + size + modified time of
+  // each candidate) is what decides whether the expensive part runs again.
+  const refFilesRef = useRef({ sig: null, files: [] });
+  const refFilesRunRef = useRef(null);
+  const loadReferenceFiles = useCallback(async () => {
+    // Single-flight: the background warm-up and a user opening the panel can
+    // both ask at once, and neither should start a second folder walk.
+    if (refFilesRunRef.current) return refFilesRunRef.current;
+    const run = (async () => {
+      const cached = refFilesRef.current;
+      try {
+        const projectId = selectedProject?.id;
+        if (!projectId) return { sig: '', files: [] };
+        const baseDir = readProjectsDir(session?.user?.id || '_anonymous') || undefined;
+        const { path } = await localFolderApi.projectDir(projectId, selectedProject?.name, baseDir);
+        const { files: list } = await localFolderApi.listAll(path || undefined);
+        // Newest first (listAll already sorts that way), skipping the document
+        // being completed and anything hidden.
+        const candidates = (list || [])
+          .filter((f) => f?.name && f.name !== file?.name && !f.name.startsWith('.'))
+          .slice(0, REF_FILE_LIMIT);
+        const sig = candidates
+          .map((f) => `${f.folderPath || ''}/${f.name}:${f.sizeBytes ?? ''}:${f.mtimeIso || ''}`)
+          .join('|');
+        if (sig === cached.sig) return cached;   // folder untouched — reuse the text
+        const out = [];
+        for (const f of candidates) {
+          try {
+            const blob = await readLocalBlob(f.path || f.name);
+            if (!blob) continue;
+            const res = await extractFileText(blob, f.name);
+            const text = (res?.text || '').trim();
+            if (text) out.push({ name: f.name, text: text.slice(0, REF_FILE_CHARS) });
+          } catch { /* unreadable file — the others still count */ }
+        }
+        return { sig, files: out };
+      } catch {
+        // No folder connected, or it went away: keep whatever we already had
+        // rather than losing a good extraction to a transient failure.
+        return cached.sig != null ? cached : { sig: '', files: [] };
+      }
+    })();
+    refFilesRunRef.current = run;
+    try {
+      const res = await run;
+      refFilesRef.current = res;
+      return res;
+    } finally {
+      if (refFilesRunRef.current === run) refFilesRunRef.current = null;
+    }
+  }, [file?.name, selectedProject?.id, selectedProject?.name, session?.user?.id]);
+
+  // Suggested values, held here rather than in the panel so they survive the
+  // panel being closed and reopened. `key` is the document plus the folder it
+  // was answered against: same key means the cached answers still stand.
+  const [fieldSuggestions, setFieldSuggestions] = useState({ key: null, map: {}, loading: false, error: null });
+  const suggestionsRef = useRef(fieldSuggestions);
+  useEffect(() => { suggestionsRef.current = fieldSuggestions; }, [fieldSuggestions]);
+  const suggestRunRef = useRef({ key: null, promise: null });
+
+  // Ask the model to propose values for every blank at once, tagging each
+  // suggestion with WHERE it came from: the document and this conversation
+  // ("context"), or a specific file in the project folder ("file").
+  //
+  // Returns immediately when the answers for this exact document + folder are
+  // already in hand, so opening the panel a second time costs nothing. The
+  // document pane calls this in the background as soon as a draft with blanks
+  // finishes rendering, which is what makes the panel fill in instantly.
+  const ensureFieldSuggestions = useCallback(async (list, documentText, sig, { force = false } = {}) => {
+    const wanted = (list || []).filter((f) => f?.id);
+    if (!wanted.length) return null;
+    const refs = await loadReferenceFiles();
+    const key = `${sig || ''}|${refs.sig || ''}`;
+    if (!force) {
+      const inflight = suggestRunRef.current;
+      if (inflight.key === key && inflight.promise) return inflight.promise;
+      if (suggestionsRef.current.key === key && !suggestionsRef.current.error) return suggestionsRef.current;
+    }
+    setFieldSuggestions((prev) => ({ key, map: prev.key === key ? prev.map : {}, loading: true, error: null }));
+
+    const run = (async () => {
+      const refBlock = refs.files.length
+        ? refs.files.map((r) => `--- FILE: ${r.name} ---\n${r.text}`).join('\n\n')
+        : '(no other readable files in this project)';
+      const fieldList = wanted
+        .map((f) => `${f.id} | placeholder: ${f.raw} | reads as: ${f.label} | in sentence: ${f.context}`)
+        .join('\n');
+      const prompt = [
+        'You are completing the blanks in a document. Propose values for each blank.',
+        '',
+        'THE DOCUMENT (blanks appear exactly as written):',
+        (documentText || '').slice(0, 12000),
+        '',
+        'THE BLANKS TO FILL (one per line):',
+        fieldList,
+        '',
+        'REFERENCE FILES the user uploaded to this project:',
+        refBlock,
+        '',
+        'Rules:',
+        '- Give at most 3 suggestions per blank, best first.',
+        '- source "file" ONLY when the value actually appears in one of the reference files above; then set "file" to that exact file name and quote the value as it appears there.',
+        '- source "context" when the value follows from the document itself or from what we have discussed.',
+        '- Never invent a fact that is nowhere in the document or the files. If you have nothing, return an empty suggestions array for that blank.',
+        '- "value" is the finished text that will be pasted into the document — no brackets, no commentary.',
+        '- "why" is at most 12 words saying where it came from.',
+        '',
+        'Reply with JSON ONLY, no prose, in exactly this shape:',
+        '{"fields":[{"id":"f1","suggestions":[{"value":"...","source":"context","why":"..."},{"value":"...","source":"file","file":"contract.pdf","why":"..."}]}]}',
+      ].join('\n');
+
+      const res = await askProjectAi({
+        messages: [{ role: 'user', content: prompt }],
+        fileNames: refs.files.map((r) => r.name),
+        model,
+        tools: false,
+        usageProject: selectedProject?.id,
+        usageAction: 'complete-data',
+      });
+      if (res.error) {
+        const message = res.error.message === 'ai_not_configured'
+          ? 'The AI isn’t configured, so there are no suggestions — you can still fill these in yourself.'
+          : 'Couldn’t reach the AI for suggestions. You can still fill these in yourself.';
+        const failed = { key, map: {}, loading: false, error: message };
+        setFieldSuggestions(failed);
+        return failed;
+      }
+      addUsage(res.usage);
+      const map = {};
+      for (const f of parseFieldSuggestions(res.text || '')) map[f.id] = f.suggestions;
+      const done = { key, map, loading: false, error: null };
+      setFieldSuggestions(done);
+      return done;
+    })();
+
+    suggestRunRef.current = { key, promise: run };
+    try {
+      return await run;
+    } finally {
+      if (suggestRunRef.current.promise === run) suggestRunRef.current = { key: null, promise: null };
+    }
+  }, [addUsage, loadReferenceFiles, model, selectedProject?.id]);
+
   const value = useMemo(
-    () => ({ messages, input, setInput, busy, switching, error, setError, send, stop, regenerate, branchFrom, branches, activeBranchId, switchBranch, fileName: file?.name, footSlot, genMode, versions, activeVersion, selectVersion, openVersion, questions, submitQuestions, skipQuestions, options, chooseOption, engine, setEngine, model, setModel, tokens, showTokenUsage: appPrefs.showTokenUsage, pendingAsk, resolveAsk, debugAsk, setDebugAsk, selection, addSelection, clearSelection }),
-    [messages, input, busy, switching, error, send, stop, regenerate, branchFrom, branches, activeBranchId, switchBranch, file?.name, footSlot, genMode, versions, activeVersion, selectVersion, openVersion, questions, submitQuestions, skipQuestions, options, chooseOption, engine, setEngine, model, setModel, tokens, appPrefs.showTokenUsage, pendingAsk, resolveAsk, debugAsk, selection, addSelection, clearSelection],
+    () => ({ messages, input, setInput, busy, switching, error, setError, send, stop, regenerate, branchFrom, branches, activeBranchId, switchBranch, fileName: file?.name, footSlot, genMode, versions, activeVersion, selectVersion, openVersion, questions, submitQuestions, skipQuestions, options, chooseOption, engine, setEngine, model, setModel, tokens, showTokenUsage: appPrefs.showTokenUsage, pendingAsk, resolveAsk, debugAsk, setDebugAsk, selection, addSelection, clearSelection, applyManualEdit, completing, setCompleting, paraPicked, setParaPicked, paraText, setParaText, paraKey, setParaKey, paraScope, threadScope, switchScope, paraSlot, setParaSlot, hoverField, setHoverField, loadIdentities, fields, allFields, fieldsSig, registerFieldsApi, publishFields, setFieldValue, focusField, applyFields, previewFields, endFieldPreview, dropFields, applyGender, applyLocality, clearPick, getDocumentText, fieldSuggestions, ensureFieldSuggestions }),
+    [messages, input, busy, switching, error, send, stop, regenerate, branchFrom, branches, activeBranchId, switchBranch, file?.name, footSlot, genMode, versions, activeVersion, selectVersion, openVersion, questions, submitQuestions, skipQuestions, options, chooseOption, engine, setEngine, model, setModel, tokens, appPrefs.showTokenUsage, pendingAsk, resolveAsk, debugAsk, selection, addSelection, clearSelection, applyManualEdit, completing, setCompleting, paraPicked, paraText, paraKey, paraScope, threadScope, switchScope, paraSlot, hoverField, loadIdentities, fields, allFields, fieldsSig, registerFieldsApi, publishFields, setFieldValue, focusField, applyFields, previewFields, endFieldPreview, dropFields, applyGender, applyLocality, clearPick, getDocumentText, fieldSuggestions, ensureFieldSuggestions],
   );
   return <MultitoolAdvisorContext.Provider value={value}>{children}</MultitoolAdvisorContext.Provider>;
 }
@@ -3906,6 +4430,45 @@ function MultitoolDebugTray() {
         <button type="button" onClick={() => setDebugAsk(DEBUG_ASKS.multiQ)}>2 questions</button>
         {debugAsk && <button type="button" className="dv-ask-debug-clear" onClick={() => setDebugAsk(null)}>Clear</button>}
       </div>
+    </div>
+  );
+}
+
+// ── Document / Paragraph sub-tabs ───────────────────────────────────────
+// A second row under the panel's tab strip, present only while a paragraph is
+// picked — with nothing picked there is only the document to talk about.
+//
+// The two are separate CONVERSATIONS, not two views of one: a paragraph's
+// thread starts empty, keeps only what was said about that paragraph, and the
+// version cards produced from it stay there too. Switching back to Document
+// finds the file-level conversation exactly as it was left.
+function AdvisorScopeTabs() {
+  const adv = useMultitoolAdvisor();
+  if (!adv?.paraPicked || !adv?.paraScope) return null;
+  const onDoc = (adv.threadScope || 'document') === 'document';
+  const quote = (adv.paraText || '').replace(/\s+/g, ' ').trim();
+  return (
+    <div className="dv-advisor-subtabs" role="tablist" aria-label="Conversation">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={onDoc}
+        className={`dv-advisor-subtab${onDoc ? ' is-active' : ''}`}
+        onClick={() => adv.switchScope?.('document')}
+      >
+        Document
+      </button>
+      <Tooltip content={quote || 'The paragraph you picked'}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!onDoc}
+          className={`dv-advisor-subtab${onDoc ? '' : ' is-active'}`}
+          onClick={() => adv.switchScope?.(adv.paraScope)}
+        >
+          Paragraph
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -4153,25 +4716,47 @@ function DocVersionCard({ fileName, version, instructions, active, onSelect, onO
 
   return (
     <>
-      <Tooltip content={instructions || (active ? 'Showing this version' : 'Preview this version')}>
-        <button
-          type="button"
-          className={`dv-doc-version${active ? ' is-active' : ''}`}
-          onClick={onSelect}
-          onContextMenu={(e) => { e.preventDefault(); setMenu({ x: toLayoutPx(e.clientX), y: toLayoutPx(e.clientY) }); }}
-          disabled={disabled}
-        >
-          <span className={`dv-doc-version-icon${iconKind ? ` is-${iconKind}` : ''}`}>{iconGlyph}</span>
-          <span className="dv-doc-version-body">
-            <span className="dv-doc-version-name">Version {version}</span>
-            <span className="dv-doc-version-format">{format}</span>
-            <span className="dv-doc-version-hint">
-              {active ? 'Current final version' : 'Click to set as the final version'}
+      {/* A container rather than one big <button>: the footer holds its own
+          buttons, and a button inside a button is invalid HTML (browsers drop
+          the nesting and the inner control stops working). The main area keeps
+          the button semantics via role + keyboard handling. */}
+      <div className={`dv-doc-version${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}>
+        <Tooltip content="Select to preview it">
+          <div
+            className="dv-doc-version-main"
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            aria-disabled={disabled || undefined}
+            onClick={() => { if (!disabled) onSelect?.(); }}
+            onKeyDown={(e) => {
+              if (disabled) return;
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(); }
+            }}
+            onContextMenu={(e) => { e.preventDefault(); setMenu({ x: toLayoutPx(e.clientX), y: toLayoutPx(e.clientY) }); }}
+          >
+            <span className={`dv-doc-version-icon${iconKind ? ` is-${iconKind}` : ''}`}>{iconGlyph}</span>
+            <span className="dv-doc-version-body">
+              <span className="dv-doc-version-name">Version {version}</span>
+              <span className="dv-doc-version-format">{format}</span>
             </span>
-          </span>
-          {active && <span className="dv-doc-version-dot" aria-hidden="true" />}
-        </button>
-      </Tooltip>
+            {active && <span className="dv-doc-version-dot" aria-hidden="true" />}
+          </div>
+        </Tooltip>
+        {/* Footer actions. Named after the real application the file belongs to
+            (Word / PowerPoint / Excel) rather than a generic "open", so it is
+            obvious what is about to launch. */}
+        <div className="dv-doc-version-actions">
+          <button
+            type="button"
+            className="dv-doc-version-action"
+            onClick={onOpenInApp}
+            disabled={disabled}
+          >
+            {OpenInAppGlyph}
+            <span>Open in {software}</span>
+          </button>
+        </div>
+      </div>
       {menu && createPortal(
         <div
           className="dv-ver-menu"
@@ -4254,6 +4839,39 @@ function DocQuestionsPanel() {
   );
 }
 
+// What one assistant turn cost, shown under its bubble. Input tokens are what
+// the model READ for this turn (the thread so far, the document, any attached
+// file), output tokens what it WROTE — worth splitting out, because a long
+// conversation gets expensive through the input side even when the replies are
+// short. Gated on the same "Show token usage" preference as the per-chat pill.
+function MessageTokens({ usage }) {
+  const input = usage?.input_tokens || 0;
+  const output = usage?.output_tokens || 0;
+  if (!input && !output) return null;
+  const total = input + output;
+  return (
+    <Tooltip content={`${input.toLocaleString()} in + ${output.toLocaleString()} out`}>
+      <div className="dv-bubble-tokens">
+        <span className="dv-bubble-tokens-n">{total.toLocaleString()}</span>
+        <span className="dv-bubble-tokens-label">tokens</span>
+      </div>
+    </Tooltip>
+  );
+}
+
+// One ask_user answer as a readable line, mirroring the shapes makeAskAnswers
+// produces: a confirm is yes/no, a free-text is its text, a select is its
+// option LABELS (never the raw ids, which mean nothing to the reader).
+function askAnswerText(q, a) {
+  if (!a) return '';
+  if (a.response_type === 'confirm') return a.approved ? 'Yes' : 'No';
+  if (a.response_type === 'free_text') return String(a.text || '').trim() || 'Left blank';
+  const labels = (a.label || []).filter(Boolean);
+  if (labels.length) return labels.join(', ');
+  const ids = (a.selected || []).filter(Boolean);
+  return ids.length ? ids.join(', ') : 'Left blank';
+}
+
 // Scroll position remembered per file path ACROSS AdvisorPanel remounts.
 // Selecting a version writes the doc → bumps regenTick → remounts DocPane (and
 // this panel), which would otherwise reset the scroll and jump to the bottom.
@@ -4263,6 +4881,51 @@ const advisorScrollPos = new Map(); // filePath -> { top, atBottom }
 // Per-file AI advisor thread — the AI-advisor tab's content. The composer now
 // lives in the shared Multitool footer (MultitoolComposer); this just renders
 // the conversation, reading the lifted advisor state from context.
+// How long the empty state takes to leave. Long enough to be seen going, short
+// enough that the first reply is not waiting on it.
+const ADVISOR_EMPTY_EXIT_MS = 260;
+
+// What the thread says before it is a thread. Not decoration: an empty pane
+// gives no clue what this thing can be asked, and "type here" is the one thing
+// the composer below already says. So it names the two useful facts — that the
+// assistant is looking at THIS file (or this paragraph), and the kinds of
+// question that get a good answer out of it.
+//
+// It stays mounted through its exit, and is positioned OUT of flow, so sending
+// the first message does not make the reply appear where the heading was
+// standing — the words fade and lift, the thread arrives underneath.
+function AdvisorEmpty({ show, paragraph }) {
+  const [mounted, setMounted] = useState(show);
+  const [leaving, setLeaving] = useState(false);
+  useEffect(() => {
+    if (show) { setMounted(true); setLeaving(false); return undefined; }
+    if (!mounted) return undefined;
+    setLeaving(true);
+    const t = window.setTimeout(() => { setMounted(false); setLeaving(false); }, ADVISOR_EMPTY_EXIT_MS);
+    return () => window.clearTimeout(t);
+  }, [show, mounted]);
+  if (!mounted) return null;
+  return (
+    <div className={`dv-advisor-empty${leaving ? ' is-leaving' : ''}`} aria-hidden={leaving || undefined}>
+      <span className="dv-advisor-empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H14l6 6v8.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z" />
+          <path d="M14 4v6h6" />
+          <path d="M8 13.5h7M8 16.5h4.5" />
+        </svg>
+      </span>
+      <p className="dv-advisor-empty-title">
+        {paragraph ? 'Ask about this paragraph' : 'Ask about this document'}
+      </p>
+      <p className="dv-advisor-empty-sub">
+        {paragraph
+          ? 'This thread belongs to the paragraph you picked. Have it rewritten, tightened or translated — or ask what it actually commits you to.'
+          : 'It has the file open in front of it. Ask for a summary, what to watch out for, a clause in plain words, or a draft to work from.'}
+      </p>
+    </div>
+  );
+}
+
 function AdvisorPanel({ file }) {
   const adv = useMultitoolAdvisor();
   const messages = adv?.messages || [];
@@ -4270,6 +4933,7 @@ function AdvisorPanel({ file }) {
   const switching = adv?.switching || false;
   const error = adv?.error || null;
   const genMode = adv?.genMode || false;
+  const showTokenUsage = !!adv?.showTokenUsage;
   const branches = adv?.branches || [];
   const activeBranchId = adv?.activeBranchId;
   const activeSplits = branches.find((b) => b.id === activeBranchId)?.splits || [];
@@ -4332,7 +4996,6 @@ function AdvisorPanel({ file }) {
   }, []);
   // The full masthead scrolls with the thread; a compact header fades in once it
   // scrolls out of view (mirrors the Versions page compact-header-on-scroll).
-  const [scrolled, setScrolled] = useState(false);
   const prevLenRef = useRef(messages.length);
   const [typing, setTyping] = useState(null);   // index of the AI msg being revealed
   const [copiedIdx, setCopiedIdx] = useState(null);
@@ -4343,23 +5006,47 @@ function AdvisorPanel({ file }) {
   // is hovered + where to place the floating pill (viewport coords; left edge at
   // the scrollbar's right edge). A short hide-delay bridges the gap between the
   // in-scroll hover strip and the pill that sits just outside it.
-  const [branchHover, setBranchHover] = useState(null); // { index, top, left }
-  const [pillHover, setPillHover] = useState(false);    // pointer is on the pill
+  // Two stages, so sweeping the pointer through the thread doesn't fling panels
+  // open behind it:
+  //   1. HOVER  — the seam under the pointer draws its divider, nothing else.
+  //               Moving on (or moving within the seam) just moves the line.
+  //   2. DWELL  — hold still for DWELL_MS and the seam opens: the gap above and
+  //               below the divider grows, and a Split button fades in centred
+  //               on the line, ready to click.
+  // Any movement inside the seam re-arms the dwell timer, so "holding still" is
+  // what opens it, not merely "being there".
+  const [branchHover, setBranchHover] = useState(null); // index whose divider is drawn
+  const [branchOpen, setBranchOpen] = useState(null);   // index that has opened up
   const branchClearRef = useRef(null);
+  const branchDwellRef = useRef(null);
+  const DWELL_MS = 360;
   const cancelBranchHide = () => { if (branchClearRef.current) { clearTimeout(branchClearRef.current); branchClearRef.current = null; } };
-  const hideBranchSoon = () => { cancelBranchHide(); branchClearRef.current = window.setTimeout(() => setBranchHover(null), 150); };
-  const showBranch = (index, anchorEl) => {
-    cancelBranchHide();
-    // Center the pill (and its connector) on the divider LINE's vertical center,
-    // not the anchor's top edge, so the connector lines up exactly with the line.
-    const lineEl = anchorEl.querySelector('.dv-branch-line');
-    const lr = (lineEl || anchorEl).getBoundingClientRect();
-    const centerY = lr.top + lr.height / 2;
-    const sc = scrollRef.current?.getBoundingClientRect();
-    const rightEdge = sc ? sc.right : lr.right;
-    // left edge flush with the scrollbar's right edge (scrollbar inset 3px).
-    setBranchHover({ index, top: toLayoutPx(centerY), left: toLayoutPx(rightEdge - 3) });
+  const cancelDwell = () => { if (branchDwellRef.current) { clearTimeout(branchDwellRef.current); branchDwellRef.current = null; } };
+  // Re-armed on every mousemove over the seam: the callback only runs once the
+  // pointer has been still for the whole delay.
+  const armDwell = (index) => {
+    cancelDwell();
+    branchDwellRef.current = window.setTimeout(() => setBranchOpen(index), DWELL_MS);
   };
+  const enterBranch = (index) => {
+    cancelBranchHide();
+    setBranchHover(index);
+    armDwell(index);
+  };
+  const moveBranch = (index) => {
+    cancelBranchHide();
+    // Already open: leave it be. Re-arming here would make the panel flicker
+    // shut and back open as the pointer travels toward the button.
+    if (branchOpen === index) return;
+    armDwell(index);
+  };
+  const hideBranchSoon = () => {
+    cancelDwell();
+    cancelBranchHide();
+    branchClearRef.current = window.setTimeout(() => { setBranchHover(null); setBranchOpen(null); }, 150);
+  };
+  // Timers must not outlive the panel.
+  useEffect(() => () => { cancelDwell(); cancelBranchHide(); }, []);
 
   const scrollToBottom = useCallback((force) => {
     const el = scrollRef.current;
@@ -4373,7 +5060,6 @@ function AdvisorPanel({ file }) {
     stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
     // Remember the position so a remount (version select) can restore it.
     if (file?.path) advisorScrollPos.set(file.path, { top: el.scrollTop, atBottom: stickRef.current });
-    setScrolled((s) => (el.scrollTop > 44 ? (s ? s : true) : (s ? false : s)));
     setBranchHover(null); // a seam pill's position would be stale after scrolling
     syncScrollbar();
   };
@@ -4416,27 +5102,25 @@ function AdvisorPanel({ file }) {
 
   return (
     <div className="dv-advisor">
-      {/* Compact header — fades in once the full masthead scrolls out of view. */}
-      <div className={`dv-advisor-minihead${scrolled ? ' is-visible' : ''}`} aria-hidden={!scrolled}>
-        <span className="dv-advisor-minihead-title">Generate</span>
-        <span className="dv-advisor-minihead-dot" aria-hidden="true">·</span>
-        <span className="dv-advisor-minihead-eyebrow">Document AI</span>
-      </div>
+      {/* No masthead and no compact-on-scroll bar: the side panel's tab strip
+          already names this pane, so a title inside it was a second label for
+          the same thing, eating the height the thread wants. */}
+      {/* Outside the scroller on purpose — which conversation you are in has to
+          stay visible while you read back through it. */}
+      <AdvisorScopeTabs />
+      {/* The picked paragraph's Save-as-new-version action heads its own thread.
+          The document pane renders it into this node — it owns the pick and the
+          edit tracking behind it. Mounted only on the Paragraph sub-tab, and
+          only while there are unsaved edits, so the two sub-tabs are otherwise
+          identical: same thread shape, same footer. */}
+      {adv?.paraPicked && (adv.threadScope || 'document') !== 'document' && (
+        <div className="dv-para-panel" ref={adv.setParaSlot} />
+      )}
       <div className={`dv-advisor-scroll${asking ? ' is-asking' : ''}`} ref={scrollRef} onScroll={onScroll}>
-        {/* iOS-style mini masthead (mirrors the Settings / Newsletter header) —
-            lives at the TOP OF THE SCROLL so it scrolls away with the thread. */}
-        <header className="dv-advisor-head">
-          <div className="dv-advisor-head-eyebrow">
-            <span>Document AI</span>
-            <span className="dv-advisor-head-muted">· this file</span>
-          </div>
-          <h2 className="dv-advisor-head-title">Generate.</h2>
-          <p className="dv-advisor-head-sub">Draft and refine this document with AI — each version appears below.</p>
-        </header>
         {/* Branch nav — one pill per split conversation. The original ("Main")
             stays so you can navigate back after splitting. Only shown once at
             least one split exists. */}
-        {branches.length > 1 && (
+        {branches.length > 1 && (adv?.threadScope || 'document') === 'document' && (
           <div className="dv-branch-nav" role="tablist" aria-label="Conversations">
             {branches.map((b) => (
               <button
@@ -4455,6 +5139,13 @@ function AdvisorPanel({ file }) {
         )}
         {/* .ai-hub / .ai-chat-page scope the main app's bubble + markdown styles
             so this thread reads identically (width neutralised in DocViewer.css). */}
+        {/* A direct child of the SCROLLER, not of the chat block — it centres
+            itself against the pane, and the chat block is only as tall as its
+            (absent) messages. */}
+        <AdvisorEmpty
+          show={messages.length === 0 && !busy}
+          paragraph={(adv?.threadScope || 'document') !== 'document'}
+        />
         <div className="dv-advisor-chat ai-hub ai-chat-page">
           {messages.length === 0 && !busy ? null : (
             <div className="chat">
@@ -4474,11 +5165,46 @@ function AdvisorPanel({ file }) {
                     <div className="bubble-c">
                       <div className="bubble-msg">
                         {m.role === 'user'
-                          ? m.content
+                          ? (m.qa?.length
+                            ? (
+                              <div className="dv-bubble-qa">
+                                {m.qa.map((qa, qi) => (
+                                  <div className="dv-bubble-qa-item" key={qi}>
+                                    <div className="dv-bubble-qa-q">{qa.prompt}</div>
+                                    <div className="dv-bubble-qa-a">{qa.answer}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                            : m.content)
                           : typing === i
                             ? <AdvTypewriter text={m.content || ''} onTick={() => scrollToBottom(false)} onDone={() => setTyping((t) => (t === i ? null : t))} />
                             : <div className="aichat-md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || ''}</ReactMarkdown></div>}
                       </div>
+                      {/* What this turn cost, under its own bubble. Same
+                          "Show token usage" setting as the per-chat pill in the
+                          composer, so both indicators appear together or not at
+                          all. Older messages from a saved thread have no usage
+                          recorded and simply show nothing. */}
+                      {showTokenUsage && m.role === 'assistant' && m.usage && (
+                        <MessageTokens usage={m.usage} />
+                      )}
+                      {/* What this message was pointed at — the passage picked in
+                          the document preview. Sits under the bubble so the ask
+                          and its target read as one thing. */}
+                      {m.passage && (
+                        <Tooltip content={m.passage}>
+                          <div className="dv-bubble-selchip">
+                            <span className="dv-bubble-selchip-ico" aria-hidden="true">
+                              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M4 7h11M4 12h16M4 17h9" />
+                              </svg>
+                            </span>
+                            <span className="dv-bubble-selchip-label">Selected passage</span>
+                            <span className="dv-bubble-selchip-text">“{m.passage}”</span>
+                          </div>
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                 );
@@ -4488,7 +5214,10 @@ function AdvisorPanel({ file }) {
                 // generated file card, never between the note and its document.
                 const aiText = m.role === 'assistant' && messages[i + 1]?.role !== 'artifact';
                 const fileCard = m.role === 'artifact';
-                const canBranch = (aiText || fileCard) && i < messages.length - 1 && !busy;
+                // No split seams on a paragraph's thread — branches are a
+                // document-conversation feature (see branchFrom).
+                const canBranch = (aiText || fileCard) && i < messages.length - 1 && !busy
+                  && (adv?.threadScope || 'document') === 'document';
                 // Persistent marker(s) for any branches split off at this point.
                 const splitsHere = activeSplits.filter((s) => s.afterIndex === i);
                 return (
@@ -4508,11 +5237,29 @@ function AdvisorPanel({ file }) {
                     ))}
                     {canBranch && (
                       <div
-                        className={`dv-branch-anchor${branchHover?.index === i ? ' is-active' : ''}${branchHover?.index === i && pillHover ? ' is-pill-hover' : ''}`}
-                        onMouseEnter={(e) => showBranch(i, e.currentTarget)}
+                        className={`dv-branch-anchor${branchHover === i ? ' is-active' : ''}${branchOpen === i ? ' is-open' : ''}`}
+                        onMouseEnter={() => enterBranch(i)}
+                        onMouseMove={() => moveBranch(i)}
                         onMouseLeave={hideBranchSoon}
                       >
                         <span className="dv-branch-line" />
+                        {/* Only mounted once the seam has opened, so a fast
+                            sweep never leaves buttons in its wake. */}
+                        {branchOpen === i && (
+                          <Tooltip content="Split a new conversation from here — keeps everything up to this message">
+                            <button
+                              type="button"
+                              className="dv-branch-split"
+                              onClick={() => {
+                                adv?.branchFrom?.(i);
+                                setBranchHover(null);
+                                setBranchOpen(null);
+                              }}
+                            >
+                              {AdvBranchGlyph}<span>Split from here</span>
+                            </button>
+                          </Tooltip>
+                        )}
                       </div>
                     )}
                   </React.Fragment>
@@ -4540,24 +5287,6 @@ function AdvisorPanel({ file }) {
       <div className="dv-advisor-sb" ref={sbTrackRef} aria-hidden="true">
         <div className="dv-advisor-sb-thumb" ref={sbThumbRef} onMouseDown={onThumbDown} />
       </div>
-      {/* Floating "Split from here" pill — portalled to <body> so it can overflow
-          past the sidebar edge (a child of the scroll would be clipped). Placed
-          at the hovered seam, left edge flush with the scrollbar's right edge. */}
-      {branchHover && createPortal(
-        <Tooltip content="Split a new conversation from here — keeps everything up to this message">
-          <button
-            type="button"
-            className="dv-branch dv-branch--float"
-            style={{ top: `${branchHover.top}px`, left: `${branchHover.left}px` }}
-            onMouseEnter={() => { cancelBranchHide(); setPillHover(true); }}
-            onMouseLeave={() => { hideBranchSoon(); setPillHover(false); }}
-            onClick={() => { adv?.branchFrom?.(branchHover.index); setBranchHover(null); }}
-          >
-            {AdvBranchGlyph}<span>Split from here</span>
-          </button>
-        </Tooltip>,
-        document.body,
-      )}
       {/* The composer is the advisor tab's footer action — rendered into the
           single shared Multitool footer slot. */}
       <MultitoolFooter><MultitoolComposer /></MultitoolFooter>
@@ -4610,18 +5339,6 @@ function MediaOcrPane({ file, url, kind, sidePanelSlot = null, sideTabsSlot = nu
   const [historyWidth, setHistoryWidth] = useState(HISTORY_DEFAULT_WIDTH);
   const jobIdRef = useRef(0);
   const historyListRef = useRef(null);
-  // Compact-header-on-scroll (mirrors the Versions page): show the mini header
-  // once the masthead has scrolled away. Hysteresis avoids edge flicker.
-  const [historyScrolled, setHistoryScrolled] = useState(false);
-  useEffect(() => {
-    const el = historyListRef.current;
-    if (!el) return undefined;
-    const onScroll = () => setHistoryScrolled((s) => (s ? el.scrollTop > 8 : el.scrollTop > 28));
-    onScroll();
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
   // "Locate selection": clicking a snippet thumbnail highlights where it was
   // taken from, back on the picture/video. `highlightId` is the entry being
   // shown; `highlightShape` is its region mapped to current stage-viewport px.
@@ -5804,24 +6521,16 @@ function MediaOcrPane({ file, url, kind, sidePanelSlot = null, sideTabsSlot = nu
       {/* No footer action — arming/tool choice moved to the floating pill
           over the media stage (shown while this tab is active). */}
       <div className="dv-ocr-history-scroll" ref={historyListRef}>
-        {/* Masthead — accent eyebrow + display title + meta (Versions style). */}
-        <header className="dv-ocr-history-head">
-          <div className="dv-ocr-history-eyebrow">
-            <span>Snippets</span>
-            <span className="dv-ocr-history-eyebrow-muted">· from this file</span>
-          </div>
-          <h2 className="dv-ocr-history-title">Extracted text</h2>
-          <div className="dv-ocr-history-meta">
-            <span className="dv-ocr-history-count">
-              {history.length > 0
-                ? <><strong>{history.length}</strong> {history.length === 1 ? 'snippet' : 'snippets'}</>
-                : 'No snippets yet'}
-            </span>
-            {history.length > 0 && (
-              <button type="button" className="dv-ocr-history-clear" onClick={clearHistory}>Clear all</button>
-            )}
-          </div>
-        </header>
+        <div className="dv-ocr-history-meta">
+          <span className="dv-ocr-history-count">
+            {history.length > 0
+              ? <><strong>{history.length}</strong> {history.length === 1 ? 'snippet' : 'snippets'}</>
+              : 'No snippets yet'}
+          </span>
+          {history.length > 0 && (
+            <button type="button" className="dv-ocr-history-clear" onClick={clearHistory}>Clear all</button>
+          )}
+        </div>
         {/* Selection cards — same shape as the Extract Tool overlay's sidebar
             (numbered badge · thumbnail · text · copy), oldest first so the
             numbers match the order the selections were made. */}
@@ -6101,13 +6810,7 @@ function CaptionsPanel({ file, url, currentTime, onSeek, onCaptionsChange }) {
   return (
     <>
     <div className="dv-ocr-history-scroll">
-      <header className="dv-ocr-history-head">
-        <div className="dv-ocr-history-eyebrow">
-          <span>Transcript</span>
-          <span className="dv-ocr-history-eyebrow-muted">· from this file</span>
-        </div>
-        <h2 className="dv-ocr-history-title">AI captions</h2>
-        <div className="dv-ocr-history-meta">
+      <div className="dv-ocr-history-meta">
           <span className="dv-ocr-history-count">
             {captions?.state === 'done'
               ? (captions.segments.length > 0
@@ -6121,7 +6824,6 @@ function CaptionsPanel({ file, url, currentTime, onSeek, onCaptionsChange }) {
             </button>
           )}
         </div>
-      </header>
 
       {!captions ? (
         <div className="dv-audio-captions-empty">
@@ -6983,7 +7685,7 @@ const SHEET_MAX_ROWS = 2000;
 // with sticky A/B/C column headers + 1/2/3 row numbers (and a tab strip when the
 // workbook has multiple sheets). SheetJS is lazy-imported so its weight isn't
 // paid until a spreadsheet is opened (mirrors docx-preview for .docx).
-function SpreadsheetPane({ file, url, onExportPdf }) {
+function SpreadsheetPane({ file, url, onExportPdf, onOpenNative }) {
   const [state, setState] = useState({ status: 'loading', sheets: [], error: null });
   const [active, setActive] = useState(0);
   const tableRef = useRef(null);
@@ -7060,7 +7762,7 @@ function SpreadsheetPane({ file, url, onExportPdf }) {
               ))}
             </div>
           ) : <span className="dv-sheet-bar-spacer" />}
-          <ReconPill />
+          <OpenNativeButton onOpen={onOpenNative} kind="xlsx" />
           {onExportPdf && <ExportPdfButton getRoot={() => tableRef.current} kind="xlsx" onExport={onExportPdf} />}
         </div>
       )}
@@ -7107,6 +7809,14 @@ function DocExtractPanel({ file, url, kind, width, fill = false, sideTabsSlot = 
   const [copiedId, setCopiedId] = useState(null);
   // Documents only get the AI advisor (text extraction is images/video only).
   const [rightTab, setRightTab] = useState('advisor');
+  // A picked paragraph no longer gets a tab of its own here — it opens a
+  // Document / Paragraph sub-tab row INSIDE the advisor, because what it really
+  // selects is which conversation you are in. Landing on Metadata when you
+  // clicked a paragraph would be the wrong answer, so pull focus back.
+  const paraPicked = !!useMultitoolAdvisor()?.paraPicked;
+  useEffect(() => {
+    if (paraPicked) setRightTab((cur) => (cur === 'metadata' ? 'advisor' : cur));
+  }, [paraPicked]);
 
   useEffect(() => { setHistory(loadOcrHistory(file.storage_path)); }, [file.storage_path]);
   useEffect(() => { saveOcrHistory(file.storage_path, history); }, [file.storage_path, history]);
@@ -7161,8 +7871,8 @@ function DocExtractPanel({ file, url, kind, width, fill = false, sideTabsSlot = 
 
   return (
     <aside className={`dv-ocr-history dv-doc-extract${fill ? ' dv-side-portal' : ''}`} style={fill ? undefined : { width: `${width}px` }}>
-      {/* Documents get two panes: the Generate (AI) advisor and Metadata.
-          Text extraction lives in the Multitool footer, not a tab. */}
+      {/* Documents get two panes: the Generate (AI) advisor and Metadata. Text
+          extraction lives in the Multitool footer, not a tab. */}
       <SidePanelTabs tabs={['advisor', 'metadata']} active={rightTab} onChange={setRightTab} slot={sideTabsSlot} />
       {rightTab === 'metadata' ? <MetadataPanel file={file} /> : <AdvisorPanel file={file} />}
       {false && (
@@ -7183,23 +7893,16 @@ function DocExtractPanel({ file, url, kind, width, fill = false, sideTabsSlot = 
         </div>
       )}
       <div className="dv-ocr-history-scroll">
-        <header className="dv-ocr-history-head">
-          <div className="dv-ocr-history-eyebrow">
-            <span>Snippets</span>
-            <span className="dv-ocr-history-eyebrow-muted">· from this file</span>
-          </div>
-          <h2 className="dv-ocr-history-title">Extracted text</h2>
-          <div className="dv-ocr-history-meta">
-            <span className="dv-ocr-history-count">
-              {history.length > 0
-                ? <><strong>{history.length}</strong> {history.length === 1 ? 'snippet' : 'snippets'}</>
-                : 'No snippets yet'}
-            </span>
-            {history.length > 0 && (
-              <button type="button" className="dv-ocr-history-clear" onClick={() => setHistory([])}>Clear all</button>
-            )}
-          </div>
-        </header>
+        <div className="dv-ocr-history-meta">
+          <span className="dv-ocr-history-count">
+            {history.length > 0
+              ? <><strong>{history.length}</strong> {history.length === 1 ? 'snippet' : 'snippets'}</>
+              : 'No snippets yet'}
+          </span>
+          {history.length > 0 && (
+            <button type="button" className="dv-ocr-history-clear" onClick={() => setHistory([])}>Clear all</button>
+          )}
+        </div>
         {history.length === 0 ? (
           <p className="dv-ocr-history-empty">
             {extractable
@@ -7266,6 +7969,349 @@ function DocumentWithPanel({ file, url, kind, mainClass = '', sidePanelSlot = nu
 // the rendered flow and slice it into fixed-size page sheets, each the section's
 // real page dimensions, breaking before any block that would overflow the page.
 // Returns the natural page width (px) so the caller can fit it to the pane.
+// Rendered blocks that count as an editable "paragraph". docx-preview emits
+// Word paragraphs as <p> (list items too — they're <p style="display:list-item">)
+// and headings as <h1>-<h6>. Tables, images and drawings are deliberately out:
+// a whole table isn't a paragraph, and making one editable would let a stray
+// keystroke rewrite its markup.
+// ── "Complete data": empty-field detection ───────────────────────────────
+// A drafted document arrives with blanks where the facts go — bracket fields
+// ("[Client name]"), mail-merge braces, angle tags, or the run of underscores
+// that stands in for a signature line. "Complete data" finds every one of them,
+// marks it in the preview, and fills it from the side panel.
+//
+// Deliberately conservative about what counts as a blank: three dots is an
+// ellipsis in ordinary prose and "[3]" is a footnote marker, so neither is
+// treated as a field. A miss is harmless; a false positive would offer to
+// rewrite real text.
+// How much of the project folder a suggestion run is allowed to read. Extracting
+// text from PDFs and Word files is slow, so this is a budget, not a limit on
+// what the user may keep in the folder: the newest files are the ones a draft is
+// usually being completed from.
+const REF_FILE_LIMIT = 8;
+const REF_FILE_CHARS = 5000;
+
+// How much of the Files tab the ADVISOR carries per turn. The inventory is just
+// names, so it is nearly free and can be generous; reading a file costs a text
+// extraction, so only the ones the user actually named get read, and only a few.
+const PROJECT_FILE_LIST_MAX = 80;
+const PROJECT_FILE_READ_MAX = 3;
+// The folder listing is re-read at most this often — a chat turn takes longer
+// than this anyway, so it only collapses the bursts (send, retry, ask_user
+// resume) that would otherwise walk the folder three times in a row.
+const PROJECT_LIST_TTL_MS = 15000;
+// Identity records change far less often than the folder does.
+const IDENTITY_LIST_TTL_MS = 60000;
+
+// Pull the suggestions object out of a model reply. It is asked for bare JSON,
+// but a fenced block or a sentence of preamble is the usual failure mode, so
+// fall back to the outermost braces before giving up.
+function parseFieldSuggestions(text) {
+  const tryParse = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text || '');
+  const candidates = [text, fenced?.[1]];
+  const first = (text || '').indexOf('{');
+  const last = (text || '').lastIndexOf('}');
+  if (first >= 0 && last > first) candidates.push(text.slice(first, last + 1));
+  for (const c of candidates) {
+    const obj = c ? tryParse(c.trim()) : null;
+    const list = Array.isArray(obj?.fields) ? obj.fields : Array.isArray(obj) ? obj : null;
+    if (!list) continue;
+    return list
+      .filter((f) => f && typeof f.id === 'string')
+      .map((f) => ({
+        id: f.id,
+        suggestions: (Array.isArray(f.suggestions) ? f.suggestions : [])
+          .filter((sg) => sg && typeof sg.value === 'string' && sg.value.trim())
+          .slice(0, 3)
+          .map((sg) => ({
+            value: sg.value.trim(),
+            source: sg.source === 'file' && sg.file ? 'file' : 'context',
+            file: sg.source === 'file' ? String(sg.file || '') : '',
+            why: typeof sg.why === 'string' ? sg.why.trim().slice(0, 90) : '',
+          })),
+      }));
+  }
+  return [];
+}
+
+const FIELD_PATTERNS = [
+  // DocVex's OWN placeholder shape, and the one every generated document is
+  // told to use: doubled square brackets around a description of what goes in
+  // the gap. It exists because single brackets are ambiguous — "[3]" is a
+  // footnote, "[sic]" is an editorial note — so a single-bracket blank has to
+  // be judged by what is inside it (see looksLikeField), and judgement is where
+  // a blank gets missed. Nothing else in a legal document is written "[[…]]",
+  // so this shape needs no judgement at all: it is always a field.
+  /\[\[[^\]\n]{1,120}\]\]/g,   // [[the seller's full name]]
+  /\[[^\][\n]{0,80}\]/g,      // [Client name] — and the bare "[...]" rule
+  /\{\{[^{}\n]{1,80}\}\}/g,   // {{client_name}}
+  /\{[^{}\n]{1,80}\}/g,       // {client_name}
+  /<[^<>\n]{1,80}>/g,         // <client name>
+  /_{3,}/g,                   // ________ (signature / fill-in rule)
+  /\.{4,}/g,                  // ......... (dotted rule, NOT an ellipsis)
+  /…{2,}/g,              // …… (repeated ellipsis characters)
+];
+
+// A blank rule (underscores / dots) always counts. A delimited placeholder only
+// counts when what's inside it reads like a label — at least one letter, so
+// citation and footnote markers such as "[3]" or "[2020]" are left alone.
+function looksLikeField(raw) {
+  // Ours by construction — no test to fail.
+  if (/^\[\[[\s\S]*\]\]$/.test(raw)) return true;
+  if (/^[_.…]+$/.test(raw)) return true;
+  // A bracketed rule — "[...]", "[…]", "[___]", "[ ]". Romanian formulas write
+  // whole identification clauses this way, labelling each gap in the prose
+  // BEFORE it ("str. [...], nr. [...]") rather than inside it. Nothing but
+  // filler between the brackets, so a citation marker like "[3]" — which has a
+  // digit — is still excluded.
+  if (/^[[{<][\s._…-]*[\]}>]$/.test(raw)) return true;
+  const inner = raw.replace(/^[[{<]+/, '').replace(/[\]}>]+$/, '').trim();
+  if (!inner || inner.length > 80) return false;
+  // A brace group holding declarations is a CSS rule, not a blank — no
+  // placeholder a person writes contains a semicolon or a property colon.
+  // (The <style> element is skipped outright above; this catches stylesheet
+  // text that reached the flow some other way.)
+  if (/^[{<]/.test(raw) && /[;:]/.test(inner)) return false;
+  return /[A-Za-zÀ-ɏ]/.test(inner);
+}
+
+// Human-readable name for a blank, used as the panel's field heading.
+function fieldLabel(raw, hint) {
+  const inner = raw
+    .replace(/^[[{<]+/, '').replace(/[\]}>]+$/, '')
+    .replace(/[_.…]{3,}/g, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // "[...]" and "________" say nothing about themselves. In a Romanian
+  // identification clause the label is the prose immediately before the gap —
+  // "str. [...]", "CNP [...]" — so that is what names the field.
+  if (!/[A-Za-zÀ-ɏ]/.test(inner)) return String(hint || '').trim() || inner || 'Blank space';
+  return inner;
+}
+
+// The words that introduce a blank: everything since the previous blank, cut
+// back to the last separator so a whole sentence doesn't become the label.
+function labelHintBefore(text) {
+  const tail = String(text || '').slice(-120);
+  const cut = Math.max(tail.lastIndexOf(','), tail.lastIndexOf(';'), tail.lastIndexOf('\n'));
+  return (cut >= 0 ? tail.slice(cut + 1) : tail).replace(/\s+/g, ' ').trim().slice(-60);
+}
+
+// Every placeholder in one string, left to right, without overlaps. Patterns
+// are run independently and merged, so the longest match wins where two shapes
+// start at the same spot (e.g. "{{x}}" beats the inner "{x}").
+function matchFields(text) {
+  const hits = [];
+  for (const re of FIELD_PATTERNS) {
+    re.lastIndex = 0;
+    let m = re.exec(text);
+    while (m) {
+      if (looksLikeField(m[0])) hits.push({ start: m.index, raw: m[0] });
+      m = re.exec(text);
+    }
+  }
+  hits.sort((a, b) => a.start - b.start || b.raw.length - a.raw.length);
+  const out = [];
+  let end = -1;
+  for (const h of hits) {
+    if (h.start < end) continue;
+    out.push(h);
+    end = h.start + h.raw.length;
+  }
+  return out;
+}
+
+// Make sure a paragraph holding a blank is tracked like any other editable
+// block. paginateDocx only tags the direct children of each page's article, so
+// anything nested — above all a Word TABLE, which is where fill-in forms
+// normally put their blanks — arrives untagged, and a value typed into it would
+// be invisible to the edit tracking and silently dropped on save.
+function tagFieldBlock(host, block) {
+  if (!block || !host?.contains(block)) return block || null;
+  if (block.classList.contains('dv-docx-para')) return block;
+  block.classList.add('dv-docx-para');
+  if (block.dataset.paraIndex == null) {
+    const used = Array.from(host.querySelectorAll('[data-para-index]'))
+      .map((n) => Number(n.dataset.paraIndex))
+      .filter((n) => Number.isFinite(n));
+    block.dataset.paraIndex = String(used.length ? Math.max(...used) + 1 : 0);
+  }
+  return block;
+}
+
+// Find every blank in the rendered document, optionally wrapping each one in a
+// marker span. Both modes walk the same nodes in the same order, so the ids they
+// hand out line up: the pane can survey a freshly rendered document WITHOUT
+// touching it (to warm the suggestions in the background), then wrap for real
+// when the mode is actually entered, and the two agree on what f3 refers to.
+//
+// Each field remembers the paragraph it lives in (so a filled value can be
+// saved back through the ordinary manual-edit path) and the sentence around it
+// (so the AI has something to reason from when suggesting values). When
+// wrapping, the paragraph's pre-fill state is captured in exactly the shape
+// applyEditable uses, so filling a blank shows up as a normal edit.
+// Where in the joined text a position falls, as a (node, offset) pair.
+function locateInSegments(segs, pos) {
+  for (const sg of segs) {
+    if (pos >= sg.start && pos <= sg.end) return { node: sg.node, offset: pos - sg.start };
+  }
+  return null;
+}
+
+// Replace one placeholder — however many text nodes it is spread over — with a
+// single marker span. A DOM Range does the work, so a blank whose opening
+// bracket sits in one run and whose closing bracket sits in the next is wrapped
+// as one field rather than missed.
+//
+// Collapsing the range's original runs into one span means a placeholder split
+// mid-word by a formatting change comes out uniformly styled, which is what it
+// should have been.
+function wrapFieldRange(segs, hit, id) {
+  const from = locateInSegments(segs, hit.start);
+  const to = locateInSegments(segs, hit.start + hit.raw.length);
+  if (!from || !to) return false;
+  try {
+    const range = document.createRange();
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    const span = document.createElement('span');
+    span.className = 'dv-field';
+    span.dataset.dvfield = id;
+    span.dataset.dvfieldRaw = hit.raw;
+    span.textContent = hit.raw;
+    range.deleteContents();
+    range.insertNode(span);
+    return true;
+  } catch {
+    // A range that can't be built (a node detached between the walk and here)
+    // costs one blank, not the whole scan.
+    return false;
+  }
+}
+
+const FIELD_BLOCK_SEL = '.dv-docx-para, p, h1, h2, h3, h4, h5, h6, li, td, th';
+
+function walkDocFields(host, { wrap }) {
+  if (!host) return [];
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => {
+      if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const parent = n.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      // docx-preview injects the document's OWN stylesheet as a <style> element
+      // inside the host, and a CSS rule body ("{ margin: 0 }") matches the
+      // brace-placeholder pattern perfectly — that is how stylesheet text ended
+      // up listed as blanks to fill in. Skip anything that isn't visible prose,
+      // and skip the page-number chips pagination adds.
+      if (parent.closest('style, script, template, head')) return NodeFilter.FILTER_REJECT;
+      if (parent.closest('.dv-docx-pagenum')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  // Group the text nodes by the BLOCK they belong to, and scan each block's
+  // text as one string. Scanning node by node used to miss any placeholder Word
+  // had split across runs — which it does at every formatting change, and often
+  // for no visible reason at all — so a document could show a blank the panel
+  // never listed. Joining first means the shape is matched against the text the
+  // reader actually sees.
+  const byBlock = new Map();
+  let cur = walker.nextNode();
+  while (cur) {
+    const block = cur.parentElement?.closest(FIELD_BLOCK_SEL) || cur.parentElement;
+    if (block) {
+      if (!byBlock.has(block)) byBlock.set(block, []);
+      byBlock.get(block).push(cur);
+    }
+    cur = walker.nextNode();
+  }
+
+  const out = [];
+  let seq = 0;
+  for (const [blockEl, nodes] of byBlock) {
+    const segs = [];
+    let joined = '';
+    for (const n of nodes) {
+      segs.push({ node: n, start: joined.length, end: joined.length + n.nodeValue.length });
+      joined += n.nodeValue;
+    }
+    const hits = matchFields(joined);
+    if (!hits.length) continue;
+
+    let block = blockEl.matches(FIELD_BLOCK_SEL) ? blockEl : (blockEl.closest(FIELD_BLOCK_SEL) || null);
+    const context = (block?.textContent || joined).trim().slice(0, 400);
+    if (wrap) {
+      block = tagFieldBlock(host, block);
+      // Remember the paragraph as it was drafted — Revert restores the HTML,
+      // and a save is diffed against the markdown. Captured BEFORE any wrapping
+      // so the marker spans aren't part of "as drafted".
+      if (block && block.dataset.originalText == null) {
+        block.dataset.originalText = block.textContent.trim();
+        block.dataset.originalHtml = block.innerHTML;
+        block.dataset.originalMd = serializeParagraphMarkdown(block);
+      }
+    }
+
+    // Ids run in document order; the wrapping runs BACK TO FRONT, so each edit
+    // leaves the offsets of everything before it untouched.
+    const ids = hits.map(() => `f${(seq += 1)}`);
+    if (wrap) {
+      for (let i = hits.length - 1; i >= 0; i -= 1) wrapFieldRange(segs, hits[i], ids[i]);
+    }
+    let prevEnd = 0;
+    hits.forEach((h, i) => {
+      const hint = labelHintBefore(joined.slice(prevEnd, h.start));
+      prevEnd = h.start + h.raw.length;
+      out.push({
+        id: ids[i],
+        raw: h.raw,
+        label: fieldLabel(h.raw, hint),
+        context,
+        paraIndex: block?.dataset.paraIndex != null ? Number(block.dataset.paraIndex) : null,
+      });
+    });
+  }
+  return out;
+}
+
+// Cheap stable fingerprint of the document's text — tells "a new version was
+// written" apart from "the panel was closed and reopened", which is the whole
+// difference between re-asking the AI and reusing the answers already given.
+function docSignature(text) {
+  const str = text || '';
+  let h = 5381;
+  for (let i = 0; i < str.length; i += 1) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return `${str.length}:${h.toString(36)}`;
+}
+
+// Survey the document without touching it — used to warm suggestions in the
+// background, before the user has asked for anything.
+function collectDocFields(host) {
+  return walkDocFields(host, { wrap: false });
+}
+
+// Mark up the document for real, ready to be filled in.
+function scanDocFields(host) {
+  clearDocFields(host);
+  return walkDocFields(host, { wrap: true });
+}
+
+// Unwrap the markers, keeping whatever text each one currently shows (so values
+// already filled in survive leaving the mode). The paragraphs are normalised
+// afterwards, because the split text nodes would otherwise confuse the markdown
+// serializer the save path runs.
+function clearDocFields(host) {
+  if (!host) return;
+  host.querySelectorAll('.dv-field').forEach((el) => {
+    el.replaceWith(document.createTextNode(el.textContent || ''));
+  });
+  try { host.normalize(); } catch { /* detached node — nothing to clean up */ }
+}
+
+const PARA_BLOCK_TAGS = /^(P|H[1-6]|LI)$/;
+
 function paginateDocx(host) {
   const wrapper = host?.querySelector('.docx-wrapper');
   if (!wrapper) return 0;
@@ -7273,6 +8319,7 @@ function paginateDocx(host) {
   if (!sections.length) return 0;
   let pageWidth = 0;
   const allPages = []; // every page sheet across all sections, for numbering
+  let paraIndex = 0;   // document-order index stamped on each selectable block
 
   for (const section of sections) {
     const cs = getComputedStyle(section);
@@ -7323,6 +8370,27 @@ function paginateDocx(host) {
         cur = makePage();
         used = 0;
       }
+      // Paragraph-level affordance: every block that actually carries text gets
+      // a document-order index so the pane can hover-highlight it and toggle it
+      // into a selection. Empty spacer paragraphs stay inert (Word documents are
+      // full of them and highlighting blank strips reads as noise).
+      if (PARA_BLOCK_TAGS.test(block.tagName) && block.textContent.trim()) {
+        block.classList.add('dv-docx-para');
+        block.dataset.paraIndex = String(paraIndex++);
+        // Word list items hang their bullet / number to the LEFT of the text
+        // box (docx-preview renders them as `display:list-item` with a negative
+        // text-indent), so a highlight painted on the box alone leaves the dot
+        // stranded outside it. Grow the box leftwards by exactly the overhang
+        // and pull the margin back by the same amount: the content box width —
+        // and therefore the line wrapping and the measured height — is
+        // unchanged, but the marker is now inside the paint area.
+        const pcs = getComputedStyle(block);
+        const overhang = -(parseFloat(pcs.textIndent) || 0);
+        if (overhang > 0) {
+          block.style.paddingLeft = `${(parseFloat(pcs.paddingLeft) || 0) + overhang}px`;
+          block.style.marginLeft = `${(parseFloat(pcs.marginLeft) || 0) - overhang}px`;
+        }
+      }
       cur.art.appendChild(block); // moves the node out of its original article
       used += h;
     }
@@ -7346,6 +8414,28 @@ function paginateDocx(host) {
 // "Convert to PDF" / "Export PDF" — captures the live rendered preview (`getRoot`)
 // to a PDF and hands the Blob to `onExport` (which saves it next to the original).
 // Shown on every office preview's toolbar. Reports working / done / failed inline.
+// "Open in Word / PowerPoint / Excel" — hands the file to the OS default app
+// for its type. The in-app preview is a reconstruction of the file; this is
+// the escape hatch to the real thing. Electron only — `openPath` is a no-op
+// success on web, so the button is hidden there rather than lying.
+const NATIVE_APP_LABEL = { docx: 'Word', pptx: 'PowerPoint', xlsx: 'Excel', pdf: 'the PDF viewer' };
+
+function OpenNativeButton({ onOpen, kind }) {
+  const app = NATIVE_APP_LABEL[kind] || 'the default app';
+  if (!onOpen || !isElectron) return null;
+  return (
+    <Tooltip content={`Open this file in ${app} on your computer`}>
+      <button type="button" className="dv-open-native" onClick={onOpen}>
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14 4h6v6M20 4l-8.5 8.5" />
+          <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+        </svg>
+        Open in {app}
+      </button>
+    </Tooltip>
+  );
+}
+
 function ExportPdfButton({ getRoot, kind, onExport, label = 'Convert to PDF' }) {
   const [state, setState] = useState('idle'); // idle | working | done | error
   const run = async () => {
@@ -7419,75 +8509,671 @@ function PageCounter({ info, show, label = 'pages' }) {
   );
 }
 
-// A centered pill noting the preview is an in-app reconstruction (docx-preview /
-// our OOXML + SheetJS renderers), so it may differ from the file opened in the
-// real Office app. Sits at the top-centre of each office preview toolbar.
-function ReconPill() {
-  // Render centred in the window title bar (portal into TitleBar's #tb-docview-
-  // center slot) when it exists; fall back to inline (web, where there's no
-  // custom title bar). Tied to the reconstruction pane, so it auto-hides for
-  // non-office files.
-  const [slot, setSlot] = useState(null);
-  useEffect(() => { setSlot(document.getElementById('tb-docview-center')); }, []);
-  const pill = (
-    <Tooltip content="This is an in-app reconstruction of the file. It may not look exactly the same as when opened in Word / PowerPoint / Excel.">
-      <span className={`dv-recon-pill${slot ? ' dv-recon-pill--titlebar' : ''}`}>
-        Reconstruction — may differ from the Office app
-      </span>
-    </Tooltip>
-  );
-  return slot ? createPortal(pill, slot) : pill;
+// Serialize a rendered paragraph's inline formatting back to markdown.
+//
+// A version is stored as markdown source, so saving an edited paragraph means
+// turning what's on screen back into that shape — otherwise every save flattens
+// the paragraph to plain text and the document loses its bold and italics. Runs
+// are read from COMPUTED style (docx-preview renders Word runs as styled spans,
+// and execCommand adds <b>/<i>), with the paragraph's own style as the baseline
+// so a heading that is bold throughout doesn't come back wrapped in `**`.
+function serializeParagraphMarkdown(el) {
+  if (!el) return '';
+  const base = getComputedStyle(el);
+  const baseBold = (parseInt(base.fontWeight, 10) || 400) >= 600;
+  const baseItalic = base.fontStyle === 'italic' || base.fontStyle === 'oblique';
+  const runs = [];
+  const walk = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walk.nextNode())) {
+    const text = node.nodeValue;
+    if (!text) continue;
+    const cs = getComputedStyle(node.parentElement || el);
+    const bold = ((parseInt(cs.fontWeight, 10) || 400) >= 600) !== baseBold;
+    const italic = (cs.fontStyle === 'italic' || cs.fontStyle === 'oblique') !== baseItalic;
+    const prev = runs[runs.length - 1];
+    if (prev && prev.bold === bold && prev.italic === italic) prev.text += text;
+    else runs.push({ text, bold, italic });
+  }
+  let out = '';
+  for (const r of runs) {
+    // Markers must hug the text — `** bold **` isn't emphasis in markdown — so
+    // any edge whitespace is lifted outside the wrapper.
+    const lead = (/^\s*/.exec(r.text) || [''])[0];
+    const tail = (/\s*$/.exec(r.text) || [''])[0];
+    const core = r.text.slice(lead.length, r.text.length - tail.length);
+    if (!core) { out += r.text; continue; }
+    const mark = r.bold && r.italic ? '***' : r.bold ? '**' : r.italic ? '*' : '';
+    out += `${lead}${mark}${core}${mark}${tail}`;
+  }
+  return out.replace(/\s+/g, ' ').trim();
 }
 
 // Renders a .docx as the formatted final product via docx-preview, re-paginated
 // into Word-like page sheets. Toolbar carries the reconstruction notice, a
-// per-page page-number toggle, and Convert-to-PDF.
-function DocxRenderPane({ url, onExportPdf }) {
+// per-page page-number toggle, Open-in-Word and Convert-to-PDF.
+function DocxRenderPane({ url, onExportPdf, onOpenNative }) {
   const hostRef = useRef(null);
   const pageWidthRef = useRef(0);
   const [showPageNumbers, setShowPageNumbers] = useState(true);
-
-  // Cursor selection → AI target. When the user highlights text in the rendered
-  // document, a small floating button lets them hand that exact passage to the
-  // advisor ("change THIS part"). selTip carries the highlighted text + a viewport
-  // anchor for the button.
   const adv = useMultitoolAdvisor();
-  const canTarget = !!adv?.addSelection;
-  const [selTip, setSelTip] = useState(null); // { text, x, y } | null
+
+  // ── Picking, editing and selecting ───────────────────────────────────────
+  // Every text block rendered by paginateDocx carries `.dv-docx-para` + a
+  // document-order index. Clicking one picks it AND turns it into an editable
+  // region: the document can be corrected in place, formatted like in Word, or
+  // handed to the AI with a prompt — all from the bar at the bottom of the pane.
+  //
+  // The nodes belong to docx-preview, not React, so state lives on the DOM
+  // (classes + data attributes) and only what the bar renders is mirrored into
+  // React. Each paragraph remembers the HTML *and* the markdown it had when it
+  // first became editable: the HTML is what Revert restores (so undo keeps the
+  // rich text), the markdown is what a save is diffed against.
+  const [paras, setParas] = useState([]);   // picked: [{ index, text }]
+  const [edits, setEdits] = useState([]);   // changed: [{ index, before, after }]
+  const [saveState, setSaveState] = useState(null); // null | 'saving' | error string
+  const [prompt, setPrompt] = useState('');
+  const lastParaRef = useRef(null);  // anchor index for shift-click ranges
+  // Why the last render attempt failed, as { title, detail } — or null. Kept in
+  // React (rather than written into the host as raw HTML) so the failure can
+  // offer the same escape hatches the rest of the pane has.
+  const [renderErr, setRenderErr] = useState(null);
+  // Bumped once every time the document finishes rendering — the blanks scan
+  // keys off it so a new version is re-scanned rather than left stale.
+  const [renderTick, setRenderTick] = useState(0);
+  // Bumped to re-run the render effect: by the automatic retry below and by the
+  // user's "Try again". `attemptRef` counts retries PER URL, so switching files
+  // always starts from a clean budget without racing a reset effect.
+  const [reloadKey, setReloadKey] = useState(0);
+  const attemptRef = useRef({ url: null, n: 0 });
+  const retryRender = useCallback(() => {
+    attemptRef.current = { url: null, n: 0 };
+    setRenderErr(null);
+    setReloadKey((k) => k + 1);
+  }, []);
+
+  const paraNodes = useCallback(
+    () => Array.from(hostRef.current?.querySelectorAll('.dv-docx-para') || []),
+    [],
+  );
+
+  // Resolve the text block a node sits in, and make sure it is tagged.
+  //
+  // paginateDocx normally stamps `.dv-docx-para` + a document-order index on
+  // every text block as it slices the flow into pages. But picking and editing
+  // must not be hostage to that: if pagination was skipped or bailed part-way,
+  // the class is simply absent and every gesture here silently found nothing to
+  // act on. So fall back to the underlying block element and tag it on the spot
+  // — from that point it behaves exactly like a block pagination tagged.
+  const blockAt = useCallback((node) => {
+    const host = hostRef.current;
+    const el = node?.nodeType === 1 ? node : node?.parentElement;
+    if (!el || !host?.contains(el)) return null;
+    const block = el.closest?.('.dv-docx-para')
+      || el.closest?.('p, h1, h2, h3, h4, h5, h6, li');
+    if (!block || !host.contains(block) || !block.textContent.trim()) return null;
+    if (!block.classList.contains('dv-docx-para')) {
+      block.classList.add('dv-docx-para');
+      // Index after everything already tagged, so ordering stays sane for
+      // shift-click ranges even when blocks get tagged out of order.
+      if (block.dataset.paraIndex == null) {
+        const used = Array.from(host.querySelectorAll('[data-para-index]'))
+          .map((n) => Number(n.dataset.paraIndex))
+          .filter((n) => Number.isFinite(n));
+        block.dataset.paraIndex = String(used.length ? Math.max(...used) + 1 : 0);
+      }
+    }
+    return block;
+  }, []);
+
+  const syncParas = useCallback(() => {
+    setParas(
+      paraNodes()
+        .filter((el) => el.classList.contains('is-selected'))
+        .map((el) => ({ index: Number(el.dataset.paraIndex), text: el.textContent.trim() }))
+        .sort((a, b) => a.index - b.index),
+    );
+  }, [paraNodes]);
+
+  const syncEdits = useCallback(() => {
+    const list = [];
+    paraNodes().forEach((el) => {
+      const before = el.dataset.originalText;
+      if (before == null) return;
+      const after = serializeParagraphMarkdown(el);
+      const changed = after !== el.dataset.originalMd;
+      el.classList.toggle('is-edited', changed);
+      if (changed) list.push({ index: Number(el.dataset.paraIndex), before, after });
+    });
+    setEdits(list);
+  }, [paraNodes]);
+
+  const applyEditable = useCallback(() => {
+    paraNodes().forEach((el) => {
+      const picked = el.classList.contains('is-selected');
+      if (!picked) { el.removeAttribute('contenteditable'); return; }
+      if (el.getAttribute('contenteditable') === 'true') return;
+      // Remember the paragraph exactly as the AI wrote it: the HTML is what
+      // Revert restores (so undo keeps the rich text), the markdown is what a
+      // save is diffed against.
+      if (el.dataset.originalText == null) {
+        el.dataset.originalText = el.textContent.trim();
+        el.dataset.originalHtml = el.innerHTML;
+        el.dataset.originalMd = serializeParagraphMarkdown(el);
+      }
+      el.setAttribute('contenteditable', 'true');
+      el.setAttribute('spellcheck', 'true');
+    });
+  }, [paraNodes]);
+
+  const clearParas = useCallback(() => {
+    paraNodes().forEach((el) => {
+      el.classList.remove('is-selected');
+      el.removeAttribute('contenteditable');
+    });
+    // The blank the fields panel had marked is marked no longer: dropping the
+    // pick closes that panel, so the ring it left on the span in the document
+    // would otherwise sit there with nothing pointing at it.
+    hostRef.current?.querySelectorAll('.dv-field.is-active, .dv-field.is-flash')
+      .forEach((el) => el.classList.remove('is-active', 'is-flash'));
+    lastParaRef.current = null;
+    setParas([]);
+  }, [paraNodes]);
+
+  // Commit the manual edits: the advisor patches them into the active version's
+  // source, rebuilds the file, and drops a version card in the thread. The
+  // preview re-reads from disk once the file lands, which resets the edit state.
+  const saveEdits = useCallback(async () => {
+    if (!adv?.applyManualEdit || !edits.length || saveState === 'saving') return;
+    setSaveState('saving');
+    const res = await adv.applyManualEdit(edits);
+    if (res?.ok) { setSaveState(null); return; }
+    setSaveState(
+      res?.error === 'no_version'
+        ? 'Nothing to save into — the AI hasn’t written a version of this document yet.'
+        : res?.error === 'not_found'
+          ? 'Couldn’t place that paragraph back in the document source.'
+          : 'Couldn’t save the edit.',
+    );
+    window.setTimeout(() => setSaveState((v) => (v === 'saving' ? v : null)), 5000);
+  }, [adv, edits, saveState]);
+  // Enter-to-save is bound inside a DOM listener that must not be re-registered
+  // on every keystroke, so it reads the latest handler through a ref.
+  const saveRef = useRef(saveEdits);
+  useEffect(() => { saveRef.current = saveEdits; }, [saveEdits]);
+
+  // Same reason: the registered API is built once and must reach the latest
+  // handler without being rebuilt on every render.
+  // What the blanks read before a party preview started, so leaving the chip
+  // puts them back. Null when no preview is running.
+  // ── Trimming what doesn't apply ───────────────────────────────────
+  // A house has no block, stair, floor or flat. Those blanks are not gaps
+  // left empty — they are clauses the document should not be carrying at
+  // all, so each one goes together with the words that introduce it and the
+  // comma that separates it: ", bl. [...]" disappears whole, leaving
+  // "…nr. 12, București" rather than "…nr. 12, bl. , sc. , București".
+  const dropFieldsIn = useCallback((ids, { silent } = {}) => {
+    const host = hostRef.current;
+    if (!host || !ids?.length) return;
+    // Back to front, so each deletion leaves the offsets before it valid.
+    const spans = ids
+      .map((id) => host.querySelector(`[data-dvfield="${id}"]`))
+      .filter(Boolean)
+      .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1))
+      .reverse();
+    for (const span of spans) {
+      const block = span.closest('.dv-docx-para') || span.parentElement;
+      if (!block) continue;
+      // Every text node in the block, including the spans' own, so an
+      // offset in the joined text maps back to a (node, offset) pair.
+      const segs = [];
+      let joined = '';
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      let n = walker.nextNode();
+      let spanStart = -1;
+      while (n) {
+        if (spanStart < 0 && span.contains(n)) spanStart = joined.length;
+        segs.push({ node: n, start: joined.length, end: joined.length + n.nodeValue.length });
+        joined += n.nodeValue;
+        n = walker.nextNode();
+      }
+      if (spanStart < 0) continue;
+      const spanEnd = spanStart + span.textContent.length;
+      const before = joined.slice(0, spanStart);
+      // Cut from the separator that introduced this clause — or, with none,
+      // from the start of the label immediately before the gap.
+      const cut = Math.max(before.lastIndexOf(','), before.lastIndexOf(';'));
+      const from = cut >= 0 ? cut : spanStart;
+      const at = (pos) => {
+        for (const sg of segs) if (pos >= sg.start && pos <= sg.end) return { node: sg.node, offset: pos - sg.start };
+        return null;
+      };
+      const a = at(from);
+      const b = at(spanEnd);
+      if (!a || !b) continue;
+      try {
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        range.setEnd(b.node, b.offset);
+        range.deleteContents();
+      } catch { /* one clause left in place is better than a broken paragraph */ }
+      // deleteContents empties the marker but leaves the element behind.
+      if (!span.textContent) span.remove();
+    }
+    try { host.normalize(); } catch { /* detached */ }
+    if (!silent) syncEdits();
+  }, [syncEdits]);
+  // Resolve the clause's gendered forms for this party — "domiciliat(ă)"
+  // and "Domnul/Doamna" have one right answer once you know who it is.
+  // Applied per TEXT NODE, and never inside a marker span, so the values
+  // just filled in are untouched.
+  // Rewrite the picked paragraph's PROSE — never a marker span's contents, which
+  // hold the values just filled in. `transform` gets one text node's string and
+  // returns what it should say.
+  const rewritePickedText = useCallback((transform, { silent } = {}) => {
+    const host = hostRef.current;
+    if (!host || !transform) return;
+    host.querySelectorAll('.dv-docx-para.is-selected').forEach((block) => {
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => (n.parentElement?.closest('.dv-field')
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      });
+      const nodes = [];
+      let n = walker.nextNode();
+      while (n) { nodes.push(n); n = walker.nextNode(); }
+      for (const node of nodes) {
+        const next = transform(node.nodeValue);
+        if (next !== node.nodeValue) node.nodeValue = next;
+      }
+    });
+    if (!silent) syncEdits();
+  }, [syncEdits]);
+
+  const applyGenderIn = useCallback((gender, opts) => {
+    if (!gender) return;
+    rewritePickedText((t) => applyGenderToText(t, gender), opts);
+  }, [rewritePickedText]);
+
+  // "județul/sectorul" — only București has sectors, so once the party's city is
+  // known one half of that formula is not redundant but wrong.
+  const applyLocalityIn = useCallback((hasSectors, opts) => {
+    if (hasSectors == null) return;
+    rewritePickedText((t) => applyLocalityToText(t, hasSectors), opts);
+  }, [rewritePickedText]);
+
+  const previewSnapRef = useRef(null);
+  const clearParasRef = useRef(clearParas);
+  useEffect(() => { clearParasRef.current = clearParas; }, [clearParas]);
+
+  // ── "Complete data" ────────────────────────────────────────────────────
+  // While the mode is on, every blank in the rendered document is wrapped in a
+  // marker span and reported to the side panel, which is where values are
+  // chosen. Filling one rewrites that span in place, so the change flows into
+  // the ordinary edit tracking and saves as a new version like any other edit.
+  const publishFields = adv?.publishFields;
+  const registerFieldsApi = adv?.registerFieldsApi;
+  const ensureFieldSuggestions = adv?.ensureFieldSuggestions;
+  const setCompleting = adv?.setCompleting;
+
+  // Fingerprint of the document AS RENDERED, computed once per render and
+  // reused. It must not follow the text as blanks get filled in — otherwise
+  // typing an answer would look like a different document and throw away the
+  // suggestions already paid for.
+  const docSigRef = useRef({ tick: -1, sig: '' });
+  const documentSignature = useCallback(() => {
+    if (docSigRef.current.tick === renderTick) return docSigRef.current.sig;
+    const sig = docSignature((hostRef.current?.innerText || '').trim());
+    docSigRef.current = { tick: renderTick, sig };
+    return sig;
+  }, [renderTick]);
+
+  // Hover, both directions. Pointing at a marked gap tells the fields panel
+  // which card to light; the panel pointing at a card comes back as
+  // `hoverField` and lights the gap. One state, two publishers, so the pair can
+  // never disagree about what is lit.
+  const setHoverField = adv?.setHoverField;
+  const hoverField = adv?.hoverField || null;
   useEffect(() => {
-    if (!canTarget) return undefined;
+    const host = hostRef.current;
+    if (!host || !setHoverField) return undefined;
+    const idAt = (node) => (node?.nodeType === 1 ? node : node?.parentElement)
+      ?.closest?.('.dv-field')?.dataset?.dvfield || null;
+    // `mouseover`/`mouseout` bubble (unlike enter/leave), so one pair of
+    // listeners on the host covers every gap, including ones added by a
+    // re-render.
+    const onOver = (e) => { const id = idAt(e.target); if (id) setHoverField(id); };
+    const onOut = (e) => {
+      // Ignore moves WITHIN one gap (between its own text nodes) — only a move
+      // that actually leaves it counts.
+      if (idAt(e.target) && idAt(e.relatedTarget) === idAt(e.target)) return;
+      if (idAt(e.target)) setHoverField(null);
+    };
+    host.addEventListener('mouseover', onOver);
+    host.addEventListener('mouseout', onOut);
+    return () => {
+      host.removeEventListener('mouseover', onOver);
+      host.removeEventListener('mouseout', onOut);
+    };
+  }, [setHoverField, renderTick]);
+  // Paint whatever is hovered, from whichever side it was hovered on.
+  useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
-    const readSelection = () => {
+    const el = hoverField ? host.querySelector(`[data-dvfield="${hoverField}"]`) : null;
+    host.querySelectorAll('.dv-field.is-active').forEach((n) => {
+      if (n !== el) n.classList.remove('is-active');
+    });
+    if (!el) return undefined;
+    el.classList.add('is-active');
+    return () => el.classList.remove('is-active');
+  }, [hoverField, renderTick]);
+
+  // Tell the side panel whether anything is picked — that is what makes the
+  // "Selected paragraph" tab exist, and where its controls end up.
+  const setParaPicked = adv?.setParaPicked;
+  const setParaTextOut = adv?.setParaText;
+  const setParaKeyOut = adv?.setParaKey;
+  const paraSlot = adv?.paraSlot || null;
+  const hasPick = paras.length > 0 || edits.length > 0;
+  const pickedText = paras.map((pp) => pp.text).join('\n\n');
+  // Document-order indices identify the pick. They survive a re-render and a
+  // new version of the file (which re-paginates but keeps the structure), so a
+  // paragraph's conversation is still there after you save a change to it.
+  const pickedKey = paras.map((pp) => pp.index).join(',');
+  useEffect(() => { setParaPicked?.(hasPick); }, [hasPick, setParaPicked]);
+  // What the composer aims at while a paragraph's thread is open.
+  useEffect(() => { setParaTextOut?.(pickedText); }, [pickedText, setParaTextOut]);
+  // Which thread that is.
+  useEffect(() => { setParaKeyOut?.(pickedKey); }, [pickedKey, setParaKeyOut]);
+  // Leaving the fill-in menu saves. There is no Save button any more: filling
+  // the blanks IS the task, and finishing a task shouldn't need a second
+  // gesture to keep it. "Left" means the pick moved to another paragraph or was
+  // dropped — closing the panel, pressing Escape and clicking the page margin
+  // all do the latter, so one watcher covers every exit.
+  //
+  // saveEdits no-ops when there is nothing changed and refuses to re-enter
+  // while a save is in flight, so the reload it triggers can't loop back here.
+  const lastPickRef = useRef('');
+  useEffect(() => {
+    const was = lastPickRef.current;
+    lastPickRef.current = pickedKey;
+    if (was && was !== pickedKey) saveRef.current?.();
+  }, [pickedKey]);
+  useEffect(() => () => { setParaKeyOut?.(''); setParaTextOut?.(''); }, [setParaKeyOut, setParaTextOut]);
+  // Leaving the document (a new file, a version switch) takes the tab with it —
+  // otherwise it would outlive the pick it was showing.
+  useEffect(() => () => setParaPicked?.(false), [setParaPicked]);
+
+  // ── Blanks ─────────────────────────────────────────────────────────────
+  // Every blank in the document is marked up as soon as it renders, so you can
+  // SEE which paragraphs still have something to fill in without having to ask.
+  // That marking is the affordance: pick a paragraph that carries one and its
+  // fields appear in the side panel.
+  //
+  // The suggestions are warmed for the WHOLE document in one call, even though
+  // the panel only ever lists one paragraph's worth. Asking per paragraph would
+  // mean re-reading the project folder and paying for a round trip on every
+  // click; asking once covers every paragraph you will visit.
+  const allFieldsRef = useRef([]);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !publishFields) return undefined;
+    let cancelled = false;
+    // After the render settles, so the walk sees the paginated DOM.
+    const id = window.setTimeout(() => {
+      if (cancelled) return;
+      const sig = documentSignature();
+      const found = scanDocFields(host);
+      allFieldsRef.current = found;
+      publishFields([], sig, found);
+      if (found.length) ensureFieldSuggestions?.(found, (host.innerText || '').trim(), sig);
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(id); };
+  }, [renderTick, publishFields, ensureFieldSuggestions, documentSignature]);
+
+  // The markup belongs to one rendered document: drop it when a new version
+  // replaces it, and when the pane goes away.
+  useEffect(() => {
+    const host = hostRef.current;
+    return () => { if (host) clearDocFields(host); };
+  }, [renderTick]);
+
+  // What the side panel lists: the blanks in the paragraphs you have picked,
+  // never the whole document. Picking a paragraph with no blanks in it leaves
+  // the panel closed — a click on ordinary prose should not throw the layout
+  // around.
+  useEffect(() => {
+    if (!publishFields) return;
+    const picked = new Set(paras.map((pp) => pp.index));
+    const list = picked.size
+      ? allFieldsRef.current.filter((f) => f.paraIndex != null && picked.has(f.paraIndex))
+      : [];
+    publishFields(list, documentSignature());
+    setCompleting?.(list.length > 0);
+  }, [paras, publishFields, setCompleting, documentSignature]);
+
+  // The panel drives the document through this — it has no access to the DOM
+  // docx-preview renders.
+  useEffect(() => {
+    if (!registerFieldsApi) return undefined;
+    const api = {
+      // Write a value into one blank (an empty value restores the placeholder),
+      // then let the edit tracking notice the paragraph changed.
+      setValue: (id, v) => {
+        const el = hostRef.current?.querySelector(`[data-dvfield="${id}"]`);
+        if (!el) return;
+        const value = (v || '').trim();
+        el.textContent = value || el.dataset.dvfieldRaw || '';
+        el.classList.toggle('is-filled', !!value);
+        syncEdits();
+      },
+      // Go to one blank: scroll it into view and flash it once. Only the CLICK
+      // path calls this — what marks a blank while you merely point at its card
+      // is `hoverField`, which paints and unpaints on its own and doesn't move
+      // the page.
+      focus: (id) => {
+        const host = hostRef.current;
+        if (!host) return;
+        const el = id ? host.querySelector(`[data-dvfield="${id}"]`) : null;
+        if (!el) return;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.classList.remove('is-flash');
+        // Reflow between the two writes, or the class never leaves the frame
+        // and the animation doesn't restart on a repeat click.
+        void el.offsetWidth;
+        el.classList.add('is-flash');
+        window.setTimeout(() => el.classList.remove('is-flash'), 1200);
+      },
+      dropFields: (ids) => dropFieldsIn(ids),
+      applyGender: (gender) => applyGenderIn(gender),
+      applyLocality: (hasSectors) => applyLocalityIn(hasSectors),
+      // ── Previewing ─────────────────────────────────────────────────────
+      // Hovering a suggestion, or a party chip, writes the outcome into the
+      // document so it can be READ IN PLACE — that is the whole question when
+      // choosing between two values or two parties: how does the clause come
+      // out. So a preview runs the FULL commit, not just the values: the
+      // block/flat lines a house address removes, and the agreement a gender
+      // settles, are exactly the parts you cannot picture from a side panel.
+      //
+      // The undo is a snapshot of each picked paragraph's markup, taken the
+      // first time a preview starts and put back verbatim when it ends. Field
+      // text alone would not do it — dropping a clause deletes nodes, and
+      // nothing short of the original markup brings those back.
+      //
+      // Nothing here is committed: the edit tracking is not run (`silent`), so
+      // a preview can never turn into a saved version on its own.
+      previewValues: (map, opts = {}) => {
+        const host = hostRef.current;
+        if (!host) return;
+        if (!previewSnapRef.current) {
+          previewSnapRef.current = Array.from(host.querySelectorAll('.dv-docx-para.is-selected'))
+            .map((el) => ({ el, html: el.innerHTML }));
+        }
+        Object.entries(map || {}).forEach(([id, v]) => {
+          const el = host.querySelector(`[data-dvfield="${id}"]`);
+          if (!el || !v) return;
+          el.textContent = v;
+          el.classList.add('is-preview');
+        });
+        if (opts.drop?.length) dropFieldsIn(opts.drop, { silent: true });
+        if (opts.gender) applyGenderIn(opts.gender, { silent: true });
+        if (opts.hasSectors != null) applyLocalityIn(opts.hasSectors, { silent: true });
+      },
+      // commit=true drops the snapshot without restoring: the click that
+      // committed this has already written it for real, and putting the
+      // paragraph back as it was would undo it.
+      endPreview: (commit) => {
+        const snap = previewSnapRef.current;
+        previewSnapRef.current = null;
+        if (!commit && snap) {
+          for (const { el, html } of snap) {
+            if (el.isConnected && el.innerHTML !== html) el.innerHTML = html;
+          }
+        }
+        hostRef.current?.querySelectorAll('.dv-field.is-preview')
+          .forEach((el) => el.classList.remove('is-preview'));
+      },
+      // Save every filled blank as a new version, through the same path the
+      // paragraph editor uses.
+      apply: () => saveRef.current?.(),
+      // Drop the pick, which is what closes the panel.
+      clearPick: () => clearParasRef.current?.(),
+      // The document as it currently reads — what the AI is asked to suggest
+      // values from.
+      documentText: () => (hostRef.current?.innerText || '').trim(),
+    };
+    registerFieldsApi(api);
+    return () => registerFieldsApi(null);
+  }, [registerFieldsApi, syncEdits, dropFieldsIn, applyGenderIn, applyLocalityIn]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+
+    const onClick = (e) => {
+      const para = blockAt(e.target);
+      // A click that lands with text still highlighted is the tail of a drag-
+      // select, not a paragraph pick — that's the selection gesture, handled on
+      // mouseup below.
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.rangeCount) { setSelTip(null); return; }
-      const range = sel.getRangeAt(0);
-      if (!host.contains(range.commonAncestorContainer)) { setSelTip(null); return; }
-      const text = sel.toString().trim();
-      if (text.length < 2) { setSelTip(null); return; }
-      const rect = range.getBoundingClientRect();
-      if (!rect || (!rect.width && !rect.height)) { setSelTip(null); return; }
-      setSelTip({ text, x: rect.left + rect.width / 2, y: rect.top });
+      if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+      if (!para) { clearParas(); return; } // clicking the page margin drops the pick
+      // Already editable: a PLAIN click is the user aiming the caret inside
+      // their own text — toggling here would deselect it mid-sentence. Modifier
+      // clicks still mean "change the pick".
+      const plainClick = !e.shiftKey && !e.metaKey && !e.ctrlKey;
+      if (plainClick && para.getAttribute('contenteditable') === 'true') return;
+        const index = Number(para.dataset.paraIndex);
+      const nodes = paraNodes();
+      if (e.shiftKey && lastParaRef.current != null) {
+        const [lo, hi] = [lastParaRef.current, index].sort((a, b) => a - b);
+        nodes.forEach((el) => {
+          const i = Number(el.dataset.paraIndex);
+          if (i >= lo && i <= hi) el.classList.add('is-selected');
+        });
+      } else if (e.metaKey || e.ctrlKey) {
+        para.classList.toggle('is-selected');
+        lastParaRef.current = index;
+      } else {
+        const wasOnlyPick = para.classList.contains('is-selected')
+          && nodes.filter((el) => el.classList.contains('is-selected')).length === 1;
+        nodes.forEach((el) => el.classList.remove('is-selected'));
+        if (!wasOnlyPick) { para.classList.add('is-selected'); lastParaRef.current = index; }
+        else lastParaRef.current = null;
+      }
+      syncParas();
+      applyEditable();
+        // Drop the caret exactly where the click landed, so picking a paragraph
+      // and typing behaves like clicking into an input rather than dumping the
+      // caret at the start of the block.
+      if (para.getAttribute('contenteditable') === 'true') {
+        para.focus({ preventScroll: true });
+        const range = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+        if (range) {
+          const sel2 = window.getSelection();
+          sel2?.removeAllRanges();
+          sel2?.addRange(range);
+        }
+      }
     };
-    // Defer so the browser has finalized the selection before we read it.
-    const onUp = () => window.setTimeout(readSelection, 0);
-    const onDown = (e) => { if (!e.target.closest?.('.dv-docx-seltip')) setSelTip(null); };
-    const onScroll = () => setSelTip(null);
-    document.addEventListener('mouseup', onUp);
-    document.addEventListener('mousedown', onDown);
-    window.addEventListener('scroll', onScroll, true);
+
+    // Shift-click natively *extends the text selection*, which would leave a
+    // non-collapsed selection and make the click above bail out — so suppress
+    // the native gesture and let it mean "extend the paragraph range" instead.
+    // Any other press clears the previous range wrapper before a new drag.
+    // Shift-click natively EXTENDS the text selection, which would leave a
+    // non-collapsed selection and make the click handler bail out — suppress the
+    // native gesture so it means "extend the paragraph range" instead.
+    const onDown = (e) => {
+      if (e.shiftKey && blockAt(e.target)) {
+        e.preventDefault();
+        window.getSelection()?.removeAllRanges();
+      }
+    };
+
+    const onInput = () => { syncEdits(); syncParas(); };
+
+    // Rich paste would drop foreign markup (and foreign fonts) into a paragraph
+    // whose formatting we re-read from computed style — paste the text only.
+    const onPaste = (e) => {
+      if (!e.target.closest?.('[contenteditable]')) return;
+      e.preventDefault();
+      const text = e.clipboardData?.getData('text/plain') || '';
+      if (text) document.execCommand('insertText', false, text.replace(/\s*\n\s*/g, ' '));
+    };
+
+    const onEditKey = (e) => {
+      if (!e.target.closest?.('[contenteditable]')) return;
+      // Enter commits the edits (Shift+Enter is left alone for a soft break —
+      // a paragraph is one block, so it's suppressed too).
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (!e.shiftKey) saveRef.current?.();
+      }
+    };
+
+    const onKey = (e) => { if (e.key === 'Escape') clearParas(); };
+
+    host.addEventListener('mousedown', onDown);
+    host.addEventListener('click', onClick);
+    host.addEventListener('input', onInput);
+    host.addEventListener('paste', onPaste);
+    host.addEventListener('keydown', onEditKey);
+    window.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mouseup', onUp);
-      document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('scroll', onScroll, true);
+      host.removeEventListener('mousedown', onDown);
+      host.removeEventListener('click', onClick);
+      host.removeEventListener('input', onInput);
+      host.removeEventListener('paste', onPaste);
+      host.removeEventListener('keydown', onEditKey);
+      window.removeEventListener('keydown', onKey);
     };
-  }, [canTarget]);
-  const targetSelection = useCallback(() => {
-    if (!selTip) return;
-    adv?.addSelection?.(selTip.text);
-    setSelTip(null);
-    window.getSelection()?.removeAllRanges();
-  }, [adv, selTip]);
+  }, [applyEditable, blockAt, clearParas, paraNodes, syncEdits, syncParas]);
+
+  // What the bar acts on: the selected words if there are any, else the whole
+  // picked paragraph(s).
+  // One place, chosen per render: the panel's slot when its tab is open, the
+  // page otherwise.
+  const renderParaBar = useCallback(
+    (node) => (paraSlot ? createPortal(node, paraSlot) : node),
+    [paraSlot],
+  );
+
+  const targetText = pickedText;
+
+  // Send the bar's prompt to the AI advisor with the picked passage attached, so
+  // "make this shorter" means this paragraph, not the whole document.
+  // Sending hands the passage off to the advisor, so the pick has done its job:
+  // drop it (and the bar with it) and let the answer arrive in the thread. An
+  // unsaved edit keeps the bar up on its own — the Save button must not vanish
+  // out from under work that hasn't landed in a version yet.
+  const askAi = useCallback(() => {
+    const q = prompt.trim();
+    if (!q || !adv?.send || adv.busy) return;
+    adv.send(q, targetText);
+    setPrompt('');
+    clearParas();
+  }, [adv, prompt, targetText, clearParas]);
 
   // Scale the page stack down to fit the pane width (Word's "fit to width"), so
   // an 8.5"/A4 sheet is readable without horizontal scrolling on a narrow pane.
@@ -7507,9 +9193,20 @@ function DocxRenderPane({ url, onExportPdf }) {
     const host = hostRef.current;
     if (!host) return undefined;
     pageWidthRef.current = 0;
+    let retryTimer = null;
     (async () => {
       try {
-        const blob = await (await fetch(url, { cache: 'no-store' })).blob();
+        const resp = await fetch(url, { cache: 'no-store' });
+        // A localfile:// read can be REFUSED (403 — the file sits outside the
+        // folders the app has opened) or the file can be gone (404). Without
+        // this check the error page's BODY was handed to docx-preview, which
+        // then failed with a generic "not a zip" — the wrong story to tell.
+        if (!resp.ok) throw new Error(`http_${resp.status}`);
+        const blob = await resp.blob();
+        // A zero-byte file is a document that hasn't finished being written (or
+        // a failed build). Distinguished from corruption because it's the one
+        // case worth retrying.
+        if (!blob.size) throw new Error('empty');
         const { renderAsync } = await import('docx-preview');
         if (cancelled) return;
         host.innerHTML = '';
@@ -7527,14 +9224,60 @@ function DocxRenderPane({ url, onExportPdf }) {
         // Wait for fonts so block heights are final before we slice into pages.
         try { await document.fonts.ready; } catch { /* ignore */ }
         if (cancelled) return;
-        pageWidthRef.current = paginateDocx(host);
+        // Pagination is presentation, not content: if it throws, the document
+        // is already rendered as a continuous flow, and keeping that beats
+        // replacing a readable document with an error screen.
+        try {
+          pageWidthRef.current = paginateDocx(host);
+        } catch (err) {
+          console.error('[doc-viewer] could not paginate the document', err);
+        }
+        lastParaRef.current = null;
+        setParas([]);
+        // Fresh DOM: any unsaved edit belonged to the previous render (and a
+        // SAVED one is already baked into the file we just re-read).
+        setEdits([]);
+        setSaveState(null);
+        setRenderErr(null);
+        attemptRef.current = { url, n: 0 };
         fitWidth();
-      } catch {
-        if (!cancelled && host) host.innerHTML = `<p class="dv-docx-error">Couldn't display the document.</p>`;
+        // Tells the "Complete data" scan that there is fresh DOM to look at —
+        // every new version replaces the whole document, blanks included.
+        setRenderTick((t) => t + 1);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('[doc-viewer] could not render the document', err);
+        const code = String(err?.message || '');
+        // A file read while it was still being written renders fine a moment
+        // later — the AI writes a new version and the watcher relists in the
+        // same breath — so a transient failure gets two quick retries before
+        // the pane gives up and says so.
+        const a = attemptRef.current;
+        if (a.url !== url) { a.url = url; a.n = 0; }
+        const transient = code === 'empty' || code === 'http_404' || code.startsWith('http_5');
+        if (transient && a.n < 2) {
+          a.n += 1;
+          retryTimer = window.setTimeout(() => setReloadKey((k) => k + 1), 400 * a.n);
+          return;
+        }
+        if (host) host.innerHTML = '';
+        setRenderErr(
+          code === 'http_403'
+            ? { title: 'This file can’t be read from here',
+                detail: 'It sits outside the folders DocVex has open. Open its folder in the Files tab, or open it in Word.' }
+            : code === 'http_404'
+              ? { title: 'This file is no longer on disk',
+                  detail: 'It was moved or deleted after this tab was opened.' }
+              : code === 'empty'
+                ? { title: 'This document is empty',
+                    detail: 'The file has no contents yet — if the AI is still building it, this will fill in on its own.' }
+                : { title: 'Couldn’t display this document',
+                    detail: 'It may not be a valid Word file, or it may be damaged. It still opens in Word.' },
+        );
       }
     })();
-    return () => { cancelled = true; };
-  }, [url, fitWidth]);
+    return () => { cancelled = true; if (retryTimer) window.clearTimeout(retryTimer); };
+  }, [url, fitWidth, reloadKey]);
 
   // Re-fit on pane resize.
   useEffect(() => {
@@ -7547,46 +9290,1459 @@ function DocxRenderPane({ url, onExportPdf }) {
 
   return (
     <div className="dv-docview">
-      <div className="dv-docview-topbar">
-        <ReconPill />
-      </div>
       <div className="dv-docview-body">
-        <div ref={hostRef} className={`dv-docx${showPageNumbers ? ' show-pagenums' : ''}`} />
-      </div>
-      {/* Floating "hand this passage to the AI" button, anchored above the
-          current text selection (viewport-fixed; dismissed on scroll / click). */}
-      {selTip && (
-        <button
-          type="button"
-          className="dv-docx-seltip"
-          style={{ position: 'fixed', left: `${selTip.x}px`, top: `${selTip.y}px` }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={targetSelection}
-        >
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 3v4M12 3 9 6M12 3l3 3" /><rect x="4" y="9" width="16" height="11" rx="2" /><path d="M8 13h8M8 16.5h5" />
-          </svg>
-          Edit this with AI
-        </button>
-      )}
-      {/* Page-numbers toggle + Convert-to-PDF docked at the bottom of the pane. */}
-      <div className="dv-docview-toolbar dv-docview-toolbar--foot">
-        <button
-          type="button"
-          className={`dv-docview-pgtoggle${showPageNumbers ? ' is-active' : ''}`}
-          onClick={() => setShowPageNumbers((v) => !v)}
-          aria-pressed={showPageNumbers}
-        >
-          <span className="dv-pgtoggle-hash" aria-hidden="true">#</span>
-          Page numbers
-        </button>
-        {onExportPdf && (
-          <>
-            <div className="dv-docview-spacer" />
-            <ExportPdfButton getRoot={() => hostRef.current} kind="docx" onExport={onExportPdf} />
-          </>
+        <div
+          ref={hostRef}
+          className={`dv-docx${showPageNumbers ? ' show-pagenums' : ''}${paras.length ? ' has-pick' : ''}`}
+        />
+        {/* The host stays mounted (the render effect needs its ref) — it is just
+            empty behind this. */}
+        {renderErr && (
+          <div className="dv-docx-error" role="alert">
+            <p className="dv-docx-error-title">{renderErr.title}</p>
+            <p className="dv-docx-error-sub">{renderErr.detail}</p>
+            <div className="dv-docx-error-actions">
+              <button type="button" className="dv-chip" onClick={retryRender}>Try again</button>
+              {onOpenNative && (
+                <button type="button" className="dv-chip" onClick={onOpenNative}>Open in Word</button>
+              )}
+            </div>
+          </div>
         )}
       </div>
+      {/* What's left of the pick's action bar: saving the edits you typed into
+          the paragraph, and — only while it FLOATS over the page — a prompt
+          field. Docked in the Paragraph sub-tab it renders nothing but Save,
+          because that tab already has the advisor's composer under it and the
+          document's own footer is the one place to type.
+
+          Undo / Copy / Clear are gone: the paragraph is a normal contenteditable
+          (so ⌘Z and ⌘C are the system's), and the pick is dropped by pressing
+          Escape or clicking the page margin. Rendered only when it would hold
+          something, so an untouched pick doesn't leave an empty box above the
+          thread. */}
+      {hasPick && adv?.send && !paraSlot && renderParaBar(
+        <div className={`dv-docx-parabar${paraSlot ? ' is-docked' : ''}`} role="group" aria-label="Selected text actions">
+          {/* Prompt the AI about exactly this passage. Only while the bar is
+              FLOATING — docked in the panel it sits directly above the shared
+              composer, and two inputs for one job is one too many. */}
+          {adv?.send && !paraSlot && (
+            <span className="dv-docx-parabar-ask">
+              <input
+                type="text"
+                className="dv-docx-parabar-input"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); askAi(); }
+                  e.stopPropagation(); // Escape here shouldn't drop the pick
+                }}
+                placeholder="Ask the AI to change this paragraph…"
+                aria-label="Ask the AI about the selection"
+                disabled={adv?.busy}
+              />
+              <Tooltip content="Send to the AI advisor">
+                <button
+                  type="button"
+                  className="dv-docx-parabar-send"
+                  onClick={askAi}
+                  disabled={!prompt.trim() || adv?.busy}
+                  aria-label="Send"
+                >
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </button>
+              </Tooltip>
+            </span>
+          )}
+
+        </div>,
+      )}
+      {/* Why a save didn't go through — sits under the bar rather than as a
+          toast, because it's about the paragraph you're looking at, so it
+          follows the bar into the panel. */}
+      {saveState && saveState !== 'saving' && renderParaBar(
+        <div className={`dv-docx-parabar-err${paraSlot ? ' is-docked' : ''}`} role="alert">{saveState}</div>,
+      )}
+      {/* Page-numbers toggle, Complete data + Convert-to-PDF docked at the
+          bottom of the pane. */}
+      {/* Whole-document actions — page numbers, Open in Word, Convert to PDF.
+          They go away while a paragraph is picked: none of them is about the
+          paragraph, and offering "convert the whole file to PDF" next to a
+          passage you are mid-edit on is an invitation to lose the edit. They
+          come back the moment the pick is dropped. */}
+      {!hasPick && (
+        <div className="dv-docview-toolbar dv-docview-toolbar--foot">
+          <button
+            type="button"
+            className={`dv-docview-pgtoggle${showPageNumbers ? ' is-active' : ''}`}
+            onClick={() => setShowPageNumbers((v) => !v)}
+            aria-pressed={showPageNumbers}
+          >
+            <span className="dv-pgtoggle-hash" aria-hidden="true">#</span>
+            Page numbers
+          </button>
+          {onExportPdf && (
+            <>
+              <div className="dv-docview-spacer" />
+              <OpenNativeButton onOpen={onOpenNative} kind="docx" />
+              <ExportPdfButton getRoot={() => hostRef.current} kind="docx" onExport={onExportPdf} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Above this, a document is assumed to have content: extracting text from it
+// just to find out would cost more than the answer is worth, and a file this
+// size is not one that was created empty a moment ago.
+const BLANK_PROBE_MAX_BYTES = 256 * 1024;
+
+// ── "What do you want to make?" ─────────────────────────────────────────
+// A brand-new document opens HERE, not on an empty page beside an advisor
+// waiting to be told something. Neither the preview nor the side panel is
+// mounted yet: there is nothing to preview and nothing to discuss until the
+// document is something.
+//
+// Picking a template hands the drafter a ready-made outline (see
+// lib/docTemplates) instead of asking it to invent one — the reason templates
+// exist at all is that the structure ships with the app rather than being paid
+// for in tokens on every draft. "Something else" is the same door with the
+// description typed instead of picked.
+function DocTemplateChooser({ onChosen }) {
+  const adv = useMultitoolAdvisor();
+  const [custom, setCustom] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // `shown` is what goes in the thread, `prompt` is what the model reads.
+  const start = useCallback((shown, prompt) => {
+    if (!prompt || busy) return;
+    setBusy(true);
+    // The layout swaps to the document + advisor immediately, and the first
+    // turn is already in flight behind it — the thread should be alive when
+    // it appears, not empty and waiting.
+    onChosen?.();
+    adv?.send?.(shown, undefined, { apiText: prompt });
+  }, [adv, busy, onChosen]);
+
+  return (
+    <div className="dvt-root">
+      <div className="dvt-inner">
+        <h1 className="dvt-title">What do you want to make?</h1>
+        <p className="dvt-sub">
+          Pick a template and the draft is written from a ready-made structure —
+          or describe anything else.
+        </p>
+
+        <div className="dvt-grid">
+          {DOC_TEMPLATES.map((t) => (
+            <button
+              type="button"
+              key={t.id}
+              className="dvt-card"
+              disabled={busy}
+              onClick={() => start(`Make a ${t.label}.`, templatePrompt(t))}
+            >
+              <span className="dvt-card-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h4" />
+                </svg>
+              </span>
+              <span className="dvt-card-label">{t.label}</span>
+              <span className="dvt-card-blurb">{t.blurb}</span>
+            </button>
+          ))}
+
+          {/* Anything the templates don't cover. Same card shape so it reads as
+              one more choice rather than a fallback. */}
+          <div className={`dvt-card dvt-card-other${busy ? ' is-busy' : ''}`}>
+            <span className="dvt-card-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14" /><path d="M5 12h14" />
+              </svg>
+            </span>
+            <span className="dvt-card-label">Something else</span>
+            <span className="dvt-card-blurb">Describe the document you need.</span>
+            <div className="dvt-other-row">
+              <input
+                className="dvt-other-input"
+                value={custom}
+                disabled={busy}
+                placeholder="A power of attorney for…"
+                onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && custom.trim()) { e.preventDefault(); start(custom.trim(), customPrompt(custom)); }
+                }}
+              />
+              <button
+                type="button"
+                className="dvt-other-go"
+                disabled={busy || !custom.trim()}
+                onClick={() => start(custom.trim(), customPrompt(custom))}
+                aria-label="Start writing this"
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h13" /><path d="M12 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// How long typing has to stop before a record is written. Long enough that a
+// burst of typing is one save, short enough that "Saved" appears while the user
+// is still looking at the field — and, since a name change renames the FILE,
+// long enough not to churn the folder through every prefix of a name.
+const IDENTITY_AUTOSAVE_MS = 900;
+
+// The address parts a clause can ask for, in the order the read-out lists them.
+const ADDRESS_PART_LABELS = [
+  ['addressStreet', 'Str.'],
+  ['addressNumber', 'nr.'],
+  ['addressBlock', 'bl.'],
+  ['addressStair', 'sc.'],
+  ['addressFloor', 'et.'],
+  ['addressApartment', 'ap.'],
+  ['addressLocality', 'loc.'],
+  // The sector has no chip of its own: it belongs to its city, and a sector
+  // without one says almost nothing. `addressLocality` renders the pair — see
+  // the read-out below.
+  ['addressCounty', 'jud.'],
+  ['addressPostalCode', 'cod'],
+];
+
+// ── Autofill picker ─────────────────────────────────────────────────────
+// The project's Files tab, in a modal over the viewer, so a record can be
+// filled from a photograph of the document it came from — an ID card, a
+// passport page, a company certificate.
+//
+// It shows the WHOLE folder rather than just the pictures, because that is what
+// the Files tab shows and hiding half of it would leave the user wondering
+// where their file went. Only an image can actually be read, so everything else
+// is present but dimmed and says why.
+const AUTOFILL_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'heic', 'heif', 'bmp', 'tif', 'tiff', 'gif', 'avif']);
+const extOfName = (name) => String(name || '').slice(String(name || '').lastIndexOf('.') + 1).toLowerCase();
+// Pictures sort first — they are the only ones that can be read.
+const imageRank = (name) => (AUTOFILL_IMAGE_EXTS.has(extOfName(name)) ? 0 : 1);
+// Where the recycle bin lives inside a project folder (see localFolder.js).
+const TRASH_DIR = '.docvex-trash';
+
+// What went wrong, in the user's terms — each with a different thing to do
+// about it. A blanket "try a sharper photo" was wrong for every case but one.
+const AUTOFILL_ERRORS = {
+  no_image: 'That file couldn’t be opened.',
+  decode_failed: 'This picture can’t be opened here — try a JPEG or PNG.',
+  no_text: 'No text was found in that picture. Make sure the document fills the frame and is in focus.',
+  ocr_failed: 'The AI service couldn’t be reached. Check you’re signed in and online.',
+  ai_failed: 'The AI service couldn’t be reached. Check you’re signed in and online.',
+  unreadable: 'The text was read, but nothing in it looked like an identity document.',
+};
+
+// How long the picker's exit animation runs. The unmount waits exactly this
+// long, so the number is shared with the `.is-closing` rules in the stylesheet
+// — change one and change the other.
+const MODAL_EXIT_MS = 180;
+
+// One tile in the picker, rendered exactly as the Files tab renders one:
+// `ItemThumbnail` (the real poster, falling back to the type glyph), the
+// `.fx-tile` shell, and `useMorphPill` for the cursor-following name pill that
+// morphs into a right-click menu. Imported rather than reimplemented — a
+// lookalike would drift from the real thing on the first change to either.
+function AutofillTile({
+  item, disabled, selected, inTrash,
+  onPick, onOpen, onOpenFolder, onShowInFolder, onDelete, onRestore,
+}) {
+  const isFolder = item.kind === 'folder';
+  const readable = item.readable;
+  // The Files tab's own menu for this item, with the picker's reason for
+  // existing put first. Same labels, same order, same danger styling and the
+  // same confirm copy as itemMenuItems in FilesWorkspace.jsx — a menu that
+  // looks like that one but reads differently is worse than no menu.
+  const subject = isFolder ? `“${item.name}” and everything inside it` : `“${item.name}”`;
+  const menuItems = item.binEntry
+    ? [{ label: 'Open', onClick: () => onOpenFolder?.(item) }]
+    : inTrash
+      ? [
+        readable && { key: 'scan', label: 'Select for scan', onClick: () => onPick?.(item) },
+        { key: 'open', label: 'Open', onClick: () => onOpen?.(item) },
+        { key: 'restore', label: 'Restore', onClick: () => onRestore?.(item) },
+        {
+          key: 'delete', label: 'Delete forever', danger: true, onClick: () => onDelete?.(item),
+          confirm: {
+            count: 1,
+            subtitle: 'Permanent · can’t be undone',
+            title: 'Permanently delete this file?',
+            message: `${subject} will be permanently deleted from your computer. This can’t be undone.`,
+            confirmLabel: 'Delete forever',
+            cancelLabel: 'Cancel',
+          },
+        },
+      ]
+      : isFolder
+        ? [
+          { key: 'open', label: 'Open', onClick: () => onOpenFolder?.(item) },
+          { key: 'loc', label: 'Open file location', onClick: () => onShowInFolder?.(item) },
+          {
+            key: 'delete', label: 'Delete folder', danger: true, onClick: () => onDelete?.(item),
+            confirm: {
+              count: 1,
+              subtitle: 'Removed from your computer',
+              title: 'Delete this folder?',
+              message: `${subject} will be deleted from your computer.`,
+              confirmLabel: 'Delete',
+              cancelLabel: 'Cancel',
+            },
+          },
+        ]
+        : [
+          readable
+            ? { key: 'scan', label: 'Select for scan', onClick: () => onPick?.(item) }
+            : {
+              key: 'scan',
+              label: item.ext
+                ? `A ${String(item.ext).toUpperCase()} has no picture to read`
+                : 'Only a picture can be read',
+              disabled: true,
+            },
+          { key: 'open', label: 'Open', onClick: () => onOpen?.(item) },
+          { key: 'loc', label: 'Open file location', onClick: () => onShowInFolder?.(item) },
+          {
+            key: 'delete', label: 'Delete', danger: true, onClick: () => onDelete?.(item),
+            confirm: {
+              count: 1,
+              subtitle: 'Recoverable for 30 days',
+              title: 'Delete this file?',
+              message: `${subject} will be moved to the Trash. It stays recoverable for 30 days.`,
+              confirmLabel: 'Delete',
+              cancelLabel: 'Cancel',
+            },
+          },
+        ];
+  const morph = useMorphPill({
+    // A file that can't be read says so ON HOVER, not only in its right-click
+    // menu — dimming a tile tells you something is off but not what, and "why
+    // can't I click this" should not need a second gesture to answer.
+    hoverContent: (isFolder || readable) ? item.name : (
+      <span className="fx-hover-rich dvi-hover-why">
+        <span className="fx-hover-name">{item.name}</span>
+        <span className="dvi-hover-note">
+          {item.ext ? `${String(item.ext).toUpperCase()} — ` : ''}
+          can’t be scanned — double-click to open it
+        </span>
+      </span>
+    ),
+    menuItems: menuItems.filter(Boolean),
+  });
+  return (
+    <>
+      <button
+        type="button"
+        className={`fx-tile${isFolder ? ' is-folder' : ''}${(item.busy || selected) ? ' is-selected' : ''}${!isFolder && !readable ? ' is-unreadable' : ''}`}
+        aria-pressed={!isFolder && readable ? !!selected : undefined}
+        // One click CHOOSES; the Scan button reads. Reading costs money and a
+        // few seconds, so it should be an act of its own rather than something
+        // a mis-click can start. Double-click OPENS — the gesture means the
+        // same thing here as it does in the Files tab, and checking a picture
+        // is the right thing to be able to do before spending a scan on it.
+        // Every file opens, not only the readable ones: nothing is being asked
+        // of the picture, so nothing about it can be unsuitable.
+        onClick={() => { if (isFolder) onOpenFolder?.(item); else if (readable) onPick?.(item); }}
+        onDoubleClick={() => { if (!isFolder) onOpen?.(item); }}
+        // `disabled` only while ANOTHER tile is being read. An unreadable file
+        // is marked aria-disabled and left enabled on purpose: a disabled
+        // <button> fires no pointer events in Chromium, which would kill the
+        // hover pill — and that pill is the only thing that says WHY the tile
+        // can't be used. The click is a no-op either way.
+        disabled={disabled}
+        aria-disabled={!isFolder && !readable ? true : undefined}
+        onMouseMove={morph.handleMouseMove}
+        onMouseLeave={morph.handleMouseLeave}
+        onContextMenu={(e) => { e.stopPropagation(); morph.handleContextMenu(e); }}
+      >
+        <span className="fx-tile-thumb">
+          {/* The Files tab's own split: folders get the folder glyph (filled
+              when they hold something), files get their thumbnail with the type
+              glyph behind it. `item.glyph` is the one exception — the Trash
+              tile, which is a folder but wears the bin. */}
+          {item.glyph
+            || (isFolder ? <FolderOrBinGlyph item={item} /> : <ItemThumbnail item={item} />)}
+        </span>
+        <span>
+          <span className="fx-tile-name">
+            {item.name}
+            {/* How many are inside, inline beside the label — the Files tab's
+                own treatment for the bin. */}
+            {item.binEntry && item.binCount > 0 && (
+              <span className="fx-bin-count is-inline">{item.binCount}</span>
+            )}
+          </span>
+        </span>
+      </button>
+      {morph.node}
+    </>
+  );
+}
+
+function IdentityAutofillModal({ open, onClose, record, onFilled }) {
+  const { selectedProject } = useSelectedProject();
+  const { session } = useAuth();
+  const [root, setRoot] = useState('');        // the project folder's own path
+  const [cwd, setCwd] = useState('');          // the folder being shown
+  const [hist, setHist] = useState({ stack: [], at: -1 });  // back / forward
+  const [listing, setListing] = useState(null); // { files, dirs } | null while reading
+  const [trash, setTrash] = useState([]);
+  const [inTrash, setInTrash] = useState(false);
+  const [query, setQuery] = useState('');
+  const [busyPath, setBusyPath] = useState(null);
+  // The picture chosen but not yet read: { name, path, blob? }. `blob` is set
+  // only for one imported from the computer, which is never in the grid.
+  const [picked, setPicked] = useState(null);
+  const [note, setNote] = useState(null);      // { tone, text }
+  // Bumped after anything that changes the folder, so the listing and the bin
+  // are re-read. The picker is a live view of the project, not a snapshot.
+  const [tick, setTick] = useState(0);
+  const searchRef = useRef(null);
+  const importRef = useRef(null);
+  const scanRef = useRef(null);
+  // Stay mounted through the exit animation. Closing is a state change, and a
+  // panel that simply vanishes on one reads as a glitch — the eye needs to see
+  // where it went. `open` is already false throughout, so every effect below
+  // has cleaned up and nothing is fetched or listened to on the way out.
+  const [mounted, setMounted] = useState(open);
+  const [exiting, setExiting] = useState(false);
+  useEffect(() => {
+    if (open) { setMounted(true); setExiting(false); return undefined; }
+    if (!mounted) return undefined;
+    setExiting(true);
+    const t = window.setTimeout(() => { setMounted(false); setExiting(false); }, MODAL_EXIT_MS);
+    return () => window.clearTimeout(t);
+  }, [open, mounted]);
+
+  // Navigate, remembering where we came from. Back and forward walk the same
+  // stack a file manager's arrows do; opening a folder from anywhere but the
+  // end of it drops whatever was ahead, which is what "forward" means.
+  const goTo = useCallback((dir, { trash: toTrash = false } = {}) => {
+    setInTrash(toTrash);
+    setCwd(dir);
+    setQuery('');
+    // A chosen file that is no longer on screen is a Scan button pointing at
+    // something invisible. Leaving the folder un-chooses it.
+    setPicked(null);
+    setNote(null);
+    setHist((h) => {
+      const stack = h.stack.slice(0, h.at + 1);
+      stack.push({ dir, trash: toTrash });
+      return { stack, at: stack.length - 1 };
+    });
+  }, []);
+  const step = useCallback((delta) => {
+    setHist((h) => {
+      const at = h.at + delta;
+      const entry = h.stack[at];
+      if (!entry) return h;
+      setCwd(entry.dir); setInTrash(entry.trash); setQuery('');
+      setPicked(null); setNote(null);
+      return { ...h, at };
+    });
+  }, []);
+
+  // Open on the project root, and re-read it each time — a photo taken a
+  // minute ago is exactly the one being reached for.
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    setListing(null); setTrash([]); setNote(null); setQuery(''); setPicked(null);
+    (async () => {
+      try {
+        const projectId = selectedProject?.id;
+        if (!projectId) { if (!cancelled) setListing({ files: [], dirs: [] }); return; }
+        const baseDir = readProjectsDir(session?.user?.id || '_anonymous') || undefined;
+        const { path } = await localFolderApi.projectDir(projectId, selectedProject?.name, baseDir);
+        if (cancelled) return;
+        setRoot(path || '');
+        setCwd(path || '');
+        setInTrash(false);
+        setHist({ stack: [{ dir: path || '', trash: false }], at: 0 });
+        const { items } = await localFolderApi.listTrash(path || undefined);
+        if (!cancelled) setTrash(items || []);
+      } catch {
+        if (!cancelled) setListing({ files: [], dirs: [] });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, selectedProject?.id, selectedProject?.name, session?.user?.id]);
+
+  // List whatever folder is current.
+  useEffect(() => {
+    if (!open || !cwd || inTrash) return undefined;
+    let cancelled = false;
+    setListing(null);
+    localFolderApi.list(cwd)
+      .then(({ files, dirs }) => { if (!cancelled) setListing({ files: files || [], dirs: dirs || [] }); })
+      .catch(() => { if (!cancelled) setListing({ files: [], dirs: [] }); });
+    return () => { cancelled = true; };
+  }, [open, cwd, inTrash, tick]);
+
+  // The bin, re-read alongside it — deleting a file here has to show up there.
+  useEffect(() => {
+    if (!open || !root || !tick) return undefined;
+    let cancelled = false;
+    localFolderApi.listTrash(root)
+      .then(({ items }) => { if (!cancelled) setTrash(items || []); })
+      .catch(() => { /* an unreadable bin is an empty one */ });
+    return () => { cancelled = true; };
+  }, [open, root, tick]);
+
+  // Escape closes — unless it is clearing a search, which is the nearer
+  // meaning when there is one. ⌘/Ctrl+F focuses the field, as in Files.
+  // Enter reads whatever is chosen; through a ref so the key handler below
+  // stays bound to `open` rather than re-binding on every click in the grid.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault(); e.stopPropagation();
+        searchRef.current?.focus(); searchRef.current?.select();
+        return;
+      }
+      if (e.key === 'Enter' && !/^(INPUT|TEXTAREA)$/.test(e.target?.tagName || '')) {
+        e.preventDefault(); scanRef.current?.();
+        return;
+      }
+      if (e.key === 'Escape') { e.stopPropagation(); onClose?.(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // `blobOverride` is set when the picture came from the computer rather than
+  // the project — everything after reading the bytes is identical.
+  const runOn = useCallback(async (file, blobOverride) => {
+    const path = file.path || file.name;
+    setBusyPath(path); setNote(null);
+    try {
+      const blob = blobOverride || await readLocalBlob(path);
+      if (!blob) throw new Error('unreadable');
+      const res = await readIdentityFromImage(blob, record, {
+        jurisdiction: record?.jurisdiction,
+        projectId: selectedProject?.id,
+      });
+      if (res.error) {
+        // Say which step failed. One message for every failure sent people off
+        // sharpening photographs when the AI key was not configured, or when
+        // the browser could not decode the file at all.
+        // The OCR layer raises messages already written for a person ("The AI
+        // key isn't configured on the server."); prefer those over the generic
+        // line, since they name the actual fix.
+        setNote({
+          tone: 'error',
+          text: (res.error === 'ocr_failed' && res.detail) || AUTOFILL_ERRORS[res.error] || AUTOFILL_ERRORS.ocr_failed,
+        });
+        return;
+      }
+      // Only what would actually change something. A reading that matches what
+      // is already in the record is correct and worth nothing to show.
+      const fresh = Object.fromEntries(
+        Object.entries(res.fields || {})
+          .filter(([k, v]) => String(record?.[k] ?? '').trim() !== v),
+      );
+      if (!Object.keys(fresh).length) {
+        // Not a failure: it read the picture and everything on it is already in
+        // the record. Saying so beats a silent no-op — and the picker stays
+        // open, because there is nothing behind it to go and look at.
+        setNote({ tone: 'ok', text: 'Nothing new — everything it read is already in the record.' });
+        return;
+      }
+      // Hand the readings back and get out of the way. They are shown under the
+      // fields they belong to, in the record itself, which is where they have to
+      // be judged: a value is right or wrong next to the rest of the record, not
+      // in a list floating over it.
+      setPicked(null);
+      onFilled?.(fresh, file.name);
+    } catch {
+      setNote({ tone: 'error', text: 'Couldn’t open that file.' });
+    } finally {
+      setBusyPath(null);
+    }
+  }, [record, onFilled, selectedProject?.id]);
+
+  const scan = useCallback(() => {
+    if (picked && !busyPath) runOn(picked, picked.blob);
+  }, [picked, busyPath, runOn]);
+
+  // Open a file in this window, as the Files tab does — it adds a tab rather
+  // than opening a second viewer. Checking what a picture actually is before
+  // spending a scan on it is exactly what double-click should be for.
+  const openInViewer = useCallback((f) => {
+    openDocViewerWindow({ path: f.path, name: f.name, mime: f.mimeType || '' });
+  }, []);
+
+  // The Files tab's own destructive actions, over the same API. A picker that
+  // shows the project's files but cannot act on them makes people leave, do the
+  // thing next door, and come back — so the menu that looks like the Files
+  // tab's does what it does.
+  const removeItem = useCallback(async (f) => {
+    const res = f.kind === 'folder'
+      ? await localFolderApi.trashFolder({ dir: root, path: f.path })
+      : await localFolderApi.trashFile({ dir: root, path: f.path });
+    if (res?.error) { setNote({ tone: 'error', text: 'Couldn’t delete that — it may be open somewhere.' }); return; }
+    setPicked((cur) => (cur?.path === f.path ? null : cur));
+    setTick((n) => n + 1);
+    notifyFilesChanged();
+  }, [root]);
+  const restoreItem = useCallback(async (f) => {
+    const res = await localFolderApi.restoreFromTrash({ dir: root, stored: f.stored });
+    if (res?.error) { setNote({ tone: 'error', text: 'Couldn’t restore that file.' }); return; }
+    setPicked((cur) => (cur?.path === f.path ? null : cur));
+    setTick((n) => n + 1);
+    notifyFilesChanged();
+  }, [root]);
+  const purgeItem = useCallback(async (f) => {
+    const res = await localFolderApi.deleteFromTrash({ dir: root, stored: f.stored });
+    if (res?.error) { setNote({ tone: 'error', text: 'Couldn’t delete that file.' }); return; }
+    setPicked((cur) => (cur?.path === f.path ? null : cur));
+    setTick((n) => n + 1);
+  }, [root]);
+  useEffect(() => { scanRef.current = scan; }, [scan]);
+
+  if (!mounted) return null;
+
+  const sep = root.includes('\\') ? '\\' : '/';
+  // Tiles in the Files tab's own shape: a descriptor for the real thumbnail, an
+  // `ext` for the type glyph it falls back to.
+  const fileItem = (f, { virtual = false } = {}) => ({
+    id: f.path || f.name,
+    kind: 'file',
+    name: f.name,
+    path: f.path || f.name,
+    ext: extOfName(f.name),
+    readable: AUTOFILL_IMAGE_EXTS.has(extOfName(f.name)),
+    mimeType: f.mimeType || '',
+    busy: busyPath === (f.path || f.name),
+    virtual,
+    descriptor: virtual ? null : describeLocalFile({ localFile: f }),
+  });
+
+  const trashItems = trash.map((t) => ({
+    ...fileItem({
+      name: t.originalName || t.stored,
+      path: root ? `${root}${sep}${TRASH_DIR}${sep}${t.stored}` : t.stored,
+      mimeType: t.mimeType,
+    }),
+    // What restore and delete-forever are addressed by — the name on disk in
+    // the bin, not the one the file used to have.
+    stored: t.stored,
+  }));
+
+  const folders = inTrash ? [] : (listing?.dirs || []).map((d) => ({
+    id: `dir:${d.path}`, kind: 'folder', name: d.name, path: d.path, empty: d.empty,
+  }));
+  const files = inTrash ? trashItems : (listing?.files || []).map((f) => fileItem(f));
+  // Pictures first — they are the only ones that can be read, and the reason
+  // the picker was open.
+  files.sort((a, b) => imageRank(a.name) - imageRank(b.name));
+
+  const q = query.trim().toLowerCase();
+  const match = (x) => !q || x.name.toLowerCase().includes(q);
+  const shownFolders = folders.filter(match);
+  const shownFiles = files.filter(match);
+  const reading = !inTrash && listing === null;
+  // The bin's own tile: shown at the project root, always — an empty one still
+  // has to be reachable, or "where did my deleted photo go" has nowhere to lead.
+  const showsBin = !inTrash && !q && cwd === root && !!root;
+
+  // Breadcrumbs from the project root down to here.
+  const rel = !inTrash && cwd.startsWith(root) ? cwd.slice(root.length).replace(/^[\\/]+/, '') : '';
+  const segs = rel ? rel.split(/[\\/]+/).filter(Boolean) : [];
+
+  return createPortal((
+    <div
+      className={`dvi-modal-scrim${exiting ? ' is-closing' : ''}`}
+      role="presentation"
+      // Nothing to dismiss while it is already leaving.
+      onMouseDown={(e) => { if (!exiting && e.target === e.currentTarget) onClose?.(); }}
+    >
+      {/* `data-theme="ink"` paints this subtree in the dark palette whatever the
+          app is set to — the mechanism the theme system already provides for a
+          component that declares its own theme (see tokens.css / ThemePicker).
+          That is what makes the Files tiles inside come out dark too: they read
+          the same semantic tokens, so they follow without a single override. */}
+      <div className="dvi-modal" data-theme="ink" role="dialog" aria-modal="true" aria-label="Fill from a picture">
+        <header className="dvi-modal-head">
+          <div className="dvi-modal-head-text">
+            <span className="dvi-modal-eyebrow">Fill from a picture</span>
+            <h2 className="dvi-modal-title">{selectedProject?.name || 'Project'} · Files</h2>
+          </div>
+          <Tooltip content="Close">
+            <button type="button" className="dvi-modal-close" onClick={onClose} aria-label="Close">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </Tooltip>
+        </header>
+
+        {/* The Files tab's path bar: back/forward and where you are on the
+            left, the folder search on the right. */}
+        <div className="dvi-modal-bar">
+          {/* The Files tab's own nav cluster — same classes, same glyph set. */}
+          <div className="fx-pathbar-nav">
+            <Tooltip content="Back">
+              <button type="button" onClick={() => step(-1)} disabled={hist.at <= 0} aria-label="Back">
+                <FxIcon name="chev-left" size={14} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Forward">
+              <button type="button" onClick={() => step(1)} disabled={hist.at >= hist.stack.length - 1} aria-label="Forward">
+                <FxIcon name="chev-right" size={14} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Up one folder">
+              <button
+                type="button"
+                onClick={() => (inTrash ? goTo(root) : goTo(cwd.slice(0, cwd.lastIndexOf(sep))))}
+                disabled={inTrash ? false : (!cwd || cwd === root)}
+                aria-label="Up one folder"
+              >
+                <FxIcon name="chev-up" size={14} />
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* Crumbs, likewise: .fx-crumbs / .fx-crumb, a filled folder glyph on
+              each and the bin's own on Trash — the same reading as the Files
+              tab's path, because it is the same path. */}
+          <nav className="fx-crumbs" aria-label="Folder path">
+            <Tooltip content={selectedProject?.name || 'Home'}>
+              <button
+                type="button"
+                className={`fx-crumb is-root${!inTrash && segs.length === 0 ? ' is-current' : ''}`}
+                onClick={() => goTo(root)}
+              >
+                <FxIcon name="folder" size={16} className="fx-crumb-icon" filled />
+                <span className="fx-crumb-label">Home</span>
+              </button>
+            </Tooltip>
+            {segs.map((name, i) => (
+              <React.Fragment key={`${name}-${i}`}>
+                <FxIcon name="chev-right" size={12} className="fx-crumb-sep" />
+                <Tooltip content={name}>
+                  <button
+                    type="button"
+                    className={`fx-crumb${i === segs.length - 1 ? ' is-current' : ''}`}
+                    onClick={i === segs.length - 1 ? undefined : () => goTo([root, ...segs.slice(0, i + 1)].join(sep))}
+                  >
+                    <FxIcon name="folder" size={14} className="fx-crumb-icon" filled />
+                    <span className="fx-crumb-label">{name}</span>
+                  </button>
+                </Tooltip>
+              </React.Fragment>
+            ))}
+            {inTrash && (
+              <>
+                <FxIcon name="chev-right" size={12} className="fx-crumb-sep" />
+                <span className="fx-crumb is-current">
+                  <FxIcon name="trash" size={14} className="fx-crumb-icon is-trash" filled />
+                  <span className="fx-crumb-label">Trash</span>
+                </span>
+              </>
+            )}
+          </nav>
+
+          <div className="dvi-modal-bar-tools">
+            {/* A picture that is not in the project yet — a photo just taken, a
+                scan in Downloads. It is READ, not copied: filling a record is
+                not a reason to put a file in someone's project folder. */}
+            <input
+              ref={importRef}
+              type="file"
+              accept="image/*"
+              className="dvi-modal-file"
+              onChange={(e) => {
+                const chosen = e.target.files?.[0];
+                // Reset first, so choosing the same file twice fires again.
+                e.target.value = '';
+                // Chosen, not read — the Scan button is the one thing that
+                // starts a read, wherever the picture came from.
+                if (chosen) {
+                  setNote(null);
+                  setPicked({ name: chosen.name, path: `import:${chosen.name}`, blob: chosen, imported: true });
+                }
+              }}
+            />
+            <Tooltip content="Read a picture from this computer — it is not added to the project">
+              <button
+                type="button"
+                className="dvi-modal-import"
+                onClick={() => importRef.current?.click()}
+                disabled={!!busyPath}
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 15V3" /><path d="m8 7 4-4 4 4" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+                </svg>
+                From computer
+              </button>
+            </Tooltip>
+            <div className={`dvi-modal-search${query ? ' is-active' : ''}`}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="dvi-modal-search-glyph" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" />
+              </svg>
+              <input
+                ref={searchRef}
+                type="text"
+                placeholder="Search this folder"
+                aria-label="Search this folder"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery(''); } }}
+              />
+              {query ? (
+                <Tooltip content="Clear search">
+                  <button
+                    type="button"
+                    className="dvi-modal-search-clear"
+                    aria-label="Clear search"
+                    onClick={() => { setQuery(''); searchRef.current?.focus(); }}
+                  >
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </Tooltip>
+              ) : (
+                <span className="dvi-modal-search-kbd">
+                  <kbd>{/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}</kbd>
+                  <span className="dvi-modal-search-plus">+</span>
+                  <kbd>F</kbd>
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="dvi-modal-body">
+          {reading && <p className="dvi-modal-empty">Reading the folder…</p>}
+          {!reading && !showsBin && shownFolders.length === 0 && shownFiles.length === 0 && (
+            <p className="dvi-modal-empty">
+              {query
+                ? `Nothing here matches “${query.trim()}”.`
+                : inTrash ? 'The trash is empty.' : 'This folder is empty.'}
+            </p>
+          )}
+          {!reading && (shownFolders.length > 0 || shownFiles.length > 0 || showsBin) && (
+            <div className={`fx-grid dvi-modal-grid${busyPath ? ' is-busy' : ''}`}>
+              {shownFolders.map((f) => (
+                <AutofillTile
+                  key={f.id}
+                  item={f}
+                  disabled={!!busyPath}
+                  onOpenFolder={() => goTo(f.path)}
+                  onShowInFolder={() => localFolderApi.showInFolder(f.path)}
+                  onDelete={() => removeItem(f)}
+                />
+              ))}
+              {/* Trash sits in the grid as a folder does in the Files tab — a
+                  picture deleted by mistake is still a picture, and this is the
+                  first place anyone looks for a file that isn't in the list. */}
+              {!inTrash && !q && cwd === root && (
+                <AutofillTile
+                  item={{
+                    id: '__trash', kind: 'folder', name: 'Trash', virtual: true,
+                    binEntry: true, binCount: trash.length,
+                  }}
+                  disabled={!!busyPath}
+                  onOpenFolder={() => goTo(root, { trash: true })}
+                />
+              )}
+              {shownFiles.map((f) => (
+                <AutofillTile
+                  key={f.id}
+                  item={f}
+                  disabled={!!busyPath}
+                  inTrash={inTrash}
+                  selected={picked?.path === f.path}
+                  onPick={() => { setNote(null); setPicked({ name: f.name, path: f.path }); }}
+                  onOpen={() => openInViewer(f)}
+                  onShowInFolder={() => localFolderApi.showInFolder(f.path)}
+                  onRestore={() => restoreItem(f)}
+                  onDelete={() => (inTrash ? purgeItem(f) : removeItem(f))}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Choosing and reading are two acts. The grid chooses; this reads.
+            Bottom-RIGHT, where the button that commits a dialog belongs — what
+            it will act on is stated to its left, so the row reads as one
+            sentence: this picture → Scan. Inert until there is something to
+            point it at, so the modal always says whether it is ready. */}
+        <footer className="dvi-modal-foot">
+          <span className="dvi-modal-foot-status">
+            {picked && !busyPath && (
+              <span className="dvi-modal-picked">
+                <span className="dvi-modal-picked-name">{picked.name}</span>
+                {picked.imported && <span className="dvi-modal-picked-tag">from this computer</span>}
+              </span>
+            )}
+            {!picked && !busyPath && !note && (
+              <span className="dvi-modal-foot-hint">Choose a picture above.</span>
+            )}
+            {note && (
+              <p className={`dvi-modal-note is-${note.tone}`} role={note.tone === 'error' ? 'alert' : 'status'}>
+                {note.text}
+              </p>
+            )}
+          </span>
+          <button
+            type="button"
+            className="dvi-modal-scan"
+            onClick={scan}
+            disabled={!picked || !!busyPath}
+          >
+            {busyPath ? (
+              <span className="dvi-modal-scan-spin" aria-hidden="true" />
+            ) : (
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 8V6a2 2 0 0 1 2-2h2M17 4h2a2 2 0 0 1 2 2v2M21 16v2a2 2 0 0 1-2 2h-2M7 20H5a2 2 0 0 1-2-2v-2" />
+                <path d="M3 12h18" />
+              </svg>
+            )}
+            {busyPath ? 'Reading…' : 'Scan'}
+          </button>
+        </footer>
+      </div>
+    </div>
+  ), document.body);
+}
+
+// ── Identity record (.dvx) ──────────────────────────────────────────────
+// A party to the case — a person or a company — rendered as the form it is
+// rather than as the JSON it is stored as. Same fields the Files tab collects;
+// this is where they are read and corrected.
+//
+// Saves in place, and repoints the window's tab when the party is renamed (the
+// filename follows the name), exactly as the AI document generator does.
+function IdentityPane({ file, onRenamed }) {
+  const [record, setRecord] = useState(null);
+  const [err, setErr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
+  // What is on disk, so "unsaved changes" is a real comparison rather than a
+  // flag that every keystroke sets and nothing ever clears.
+  const cleanRef = useRef('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setRecord(null); setErr(null);
+    (async () => {
+      try {
+        const resp = await fetch(file.url || '', { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`http_${resp.status}`);
+        const parsed = parseIdentity(await resp.text());
+        if (cancelled) return;
+        if (!parsed) { setErr('This file isn’t a valid identity record.'); return; }
+        cleanRef.current = JSON.stringify(parsed);
+        setRecord(parsed);
+      } catch (e) {
+        if (!cancelled) setErr('Couldn’t read this identity record.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [file.url]);
+
+  // Fill-from-a-picture drawer.
+  const [autofillOpen, setAutofillOpen] = useState(false);
+  // What the picture said, waiting to be judged: { fields, source }. NOT applied
+  // — a record is evidence about a person, and a machine reading of a photograph
+  // is a claim about it. The claim is shown under the field it concerns, in the
+  // record's own form, and the person decides. That is also why the picker
+  // closes the moment it has something: the answer is behind it.
+  const [suggest, setSuggest] = useState(null);
+  const receiveAutofill = useCallback((fields, source) => {
+    setSuggest({ fields, source });
+    setAutofillOpen(false);
+  }, []);
+  // Taking one reading, or putting it aside. Dropping the last one drops the
+  // whole banner with it — an empty "read 0 details" strip is just clutter.
+  const dropSuggestion = useCallback((key) => {
+    setSuggest((sg) => {
+      if (!sg) return sg;
+      const rest = { ...sg.fields };
+      delete rest[key];
+      return Object.keys(rest).length ? { ...sg, fields: rest } : null;
+    });
+  }, []);
+  const useSuggestion = useCallback((key, value) => {
+    setRecord((r) => (r ? { ...r, [key]: value } : r));
+    dropSuggestion(key);
+  }, [dropSuggestion]);
+  const useAllSuggestions = useCallback((fields) => {
+    setRecord((r) => (r ? { ...r, ...fields } : r));
+    setSuggest(null);
+  }, []);
+
+  // "Saved" is worth a moment's confirmation, not a permanent label — so it
+  // clears itself, while an error waits to be dealt with.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!savedAt) return undefined;
+    setSettled(false);
+    const t = window.setTimeout(() => setSettled(true), 2200);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const rows = useMemo(() => fieldsFor(record?.kind || 'person'), [record?.kind]);
+  // What the card prints, in the order a real document prints it — a short,
+  // fixed set, unlike the form's full field list. Blank ones still get their
+  // line (an ID card with a missing field shows the missing field).
+  const cardRows = useMemo(() => {
+    if (!record) return [];
+    if (record.kind === 'org') {
+      return [
+        ['Legal name', record.legalName || record.name],
+        ['Legal form', record.legalForm],
+        ['CUI / VAT', record.taxId],
+        ['Trade register', record.regNo],
+        ['Represented by', record.representative],
+        ['Contact', [record.email, record.phone].filter(Boolean).join(' · ')],
+      ];
+    }
+    const { surname, given } = identityNameParts(record);
+    return [
+      ['Surname', surname],
+      ['Given names', given],
+      ['CNP', record.nationalId],
+      ['Date of birth', record.dateOfBirth],
+      ['Nationality', record.nationality],
+      ['ID document', identityValueForField(record, 'idDocument')],
+      ['Contact', [record.email, record.phone].filter(Boolean).join(' · ')],
+    ];
+  }, [record]);
+  const set = (key, v) => setRecord((r) => ({ ...r, [key]: v }));
+  const dirty = record ? JSON.stringify(record) !== cleanRef.current : false;
+  const saveState = err ? { tone: 'error', text: err }
+    : saving ? { tone: 'busy', text: 'Saving…' }
+      : dirty ? { tone: 'busy', text: 'Saving shortly…' }
+        : (savedAt && !settled) ? { tone: 'ok', text: 'Saved' }
+          : null;
+
+  const save = useCallback(async () => {
+    if (!record || saving) return;
+    setSaving(true);
+    const res = await saveIdentityAt(file.path, record);
+    setSaving(false);
+    if (res.error) { setErr('Couldn’t save this identity record.'); return; }
+    cleanRef.current = JSON.stringify(res.identity);
+    setRecord(res.identity);
+    setSavedAt(Date.now());
+    setErr(null);
+    notifyFilesChanged();
+    if (res.renamed) onRenamed?.(res.filename);
+  }, [file.path, record, saving, onRenamed]);
+
+  // ⌘/Ctrl+S still works — it just flushes the autosave early rather than being
+  // the only way to keep an edit.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [save]);
+
+  // Autosave. There is no Save button: a record is a form over a small JSON
+  // file, and "did I keep that?" is not a question worth making anyone hold.
+  // Debounced, so a burst of typing is one write rather than one per keystroke.
+  useEffect(() => {
+    if (!record || saving || !dirty) return undefined;
+    const t = window.setTimeout(() => { save(); }, IDENTITY_AUTOSAVE_MS);
+    return () => window.clearTimeout(t);
+  }, [record, saving, dirty, save]);
+
+  // Closing the window inside the debounce window must not lose the last edit.
+  // Refs, because the cleanup runs with the values from its own render.
+  const saveRef = useRef(save);
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { saveRef.current = save; dirtyRef.current = dirty; }, [save, dirty]);
+  useEffect(() => () => { if (dirtyRef.current) saveRef.current?.(); }, []);
+
+  if (err && !record) {
+    return (
+      <div className="dv-noview">
+        <p className="dv-noview-title">{err}</p>
+        <p className="dv-noview-sub">{file.name}</p>
+        <button type="button" className="dv-chip" onClick={() => localFolderApi.openPath(file.path)}>Open in default app</button>
+      </div>
+    );
+  }
+  if (!record) return <div className="dv-loading">Reading record…</div>;
+
+  // What the picture said about ONE field, printed under that field. Shown only
+  // where it would change something — a reading that matches what is already
+  // there is correct and worth nothing. Where it disagrees, it says so: that is
+  // the case a person actually has to look at, and the one an auto-fill that
+  // "never overwrites" used to swallow in silence.
+  const suggestionFor = (key, render) => {
+    const value = suggest?.fields?.[key];
+    if (value == null || value === '') return null;
+    const current = String(record[key] ?? '').trim();
+    if (current === value) return null;
+    return (
+      <span className={`dvi-sugg${current ? ' is-conflict' : ''}`}>
+        <span className="dvi-sugg-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9V7a2 2 0 0 1 2-2h2M17 5h2a2 2 0 0 1 2 2v2M21 15v2a2 2 0 0 1-2 2h-2M7 19H5a2 2 0 0 1-2-2v-2" />
+            <path d="M7 12h10" />
+          </svg>
+        </span>
+        <span className="dvi-sugg-body">
+          <span className="dvi-sugg-value">{render ? render(value) : value}</span>
+          {current && <span className="dvi-sugg-note">replaces “{current}”</span>}
+        </span>
+        <button type="button" className="dvi-sugg-use" onClick={() => useSuggestion(key, value)}>Use</button>
+        <Tooltip content="Not this one">
+          <button type="button" className="dvi-sugg-drop" aria-label="Dismiss this reading" onClick={() => dropSuggestion(key)}>
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </Tooltip>
+      </span>
+    );
+  };
+  // Only the readings that still differ decide whether the banner has anything
+  // left to say — accepting them one at a time has to end with it gone.
+  const suggestKeys = Object.keys(suggest?.fields || {})
+    .filter((k) => String(record[k] ?? '').trim() !== suggest.fields[k]);
+
+  return (
+    <div className="dvi-pane">
+      {/* The card sits OUTSIDE the scroller: it is the record's identity, so it
+          should stay put while the form under it is worked through, and being a
+          flex item in the scroller was letting it be squeezed below its own
+          content height and clipped by its rounded frame. */}
+      <div className="dvi-cardwrap">
+        {/* The record as a document rather than a heading: a data page in the
+            shape of an ID card / passport, showing the fields that identify the
+            party at a glance. It is a READ-OUT of the form below — every value
+            comes straight from `record`, so typing in the form updates the card
+            live and there is no second source of truth. */}
+        <section className={`dvi-card${record.kind === 'org' ? ' is-org' : ''}`}>
+          <div className="dvi-card-guilloche" aria-hidden="true" />
+          <header className="dvi-card-band">
+            <span className="dvi-card-issuer">DocVex · Case file</span>
+            <span className="dvi-card-doc">{record.kind === 'org' ? 'Entity record' : 'Identity record'}</span>
+            {record.origin === 'timeline' && <span className="dvi-card-origin">From the timeline</span>}
+          </header>
+
+          <div className="dvi-card-body">
+            {/* No portrait panel. A monogram in a photo-shaped frame was
+                standing in for a photograph the record does not have and cannot
+                get — it reserved the space a picture would take to say nothing,
+                and the width is better spent on the data. */}
+            <div className="dvi-card-main">
+              <div className="dvi-card-heading">
+                <h1 className="dvi-card-name">{record.name || 'Unnamed'}</h1>
+                {record.role && <span className="dvi-card-role">{record.role}</span>}
+              </div>
+
+              <dl className="dvi-card-data">
+                {cardRows.map(([label, value]) => (
+                  <div className="dvi-card-datum" key={label}>
+                    <dt>{label}</dt>
+                    <dd className={value ? undefined : 'is-blank'}>{value || '—'}</dd>
+                  </div>
+                ))}
+                {record.address && (
+                  <div className="dvi-card-datum is-wide">
+                    <dt>{record.kind === 'org' ? 'Registered office' : 'Address'}</dt>
+                    <dd>{record.address}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          </div>
+
+          {/* The strip a passport's data page ends on. Generated from the
+              fields above on every render, so it can never disagree with them;
+              hidden from assistive tech, which already read the real values. */}
+          <footer className="dvi-card-mrz" aria-hidden="true">
+            {identityMrz(record).map((line, i) => <span key={i}>{line}</span>)}
+          </footer>
+
+          {/* Bottom-left of the card, over the machine strip: the details on
+              this record are already written on a document somewhere, and
+              typing them again is work a computer should be doing. */}
+          <Tooltip content="Read the details off a photo of the ID or certificate">
+            <button
+              type="button"
+              className={`dvi-card-action${autofillOpen ? ' is-on' : ''}`}
+              onClick={() => setAutofillOpen((v) => !v)}
+              aria-expanded={autofillOpen}
+            >
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+                <circle cx="12" cy="12" r="3.2" />
+              </svg>
+              Auto-complete
+            </button>
+          </Tooltip>
+        </section>
+      </div>
+
+      {/* Everything that is edited, scrolling under the card. */}
+      <div className="dvi-sheet">
+        {/* The picture has been read and the picker is gone; this is what it
+            found. Nothing is in the record yet — each reading sits under its own
+            field below, and this is the shortcut for when they are all right. */}
+        {suggestKeys.length > 0 && (
+          <div className="dvi-suggbar" role="status">
+            <span className="dvi-suggbar-text">
+              <strong>{suggestKeys.length}</strong>
+              {suggestKeys.length === 1 ? ' detail read from ' : ' details read from '}
+              <span className="dvi-suggbar-src">{suggest.source || 'the picture'}</span>
+              {' — each one is waiting under its field.'}
+            </span>
+            <button
+              type="button"
+              className="dvi-suggbar-all"
+              onClick={() => useAllSuggestions(Object.fromEntries(suggestKeys.map((k) => [k, suggest.fields[k]])))}
+            >
+              Use all
+            </button>
+            <Tooltip content="Discard everything it read">
+              <button type="button" className="dvi-suggbar-drop" onClick={() => setSuggest(null)} aria-label="Discard all readings">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </Tooltip>
+          </div>
+        )}
+
+        <div className="dvi-kinds" role="radiogroup" aria-label="Kind of party">
+          {IDENTITY_KINDS.map((k) => (
+            <button
+              type="button"
+              key={k.id}
+              role="radio"
+              aria-checked={record.kind === k.id}
+              className={`dvi-kind${record.kind === k.id ? ' is-on' : ''}`}
+              onClick={() => set('kind', k.id)}
+            >
+              <span className="dvi-kind-label">{k.label}</span>
+              <span className="dvi-kind-hint">{k.hint}</span>
+            </button>
+          ))}
+        </div>
+
+        <label className="dvi-field">
+          <span className="dvi-label">Name</span>
+          <input
+            className="dvi-input"
+            value={record.name}
+            placeholder={record.kind === 'org' ? 'Acme SRL' : 'Ionescu Maria'}
+            onChange={(e) => set('name', e.target.value)}
+          />
+          <span className="dvi-hint">Renaming the party renames this file too, once you stop typing.</span>
+        </label>
+
+        <label className="dvi-field">
+          <span className="dvi-label">Role in the case</span>
+          <input
+            className="dvi-input"
+            list="dvi-roles"
+            value={record.role}
+            placeholder="Client, opposing party, witness…"
+            onChange={(e) => set('role', e.target.value)}
+          />
+          <datalist id="dvi-roles">
+            {IDENTITY_ROLES.map((r) => <option value={r} key={r} />)}
+          </datalist>
+        </label>
+
+        {/* Origin — which country's format this record follows. Everything the
+            app knows is listed, but only Romania can be picked: the field set
+            below, the address and ID splitters, and the Romanian clause
+            transforms are all built to that practice. Greying the rest out is
+            the honest version of "not yet"; hiding them would suggest the
+            question had never been asked. */}
+        <label className="dvi-field">
+          <span className="dvi-label">Origin</span>
+          <select
+            className="dvi-input dvi-select"
+            value={record.jurisdiction || 'RO'}
+            onChange={(e) => set('jurisdiction', e.target.value)}
+          >
+            {IDENTITY_ORIGINS.map((o) => (
+              <option key={o.code} value={o.code} disabled={!o.available}>
+                {o.flag} {o.name}{o.available ? '' : ' — not supported yet'}
+              </option>
+            ))}
+          </select>
+          <span className="dvi-hint">
+            Romanian format: CNP and act of identity for a person, CUI and Trade
+            Register number for a company.
+          </span>
+        </label>
+
+        <div className="dvi-grid">
+          {rows.map((f) => (
+            f.choices === 'gender' ? (
+              /* Three states, all of them short — buttons say what the options
+                 ARE, where a text field would have made the user guess and
+                 typed answers would never have matched. */
+              <div className="dvi-field" key={f.key}>
+                <span className="dvi-label">{f.label}</span>
+                <div className="dvi-choice" role="radiogroup" aria-label={f.label}>
+                  {IDENTITY_GENDERS.filter((g) => g.id).map((g) => {
+                    const on = (record[f.key] || '') === g.id;
+                    return (
+                      <button
+                        type="button"
+                        key={g.id}
+                        role="radio"
+                        aria-checked={on}
+                        className={`dvi-choice-opt${on ? ' is-on' : ''}`}
+                        // Clicking the chosen one again clears it: "not
+                        // specified" has to be reachable, and a fourth button
+                        // for it would read as a fourth kind of person.
+                        onClick={() => set(f.key, on ? '' : g.id)}
+                      >
+                        {g.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {suggestionFor(f.key, (v) => IDENTITY_GENDERS.find((g) => g.id === v)?.label || v)}
+                {f.hint && <span className="dvi-hint">{f.hint}</span>}
+              </div>
+            ) : (
+            <label className={`dvi-field${f.multiline ? ' is-wide' : ''}`} key={f.key}>
+              <span className="dvi-label">{f.label}</span>
+              {f.choices === 'idType' || f.choices === 'legalForm' ? (
+                /* The common answers offered, but still an input: a form or an
+                   act type nobody listed has to remain typeable. */
+                <>
+                  <input
+                    className="dvi-input"
+                    list={`dvi-choices-${f.key}`}
+                    value={record[f.key] || ''}
+                    onChange={(e) => set(f.key, e.target.value)}
+                  />
+                  <datalist id={`dvi-choices-${f.key}`}>
+                    {(f.choices === 'idType' ? IDENTITY_ID_TYPES : IDENTITY_LEGAL_FORMS)
+                      .map((c) => <option value={c} key={c} />)}
+                  </datalist>
+                </>
+              ) : f.multiline ? (
+                <textarea className="dvi-input dvi-textarea" rows={2} value={record[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} />
+              ) : (
+                <input className="dvi-input" value={record[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} />
+              )}
+              {suggestionFor(f.key)}
+              {/* What the parse understood, part by part. The address is one
+                  field, but a clause asks for it five blanks at a time — so the
+                  split has to be visible, or a line it reads wrongly quietly
+                  mis-fills the document. Shown only once something is typed. */}
+              {/* Which of the two the typed value turned out to be. It decides
+                  how the document reads — "județul X" everywhere in the country,
+                  "sectorul N" in București alone — so it is shown rather than
+                  assumed. "Not recognised" is a real answer: the clause then
+                  keeps its both-form rather than being made to pick a half. */}
+              {f.parsed === 'county' && (record[f.key] || '').trim() && (() => {
+                const seen = classifyCounty(record[f.key], record.city);
+                return (
+                  <span className="dvi-parsed">
+                    <span className={`dvi-parsed-bit${seen.kind ? '' : ' is-unknown'}`}>
+                      <span className="dvi-parsed-key">{seen.kind ? 'Read as' : '?'}</span>
+                      {seen.kind ? `${seen.label} · ${seen.value}` : 'Not a Romanian county or sector'}
+                    </span>
+                  </span>
+                );
+              })()}
+              {f.parsed === 'address' && (record[f.key] || '').trim() && (
+                <span className="dvi-parsed">
+                  {ADDRESS_PART_LABELS.map(([key, label]) => {
+                    let value = identityValueForField(record, key);
+                    if (key === 'addressLocality') {
+                      // A sector is read as part of its city, not beside it:
+                      // "Sector 2" alone could be any of six in one town, and
+                      // the two are always written together in an address.
+                      const sector = identityValueForField(record, 'addressSector');
+                      const tidy = sector ? classifyCounty(sector, value).value || sector : '';
+                      if (tidy) value = value ? `${value} · ${tidy}` : tidy;
+                    }
+                    if (!value) return null;
+                    return (
+                      <span className="dvi-parsed-bit" key={key}>
+                        <span className="dvi-parsed-key">{label}</span>
+                        {value}
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
+              {f.hint && <span className="dvi-hint">{f.hint}</span>}
+            </label>
+            )
+          ))}
+        </div>
+
+        <label className="dvi-field">
+          <span className="dvi-label">Notes</span>
+          <textarea
+            className="dvi-input dvi-textarea"
+            rows={4}
+            value={record.notes || ''}
+            placeholder="Anything worth remembering about this party."
+            onChange={(e) => set('notes', e.target.value)}
+          />
+        </label>
+
+        {/* Where each detail was read from, so a disputed one can be traced
+            back to the document it came out of. */}
+        {record.sources?.length > 0 && (
+          <div className="dvi-field">
+            <span className="dvi-label">Taken from</span>
+            <div className="dvi-sources">
+              {record.sources.map((sname) => <span className="dvi-source" key={sname}>{sname}</span>)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* The record saves itself, so the footer shelf that used to hold a Save
+          button has nothing left to be. What remains is a pill that floats over
+          the corner of the sheet and says where the write got to — kept because
+          a write to disk that leaves no trace is indistinguishable from one that
+          failed. It fades out once a save has settled; an error stays. */}
+      <IdentityAutofillModal
+        open={autofillOpen}
+        onClose={() => setAutofillOpen(false)}
+        record={record}
+        onFilled={receiveAutofill}
+      />
+
+      {saveState && (
+        <div
+          className={`dvi-pill is-${saveState.tone}`}
+          role={saveState.tone === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          <span className="dvi-pill-dot" aria-hidden="true" />
+          <span className="dvi-pill-text">{saveState.text}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -7816,7 +10972,7 @@ function parseSlideShapes(xml, theme, rels, mediaUrls) {
 // Slides / Outline toggle. Styling (fills, fonts, colours, layout, images) is
 // reproduced from the OOXML; only exotic features (gradients beyond the first
 // stop, charts, SmartArt) are approximated.
-function PptxRenderPane({ url, onExportPdf }) {
+function PptxRenderPane({ url, onExportPdf, onOpenNative }) {
   const [deck, setDeck] = useState(null); // { w, h, slides } | null while loading
   const [mode, setMode] = useState('render');
   const [failed, setFailed] = useState(false);
@@ -7906,13 +11062,13 @@ function PptxRenderPane({ url, onExportPdf }) {
           <button type="button" className={`dv-docview-toggle${mode === 'render' ? ' is-active' : ''}`} onClick={() => setMode('render')} aria-pressed={mode === 'render'}>Slides</button>
           <button type="button" className={`dv-docview-toggle${mode === 'plain' ? ' is-active' : ''}`} onClick={() => setMode('plain')} aria-pressed={mode === 'plain'}>Outline</button>
         </div>
-        {mode === 'render' && deck && deck.slides.length > 0 && <ReconPill />}
         {deck && deck.slides.length > 0 && (
           <span className="dv-pptx-count">{deck.slides.length} slide{deck.slides.length === 1 ? '' : 's'}</span>
         )}
         {mode === 'render' && onExportPdf && deck && deck.slides.length > 0 && (
           <>
             <div className="dv-docview-spacer" />
+            <OpenNativeButton onOpen={onOpenNative} kind="pptx" />
             <ExportPdfButton getRoot={() => pptxRef.current} kind="pptx" onExport={onExportPdf} />
           </>
         )}
@@ -7986,9 +11142,34 @@ function PptxRenderPane({ url, onExportPdf }) {
   );
 }
 
-function DocPane({ file, onWhatsAppDetected, sidePanelSlot = null, sideTabsSlot = null, regenTick = 0 }) {
+function DocPane({ file, onWhatsAppDetected, onRenamed, sidePanelSlot = null, sideTabsSlot = null, regenTick = 0 }) {
   const { notify } = useNotifications();
-  const { kind, mime } = useMemo(() => classify(file.mime, file.name), [file.mime, file.name]);
+  const { kind: baseKind, mime } = useMemo(
+    () => classify(file.mime, file.name, file.path),
+    [file.mime, file.name, file.path],
+  );
+  // A record saved as plain `.json` OUTSIDE the Identities folder can only be
+  // recognised by reading it. Records are tiny, and this runs for `.json` files
+  // alone, so the read costs nothing worth avoiding — and showing somebody's
+  // party as raw JSON is the thing actually worth avoiding.
+  const [jsonIsRecord, setJsonIsRecord] = useState(false);
+  useEffect(() => {
+    setJsonIsRecord(false);
+    if (baseKind === 'identity' || extOf(file.name) !== 'json') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        // readLocalBlob, not the localfile:// URL — this has to work on the web
+        // build too, where there is no such scheme.
+        const blob = await readLocalBlob(file.path || file.name);
+        if (!blob || cancelled) return;
+        const text = await blob.text();
+        if (!cancelled && looksLikeIdentityJson(text)) setJsonIsRecord(true);
+      } catch { /* unreadable — leave it as the text file it looks like */ }
+    })();
+    return () => { cancelled = true; };
+  }, [baseKind, file.name, file.path]);
+  const kind = jsonIsRecord ? 'identity' : baseKind;
   // Every pane (image/video OCR, audio player, PDF/text/docx preview) reads
   // this one URL. Electron: the streaming localfile:// scheme. Web: no such
   // scheme — connect the folder backend for this tab, read the bytes from
@@ -8016,7 +11197,8 @@ function DocPane({ file, onWhatsAppDetected, sidePanelSlot = null, sideTabsSlot 
   const url = isElectron ? electronUrl : webUrl;
   // While a saved version is being written to disk, show a spinner over the
   // preview (the chat stays calm — no thinking bubble there).
-  const switchingVersion = !!useMultitoolAdvisor()?.switching;
+  const adv = useMultitoolAdvisor();
+  const switchingVersion = !!adv?.switching;
   // Folder holding this file — a WhatsApp export's media siblings live here.
   const { dir, sep } = useMemo(() => dirAndSep(file.path), [file.path]);
   // Legacy .doc extracted text: null = loading, string = body, '' = empty.
@@ -8073,13 +11255,17 @@ function DocPane({ file, onWhatsAppDetected, sidePanelSlot = null, sideTabsSlot 
 
   // Flush (fills, no padding) for the panes that manage their own scroll;
   // padded block for the document renderers (matches the old body padding).
-  const mainClass = kind === 'text' || kind === 'sheet' ? 'is-flush' : '';
+  const mainClass = kind === 'text' || kind === 'sheet' || kind === 'identity' ? 'is-flush' : '';
+
+  // The preview is an in-app reconstruction; this opens the actual file in
+  // whatever app the OS associates with it (Word, PowerPoint, Excel…).
+  const openNative = () => localFolderApi.openPath(file.path);
 
   let content;
   if (kind === 'docx') {
-    content = <DocxRenderPane url={url} onExportPdf={exportPdfNextTo} />;
+    content = <DocxRenderPane url={url} onExportPdf={exportPdfNextTo} onOpenNative={openNative} />;
   } else if (kind === 'pptx') {
-    content = <PptxRenderPane url={url} onExportPdf={exportPdfNextTo} />;
+    content = <PptxRenderPane url={url} onExportPdf={exportPdfNextTo} onOpenNative={openNative} />;
   } else if (kind === 'doc') {
     content = (docErr || docText === '') ? (
       <div className="dv-noview">
@@ -8095,7 +11281,9 @@ function DocPane({ file, onWhatsAppDetected, sidePanelSlot = null, sideTabsSlot 
       </div>
     );
   } else if (kind === 'sheet') {
-    content = <SpreadsheetPane file={previewFile} url={url} onExportPdf={exportPdfNextTo} />;
+    content = <SpreadsheetPane file={previewFile} url={url} onExportPdf={exportPdfNextTo} onOpenNative={openNative} />;
+  } else if (kind === 'identity') {
+    content = <IdentityPane file={{ ...file, url }} onRenamed={onRenamed} />;
   } else if (kind === 'text') {
     content = <DocTextPane file={previewFile} url={url} dir={dir} sep={sep} onWhatsAppDetected={onWhatsAppDetected} />;
   } else if (kind === 'other') {
@@ -8128,7 +11316,14 @@ function DocPane({ file, onWhatsAppDetected, sidePanelSlot = null, sideTabsSlot 
       ) : isAudio ? (
         <AudioPlayerPane file={previewFile} url={url} sidePanelSlot={sidePanelSlot} sideTabsSlot={sideTabsSlot} />
       ) : (
-        <DocumentWithPanel file={previewFile} url={url} kind={kind} mainClass={mainClass} sidePanelSlot={sidePanelSlot} sideTabsSlot={sideTabsSlot}>
+        <DocumentWithPanel
+          file={previewFile}
+          url={url}
+          kind={kind}
+          mainClass={mainClass}
+          sidePanelSlot={sidePanelSlot}
+          sideTabsSlot={sideTabsSlot}
+        >
           {content}
         </DocumentWithPanel>
       )}
@@ -8228,6 +11423,547 @@ const LargeTileGlyph = (
 // (The left rail — "Back to app" + "Opened files" — was removed; the window
 // now dedicates its full width to the Multitool panel + document card.)
 
+// ── Complete-data panel ────────────────────────────────────────────────────
+// Slides in on the right while "Complete data" is on, one card per blank found
+// in the document. Suggestions arrive already sorted into where they came from:
+// what the document and this conversation imply, and what was actually read out
+// of the files in the project folder. Every card also takes a typed answer, so a
+// blank the AI has nothing for is still one field away from being filled.
+// Does this record say where the party is at all? Without a city, a county or an
+// address there is nothing to decide "județul/sectorul" from, and the both-form
+// is still the correct wording — so it is left alone.
+// Does the record say anything about the street at all? House-vs-flat is only
+// decidable when it does — with no address, "bl. […] sc. […] ap. […]" might yet
+// be right, so the clause keeps them.
+const addressKnown = (rec) => !!String(
+  rec?.address || rec?.addressStreet || rec?.addressNumber || rec?.addressBlock || '',
+).trim();
+
+const locationKnown = (rec) => !!String(
+  rec?.city || rec?.county || rec?.address || rec?.addressStreet || rec?.addressLocality || '',
+).trim();
+
+function DocFieldsPanel() {
+  const adv = useMultitoolAdvisor();
+  const fields = adv?.fields || [];
+  const completing = !!adv?.completing;
+
+  const [values, setValues] = useState({});      // fieldId → chosen/typed value
+  const [saving, setSaving] = useState(false);
+
+  // Suggestions live in the advisor context, keyed by the document they were
+  // answered for, so closing and reopening this panel shows what was already
+  // fetched instead of starting over.
+  const { map: suggestions, loading, error } = adv?.fieldSuggestions || {};
+  const fieldsSig = adv?.fieldsSig || '';
+  // Stable across renders (both are useCallback in the provider), so effects
+  // below key off these rather than the whole context value — which changes on
+  // every chat message and would re-run them constantly.
+  const ensureFieldSuggestions = adv?.ensureFieldSuggestions;
+  const getDocumentText = adv?.getDocumentText;
+  // Suggestions cover the whole document even though this panel lists one
+  // paragraph — see the provider's `allFields`.
+  const allFields = adv?.allFields || [];
+
+  // Typed and chosen answers belong to one document — a new version clears
+  // them, reopening the panel does not.
+  const sigRef = useRef(fieldsSig);
+  useEffect(() => {
+    if (sigRef.current === fieldsSig) return;
+    sigRef.current = fieldsSig;
+    setValues({});
+  }, [fieldsSig]);
+
+  // Normally a no-op: the pane warms this the moment the document renders. It
+  // matters when the warm-up was skipped or failed, or when the folder changed
+  // while the panel was closed.
+  useEffect(() => {
+    if (!completing || !allFields.length) return;
+    ensureFieldSuggestions?.(allFields, getDocumentText?.() || '', fieldsSig);
+  }, [completing, allFields, fieldsSig, ensureFieldSuggestions, getDocumentText]);
+
+  const runSuggest = useCallback(() => {
+    if (!allFields.length) return;
+    ensureFieldSuggestions?.(allFields, getDocumentText?.() || '', fieldsSig, { force: true });
+  }, [ensureFieldSuggestions, getDocumentText, allFields, fieldsSig]);
+
+  // Which blank is lit, on BOTH sides at once. There is no selection any more:
+  // pointing at a card marks its gap in the document, pointing at a gap in the
+  // document marks its card, and moving away from either drops it. Nothing has
+  // to be clicked to see where a field lands, and nothing stays marked
+  // afterwards.
+  const setHoverField = adv?.setHoverField;
+  const hoverField = adv?.hoverField || null;
+  const hoverCard = useCallback((id) => { setHoverField?.(id); }, [setHoverField]);
+  // Leaving the panel entirely (or the panel unmounting) must not leave a gap
+  // lit in the document with nothing pointing at it.
+  useEffect(() => () => setHoverField?.(null), [setHoverField]);
+  // A new document has different blanks — none of the old ids mean anything.
+  useEffect(() => { setHoverField?.(null); }, [fieldsSig, setHoverField]);
+
+  const choose = useCallback((id, v) => {
+    // Hand any running preview over rather than ending it: the mouseleave that
+    // follows the click would otherwise restore the placeholder over the value
+    // it just committed. Same reasoning as fillFromIdentity.
+    adv?.endFieldPreview?.(true);
+    setValues((m) => ({ ...m, [id]: v }));
+    adv?.setFieldValue?.(id, v);
+  }, [adv]);
+
+
+  // ── Fill every blank about one party at once ──────────────────────────
+  // A picked paragraph is usually asking for ONE person's details spread over
+  // four or five blanks — name, CNP, address, ID series. Every one of them is
+  // already on a record in the Files tab, so offer the record instead of making
+  // the user retype what the project knows.
+  //
+  // The per-field inputs stay exactly as they were: this fills what it
+  // recognises and leaves the rest (and anything it got wrong) to be typed or
+  // picked by hand, which is why the rules can afford to be conservative.
+  const [identities, setIdentities] = useState([]);
+  const loadIdentities = adv?.loadIdentities;
+  // Which of this paragraph's blanks are asking for identity details at all.
+  // Resolved as a SEQUENCE, not one at a time: an identification clause labels
+  // its gaps in the prose before them, so two blanks can carry the same word and
+  // mean different things — the "nr." after a street is a house number, the one
+  // after a series is a document number. Reading them in order settles it.
+  const identityTargets = useMemo(() => {
+    const resolved = resolveIdentityFields(fields.map((f) => f.label));
+    return fields
+      .map((f, i) => ({ id: f.id, key: resolved[i]?.key || null, role: resolved[i]?.role || null }))
+      .filter((t) => t.key);
+  }, [fields]);
+
+  // Blanks grouped by the party they name. A generated clause tags them
+  // ([[seller.legalName]], [[buyer.nationalId]]), and a clause naming two
+  // people has to be fillable from two different records — so each party gets
+  // its own row of chips rather than one row that fills everything at once.
+  // Untagged blanks (an older document, a hand-written one) form a single
+  // unnamed group, which is the behaviour there has always been.
+  const targetGroups = useMemo(() => {
+    const byRole = new Map();
+    for (const t of identityTargets) {
+      const role = t.role || '';
+      if (!byRole.has(role)) byRole.set(role, []);
+      byRole.get(role).push(t);
+    }
+    return Array.from(byRole, ([role, targets]) => ({ role, targets }));
+  }, [identityTargets]);
+  useEffect(() => {
+    if (!identityTargets.length || !loadIdentities) { setIdentities([]); return undefined; }
+    let cancelled = false;
+    (async () => {
+      const list = await loadIdentities();
+      if (!cancelled) setIdentities(list || []);
+    })();
+    return () => { cancelled = true; };
+  }, [identityTargets.length, loadIdentities, fieldsSig]);
+
+  // How many of this paragraph's blanks a given record can actually answer —
+  // shown on its chip, so picking between two parties isn't guesswork.
+  const fillCountFor = useCallback(
+    (rec, targets) => targets.filter((t) => identityValueForField(rec, t.key)).length,
+    [],
+  );
+  // Blanks this record answers by REMOVING them — the block/stair/flat lines of
+  // a clause being filled with a house address.
+  const dropCountFor = useCallback((rec, targets) => (
+    (addressKnown(rec) && !addressIsApartment(rec))
+      ? targets.filter((t) => APARTMENT_ONLY_FIELDS.includes(t.key)).length
+      : 0
+  ), []);
+
+  // What a record would put in each blank — the one computation behind both
+  // the hover preview and the click that commits it.
+  const valuesFromIdentity = useCallback((rec, targets) => {
+    const next = {};
+    for (const t of targets) {
+      const v = identityValueForField(rec, t.key);
+      if (v) next[t.id] = v;
+    }
+    return next;
+  }, []);
+
+  // Hovering a chip writes that party into the document's blanks so the
+  // paragraph can be READ with them in it — choosing between two parties is a
+  // question about how the sentence comes out, which a column of values in a
+  // side panel can't answer. Nothing is committed and nothing is marked edited;
+  // leaving puts back whatever was there.
+  const previewIdentity = useCallback((rec, targets) => {
+    // Everything the click would do — values, the block/flat lines a house
+    // address removes, the agreement its gender settles — so what you see on
+    // hover is what you get.
+    const drop = (addressKnown(rec) && !addressIsApartment(rec))
+      ? targets.filter((t) => APARTMENT_ONLY_FIELDS.includes(t.key)).map((t) => t.id)
+      : [];
+    adv?.previewFields?.(valuesFromIdentity(rec, targets), {
+      drop,
+      gender: rec.gender || '',
+      hasSectors: locationKnown(rec) ? addressHasSectors(rec) : null,
+    });
+  }, [adv, valuesFromIdentity]);
+  const endPreview = useCallback(() => { adv?.endFieldPreview?.(false); }, [adv]);
+
+  // The same preview for ONE blank: hovering a suggestion drops it into the gap
+  // in the document so the sentence can be read with it in place. Choosing
+  // between "S.C. ACME S.R.L." and "ACME SRL" is a question about how the
+  // clause reads, and the card can't answer it.
+  const previewSuggestion = useCallback((fieldId, value) => {
+    if (!value) return;
+    adv?.previewFields?.({ [fieldId]: value });
+  }, [adv]);
+
+  // Filling OVERWRITES: naming a party is an explicit instruction, and picking
+  // the wrong record first has to be undoable by picking the right one. Blanks
+  // the record has nothing for are left alone rather than being blanked out.
+  const fillFromIdentity = useCallback((rec, targets) => {
+    const next = valuesFromIdentity(rec, targets);
+    // Hand the preview over BEFORE writing: the mouseleave that follows the
+    // click would otherwise restore the placeholders over the values it just
+    // committed.
+    adv?.endFieldPreview?.(true);
+    for (const [id, v] of Object.entries(next)) adv?.setFieldValue?.(id, v);
+    // A house has no block, stair, floor or flat — take those clauses out
+    // rather than leaving a row of empty gaps behind. Only when the record
+    // actually HAS an address: with nothing to go on, leave the draft alone.
+    if (addressKnown(rec) && !addressIsApartment(rec)) {
+      const drop = targets
+        .filter((t) => APARTMENT_ONLY_FIELDS.includes(t.key))
+        .map((t) => t.id);
+      if (drop.length) adv?.dropFields?.(drop);
+    }
+    // …and settle the two agreements the formula left open: who the party is,
+    // and whether their city is the one with sectors.
+    if (rec.gender) adv?.applyGender?.(rec.gender);
+    if (locationKnown(rec)) adv?.applyLocality?.(addressHasSectors(rec));
+    if (Object.keys(next).length) setValues((m) => ({ ...m, ...next }));
+  }, [adv, valuesFromIdentity]);
+
+  // A pick dropped, or the panel closed, while a preview was showing.
+  useEffect(() => () => { adv?.endFieldPreview?.(false); }, [adv]);
+
+
+  const filled = fields.filter((f) => (values[f.id] || '').trim()).length;
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    await adv?.applyFields?.();
+    setSaving(false);
+  }, [adv]);
+
+  return (
+    <aside className="dv-fields-card" aria-label="Complete data" aria-hidden={!completing}>
+      <header className="dv-fields-head">
+        <div className="dv-fields-head-text">
+          <span className="dv-fields-eyebrow">This paragraph</span>
+          <h2 className="dv-fields-title">
+            {fields.length === 0 ? 'Nothing to fill in' : `${filled} of ${fields.length} filled`}
+          </h2>
+        </div>
+        <Tooltip content="Close — drops the paragraph you picked">
+          <button
+            type="button"
+            className="dv-fields-close"
+            onClick={() => adv?.clearPick?.()}
+            aria-label="Close"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </Tooltip>
+      </header>
+
+      <div className="dv-fields-body">
+        {targetGroups.length > 0 && identities.length > 0 && (
+          <div className="dv-fields-parties">
+            <span className="dv-fields-parties-label">
+              Fill from a party
+              <span className="dv-fields-parties-hint">
+                {identityTargets.length} of {fields.length} {fields.length === 1 ? 'blank' : 'blanks'} recognised
+              </span>
+            </span>
+            {targetGroups.map(({ role, targets }) => {
+              // Only the records that can answer something in THIS party's
+              // blanks; a chip that would fill nothing is noise.
+              const usable = identities.filter((r) => fillCountFor(r, targets) > 0 || dropCountFor(r, targets) > 0);
+              if (!usable.length) return null;
+              return (
+                <div className="dv-fields-party-group" key={role || '_'}>
+                  {/* Named only when the document named it — an untagged
+                      paragraph has one implicit party and needs no label. */}
+                  {role && <span className="dv-fields-party-role">{role}</span>}
+                  <div className="dv-fields-parties-list">
+                    {usable.map((rec) => {
+                      const fills = fillCountFor(rec, targets);
+                      const drops = dropCountFor(rec, targets);
+                      return (
+                        <Tooltip
+                          key={(rec._path || rec.id || rec.name) + role}
+                          content={
+                            `Fill ${fills} of ${role ? `the ${role}'s` : "this paragraph's"} blanks from ${rec.name || 'this record'}`
+                            + (drops > 0 ? ` — and remove the ${drops} block/flat lines, since this address is a house` : '')
+                            + (rec.gender ? ', settling the Romanian agreement for this party' : '')
+                          }
+                        >
+                          <button
+                            type="button"
+                            className="dv-fields-party"
+                            onClick={() => fillFromIdentity(rec, targets)}
+                            onMouseEnter={() => previewIdentity(rec, targets)}
+                            onMouseLeave={endPreview}
+                            onFocus={() => previewIdentity(rec, targets)}
+                            onBlur={endPreview}
+                          >
+                            <span className="dv-fields-party-mono" aria-hidden="true">{identityInitials(rec)}</span>
+                            <span className="dv-fields-party-text">
+                              <span className="dv-fields-party-name">{rec.name || 'Unnamed'}</span>
+                              <span className="dv-fields-party-meta">
+                                {rec.role ? `${rec.role} \u00b7 ` : ''}
+                                fills {fills}
+                                {drops > 0 ? `, drops ${drops}` : ''}
+                              </span>
+                            </span>
+                          </button>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {fields.length === 0 && (
+          <p className="dv-fields-empty">
+            The paragraph you picked has no blanks in it. Pick one with a marked
+            gap to fill it in here.
+          </p>
+        )}
+
+        {loading && (
+          <div className="dv-fields-loading">
+            <span className="dv-fields-spinner" aria-hidden="true" />
+            <span>Reading the document and your project files…</span>
+          </div>
+        )}
+        {error && <p className="dv-fields-error">{error}</p>}
+
+        {fields.map((f) => {
+          const all = suggestions?.[f.id] || [];
+          const fromContext = all.filter((sg) => sg.source === 'context');
+          const fromFiles = all.filter((sg) => sg.source === 'file');
+          const value = values[f.id] || '';
+          return (
+            <section
+              className={`dv-field-card${value.trim() ? ' is-filled' : ''}${hoverField === f.id ? ' is-active' : ''}`}
+              key={f.id}
+              // Pointing at the card lights its gap in the document. Keyboard
+              // users get the same link from focus, which is the pointer's
+              // equivalent for them.
+              onMouseEnter={() => hoverCard(f.id)}
+              onMouseLeave={() => hoverCard(null)}
+              onFocusCapture={() => hoverCard(f.id)}
+              onBlurCapture={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget)) hoverCard(null);
+              }}
+            >
+              <button
+                type="button"
+                className="dv-field-label"
+                // Clicking still SCROLLS to the gap — hovering only marks it,
+                // because a page that jumped under the pointer every time it
+                // crossed a card would be unusable.
+                onClick={() => adv?.focusField?.(f.id)}
+                title="Show where this sits in the document"
+              >
+                <span className="dv-field-label-text">{f.label}</span>
+              </button>
+
+              {fromContext.length > 0 && (
+                <div className="dv-field-group">
+                  <div className="dv-field-group-head">
+                    <span className="dv-field-group-dot is-context" aria-hidden="true" />
+                    <span>From this document</span>
+                  </div>
+                  {fromContext.map((sg, i) => (
+                    <button
+                      type="button"
+                      key={`c${i}`}
+                      className={`dv-field-sugg${value === sg.value ? ' is-picked' : ''}`}
+                      onClick={() => choose(f.id, sg.value)}
+                      onMouseEnter={() => previewSuggestion(f.id, sg.value)}
+                      onMouseLeave={endPreview}
+                      onFocus={() => previewSuggestion(f.id, sg.value)}
+                      onBlur={endPreview}
+                    >
+                      <span className="dv-field-sugg-val">{sg.value}</span>
+                      {sg.why && <span className="dv-field-sugg-why">{sg.why}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {fromFiles.length > 0 && (
+                <div className="dv-field-group">
+                  <div className="dv-field-group-head">
+                    <span className="dv-field-group-dot is-file" aria-hidden="true" />
+                    <span>From your project files</span>
+                  </div>
+                  {fromFiles.map((sg, i) => (
+                    <button
+                      type="button"
+                      key={`f${i}`}
+                      className={`dv-field-sugg${value === sg.value ? ' is-picked' : ''}`}
+                      onClick={() => choose(f.id, sg.value)}
+                      onMouseEnter={() => previewSuggestion(f.id, sg.value)}
+                      onMouseLeave={endPreview}
+                      onFocus={() => previewSuggestion(f.id, sg.value)}
+                      onBlur={endPreview}
+                    >
+                      <span className="dv-field-sugg-val">{sg.value}</span>
+                      <span className="dv-field-sugg-src">{sg.file}</span>
+                      {sg.why && <span className="dv-field-sugg-why">{sg.why}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <input
+                className="dv-field-input"
+                type="text"
+                value={value}
+                placeholder="Or write your own…"
+                onChange={(e) => choose(f.id, e.target.value)}
+              />
+            </section>
+          );
+        })}
+      </div>
+
+      <footer className="dv-fields-foot">
+        <button
+          type="button"
+          className="dv-fields-btn"
+          onClick={runSuggest}
+          disabled={loading || !fields.length}
+        >
+          {loading ? 'Suggesting…' : 'Suggest again'}
+        </button>
+      </footer>
+    </aside>
+  );
+}
+
+// ── Find in this document ───────────────────────────────────────────────
+// Windows-style find, pinned to the top-left of the document area: typing
+// highlights EVERY match at once, Enter walks them (Shift+Enter walks back),
+// and the chip says which one you are on out of how many.
+//
+// It reuses the team chat's `useChatFind`, which paints through the CSS Custom
+// Highlight API rather than by wrapping matches in elements. That matters more
+// here than it does in a chat: this same DOM carries the blank markers, the
+// paragraph pick, the contenteditable edit tracking and the hover previews, and
+// a find that inserted <mark> tags into it would corrupt every one of them. The
+// API points Ranges at the text nodes already there and styles them from CSS —
+// the document is never touched.
+const FIND_GLYPH = (
+  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-3.6-3.6" />
+  </svg>
+);
+
+function DocFindBar({ containerRef }) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef(null);
+  const find = useChatFind({ containerRef, query, name: 'docfind' });
+
+  // ⌘/Ctrl+F focuses the bar instead of opening the browser's own find, which
+  // would search the app's chrome as well and can't see the document's scroll.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className={`dv-find${query ? ' is-active' : ''}`} role="search">
+      <span className="dv-find-glyph" aria-hidden="true">{FIND_GLYPH}</span>
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        placeholder="Search this document"
+        aria-label="Search this document"
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          // Escape in here clears the search. It must NOT reach the document's
+          // window handler, which reads Escape as "drop the picked paragraph".
+          e.stopPropagation();
+          if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur(); return; }
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            if (e.shiftKey) find.goPrev(); else find.goNext();
+          }
+        }}
+      />
+      {/* One slot, two states — the keyboard hint until there is a query, then
+          the match position and the controls for walking it. Same swap the
+          Files search does with its hint and clear button. */}
+      {query ? (
+        <>
+          <span
+            className={`dv-find-count${find.total === 0 ? ' is-empty' : ''}`}
+            aria-live="polite"
+          >
+            {find.total ? `${find.current}/${find.total}` : 'No results'}
+          </span>
+          <Tooltip content="Previous match (Shift+Enter)">
+            <button type="button" className="dv-find-btn" onClick={find.goPrev} disabled={!find.total} aria-label="Previous match">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m18 15-6-6-6 6" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip content="Next match (Enter)">
+            <button type="button" className="dv-find-btn" onClick={find.goNext} disabled={!find.total} aria-label="Next match">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip content="Clear search">
+            <button
+              type="button"
+              className="dv-find-btn"
+              aria-label="Clear search"
+              onClick={() => { setQuery(''); inputRef.current?.focus(); }}
+            >
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </Tooltip>
+        </>
+      ) : (
+        <span className="dv-find-kbd">
+          <kbd>{/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}</kbd>
+          <span className="dv-find-kbd-plus">+</span>
+          <kbd>F</kbd>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function DocViewer() {
   const [params] = useSearchParams();
   // Opened from Files' "New file": the document is empty and the advisor should
@@ -8247,8 +11983,39 @@ export default function DocViewer() {
   // Single Multitool footer slot — the active tab portals its primary action
   // (Extract text / Generate captions / advisor composer) here.
   const [footSlot, setFootSlot] = useState(null);
+  // The document's rendered body — what the find bar searches inside.
+  const docPaneRef = useRef(null);
+  // Is the active document still BLANK — nothing written in it yet? A blank
+  // document opens on the template chooser instead of on an empty preview
+  // beside an idle advisor. `null` while unknown, so nothing flashes before
+  // the answer is in.
+  const [docIsBlank, setDocIsBlank] = useState(null);
+  // Set once the user answers "what do you want to make?", which is what
+  // brings the preview and the side panel in. Kept separate from docIsBlank:
+  // the document stays blank for the seconds it takes the AI to write it, and
+  // the chooser must not come back in the meantime.
+  const [templateChosen, setTemplateChosen] = useState(false);
+
+  // "Complete data" mode: the advisor slides off to the left, the preview takes
+  // its space, and the blanks panel comes in on the right. Lives here rather
+  // than in the advisor context because it drives THIS component's layout, and
+  // the provider it is handed down to is rendered below.
+  const [completing, setCompleting] = useState(false);
+  // Animate the preview's shift only while the mode is actually toggling —
+  // otherwise dragging the advisor's resize gutter would fight a 340ms
+  // transition on the same padding and feel rubbery.
+  const [shifting, setShifting] = useState(false);
+  const shiftTimerRef = useRef(null);
+  const toggleCompleting = useCallback((next) => {
+    setCompleting((cur) => (typeof next === 'function' ? next(cur) : next));
+    setShifting(true);
+    if (shiftTimerRef.current) window.clearTimeout(shiftTimerRef.current);
+    shiftTimerRef.current = window.setTimeout(() => setShifting(false), 420);
+  }, []);
+  useEffect(() => () => { if (shiftTimerRef.current) window.clearTimeout(shiftTimerRef.current); }, []);
   const ADVISOR_MIN = 240;
   const ADVISOR_MAX = 960;
+  const FIELDS_W = 380;
   const [advisorW, setAdvisorW] = useState(() => {
     const w = readDvLayout().advisorW;
     return typeof w === 'number' ? Math.min(ADVISOR_MAX, Math.max(ADVISOR_MIN, w)) : 360;
@@ -8480,6 +12247,47 @@ export default function DocViewer() {
   }, []);
 
   const active = tabs.find((t) => t.id === activeId) || tabs[0] || null;
+  // A different file has different blanks — never carry the mode across.
+  useEffect(() => { setCompleting(false); }, [active?.id]);
+
+  // Decide once per file whether it is still blank.
+  //
+  // Not just "zero bytes": a file created as a Word document is a valid, empty
+  // .docx of a few kilobytes, and that is the common way to arrive here. So the
+  // bytes are read and the TEXT is checked — bounded by a size cap, because a
+  // document that large plainly has something in it and is not worth extracting
+  // to find out. Keyed on the file id alone (never regenTick), so a document the
+  // AI has just written doesn't get re-tested and bounce back to the chooser.
+  useEffect(() => {
+    setDocIsBlank(null);
+    setTemplateChosen(false);
+    const path = active?.path;
+    const name = active?.name;
+    if (!path) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const blob = await readLocalBlob(path);
+        if (cancelled) return;
+        if (!blob || blob.size === 0) { setDocIsBlank(true); return; }
+        if (blob.size > BLANK_PROBE_MAX_BYTES) { setDocIsBlank(false); return; }
+        const res = await extractFileText(blob, name);
+        if (cancelled) return;
+        // extractFileText reports a blank document as an ERROR ('empty'), not
+        // as empty text — and a blank Word document is exactly the case this
+        // whole check exists for, so it must not be lumped in with the real
+        // failures. 'unsupported' (an image, a binary, a legacy .doc) means we
+        // cannot tell, which is not the same as blank.
+        if (res?.error) { setDocIsBlank(res.error === 'empty'); return; }
+        setDocIsBlank(!(res.text || '').trim());
+      } catch (err) {
+        console.error('[doc-viewer] could not check whether the document is blank', err);
+        if (!cancelled) setDocIsBlank(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
 
   // A pre-warmed window is now SHOWN before it has been handed a file (main no
   // longer waits for the document to paint — see adoptWarmDocViewer), so this
@@ -8503,11 +12311,25 @@ export default function DocViewer() {
   const GENERATABLE_DOC_KINDS = new Set(['docx', 'doc', 'pptx', 'sheet', 'pdf', 'text']);
   const generateArmed = wantsGenerate
     || extOf(active.name) === ''
-    || GENERATABLE_DOC_KINDS.has(classify(active.mime, active.name).kind);
+    || GENERATABLE_DOC_KINDS.has(classify(active.mime, active.name, active.path).kind);
+
+  // The chooser stands in for the whole workspace while the document is still
+  // blank AND the AI is armed to write it. `docIsBlank === true` (not truthy):
+  // while the probe is in flight the answer is null and neither surface should
+  // paint, or the chooser flashes over a document that turns out to have
+  // content.
+  const showTemplateChooser = generateArmed && docIsBlank === true && !templateChosen;
 
   // Audio drops the document card's rounded-corner frame so the player +
   // lyrics read as an open section rather than a boxed card.
-  const isAudioDoc = classify(active.mime, active.name).kind === 'audio';
+  const activeKind = classify(active.mime, active.name, active.path).kind;
+  const isAudioDoc = activeKind === 'audio';
+  // Media has no text nodes to search. PDFs do now — the preview renders
+  // pdf.js's text layer over the canvas — so they get the bar like Word,
+  // PowerPoint and the rest. An identity record is excluded for a different
+  // reason: it is a form, and every value in it is already on screen in a
+  // labelled field, so there is nothing a find bar could reveal.
+  const searchable = !['audio', 'video', 'image', 'other', 'identity'].includes(activeKind);
 
   return (
     <MultitoolAdvisorProvider
@@ -8516,10 +12338,19 @@ export default function DocViewer() {
       generateMode={generateArmed}
       onDocWritten={() => setRegenTick((t) => t + 1)}
       onRenameFile={(newName, newMime) => applyGeneratedRename(active.id, newName, newMime)}
+      completing={completing}
+      setCompleting={toggleCompleting}
     >
     <div className="dv-page" ref={pageRef}>
       <CursorSpotlight contain className="dv-cursor-spotlight" />
 
+      {/* A blank document has nothing to preview and nothing to discuss — it
+          opens on the chooser, with neither the side panel nor the preview
+          mounted, until it is something. */}
+      {showTemplateChooser ? (
+        <DocTemplateChooser onChosen={() => setTemplateChosen(true)} />
+      ) : (
+      <>
       {/* Body: a column holding the Documents + Multitool cards. */}
       <div className="dv-body-row">
         {/* Right column — Documents + Multitool. */}
@@ -8527,7 +12358,17 @@ export default function DocViewer() {
           {/* Main row: the document card fills the whole area; the Multitool
               panel FLOATS above its left side (absolute, see CSS). The var
               feeds the resize gutter's position. */}
-          <div className="dv-main-row" style={{ '--dv-advisor-w': `${advisorW}px` }}>
+          <div
+            className={`dv-main-row${completing ? ' is-completing' : ''}${shifting ? ' is-shifting' : ''}`}
+            style={{
+              // The advisor keeps its strip; the blanks panel reserves its own
+              // on the opposite side, so the preview narrows rather than
+              // sliding sideways under a vanishing sidebar.
+              '--dv-advisor-w': `${advisorW}px`,
+              '--dv-fields-w': `${FIELDS_W}px`,
+              '--dv-fields-pad': completing ? `calc(${FIELDS_W}px + 24px)` : '0px',
+            }}
+          >
             {/* Multitool panel — hosts the active file's tabbed side panel,
                 portalled into the slot below by its pane. No chrome header. */}
             <aside
@@ -8558,21 +12399,31 @@ export default function DocViewer() {
               data-dvwin="documents"
             >
               <div className="dv-section-body">
-                <div className="dv-section-pane dv-doc">
+                {/* Top-left of the document area, just inside the side panel's
+                    edge — the corner a find bar is expected in. */}
+                {searchable && <DocFindBar containerRef={docPaneRef} />}
+                <div className="dv-section-pane dv-doc" ref={docPaneRef}>
                   {/* Keyed by the file id only (NOT regenTick) so writing a new
                       version doesn't remount the whole pane — that would refresh
                       and jump the chat. regenTick is passed down so only the
                       PREVIEW re-reads the file from disk. */}
-                  <DocPane key={active.id} regenTick={regenTick} file={active} sidePanelSlot={sidePanelSlot} sideTabsSlot={sideTabsSlot} onWhatsAppDetected={() => markActiveWhatsApp(active.id)} />
+                  <DocPane key={active.id} regenTick={regenTick} file={active} sidePanelSlot={sidePanelSlot} sideTabsSlot={sideTabsSlot} onWhatsAppDetected={() => markActiveWhatsApp(active.id)} onRenamed={(newName) => applyGeneratedRename(active.id, newName, 'application/json')} />
                 </div>
                 {/* Clarifying questions now render in the shared AskUserPanel
                     directly above the composer (see MultitoolComposer), not as an
                     overlay over the document area. */}
               </div>
             </div>
+
+            {/* Blanks panel — mirrors the advisor on the opposite edge. Always
+                mounted so it can fade rather than pop, and so a suggestion run
+                already in flight isn't thrown away by a stray toggle. */}
+            <DocFieldsPanel />
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
     </MultitoolAdvisorProvider>
   );

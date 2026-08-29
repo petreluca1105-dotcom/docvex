@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getCachedPdf } from '../lib/pdfCache';
+import { loadPdfModule } from '../lib/pdfWorker';
 import Tooltip from './Tooltip';
 
 // Preview renderer for the FileDetailModal's preview pane.
@@ -115,6 +116,12 @@ function VideoPreview({ signedUrl }) {
 // "Loading PDF…" string shows while pdf.js parses and renders.
 function PdfPreview({ signedUrl, file, onOpen }) {
   const canvasRef = useRef(null);
+  // A transparent copy of the page's text, positioned over the canvas. The
+  // canvas is pixels — nothing in it can be selected, searched or read by a
+  // screen reader — so pdf.js's text layer is what makes a PDF behave like a
+  // document rather than a picture of one. The Doc Viewer's find bar walks
+  // exactly these nodes.
+  const textLayerRef = useRef(null);
   const containerRef = useRef(null);
   const pdfRef = useRef(null);
   const renderTaskRef = useRef(null);
@@ -228,6 +235,29 @@ function PdfPreview({ signedUrl, file, onOpen }) {
         await task.promise;
         if (renderTaskRef.current === task) renderTaskRef.current = null;
         if (!cancelled) setPdfPainted(true);
+
+        // Text layer, at CSS scale (the canvas is oversampled by dpr; the
+        // overlay is not). Best-effort: a PDF that is pure scanned image has no
+        // text content, and a failure here must never cost the rendered page.
+        const layer = textLayerRef.current;
+        if (layer && !cancelled) {
+          layer.replaceChildren();
+          try {
+            const cssViewport = page.getViewport({ scale });
+            layer.style.width = `${Math.round(cssViewport.width)}px`;
+            layer.style.height = `${Math.round(cssViewport.height)}px`;
+            layer.style.setProperty('--scale-factor', String(scale));
+            const pdfjs = await loadPdfModule();
+            if (cancelled) return;
+            const textContent = await page.getTextContent();
+            if (cancelled) return;
+            if (pdfjs.TextLayer) {
+              await new pdfjs.TextLayer({ textContentSource: textContent, container: layer, viewport: cssViewport }).render();
+            } else if (pdfjs.renderTextLayer) {
+              await pdfjs.renderTextLayer({ textContentSource: textContent, container: layer, viewport: cssViewport }).promise;
+            }
+          } catch { /* no text in this PDF, or an older pdf.js — the page still renders */ }
+        }
       } catch (err) {
         if (err?.name !== 'RenderingCancelledException' && !cancelled) {
           setError(err?.message || 'Failed to render page');
@@ -243,10 +273,13 @@ function PdfPreview({ signedUrl, file, onOpen }) {
   return (
     <ClickablePreview onOpen={onOpen} ariaLabel={`Open ${file.name}`}>
       <div className="file-preview-pdf-static" ref={containerRef}>
-        <canvas
-          ref={canvasRef}
-          className={`file-preview-pdf-canvas${pdfPainted ? ' is-visible' : ''}`}
-        />
+        <div className="file-preview-pdf-stack">
+          <canvas
+            ref={canvasRef}
+            className={`file-preview-pdf-canvas${pdfPainted ? ' is-visible' : ''}`}
+          />
+          <div className="file-preview-pdf-text" ref={textLayerRef} aria-hidden="true" />
+        </div>
         {!pdfPainted && (
           <div className="file-preview-loading">Loading PDF…</div>
         )}

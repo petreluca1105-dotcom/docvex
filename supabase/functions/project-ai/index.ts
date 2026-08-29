@@ -51,6 +51,7 @@
 //   200 with { ok:false, error:"ai_not_configured" } so the client can
 //   show a friendly message instead of treating it as a hard failure.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { firmDescriptor, jurisdictionPrompt } from "../_shared/jurisdictions.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -149,6 +150,47 @@ const ASK_USER_TOOL = {
   },
 } as const;
 
+// The names a blank may carry. They are the identity record's OWN field names
+// (src/lib/identities.js — keep the two lists in step), so a document generated
+// with them is matched by lookup rather than by guessing at the words around
+// the gap, and a party's details land in the right places every time.
+const IDENTITY_FIELD_KEYS = [
+  "legalName", "aka",
+  "nationalId", "dateOfBirth", "placeOfBirth", "nationality",
+  "idType", "idDocument", "idSeries", "idNumber", "idIssuer", "idIssuedAt",
+  "taxId", "regNo", "legalForm", "representative", "repCapacity", "iban", "bank",
+  "address", "addressStreet", "addressNumber", "addressBlock", "addressStair",
+  "addressFloor", "addressApartment", "addressLocality", "addressCounty", "addressSector",
+  "addressCountyOrSector", "addressPostalCode",
+  "city", "county", "country",
+  "email", "phone",
+].join(", ");
+
+const PLACEHOLDER_RULE =
+  "PLACEHOLDERS — one shape, always, and every blank names the field it wants.\\n" +
+  "Write each gap as DOUBLE square brackets around a NAME FROM THIS LIST: " + IDENTITY_FIELD_KEYS + ". " +
+  "Prefix it with the party when the clause involves more than one — [[seller.legalName]], " +
+  "[[buyer.nationalId]] — and use the bare name when there is only one: [[legalName]]. " +
+  "DocVex holds a record for each party in the matter, so a blank named this way is filled from that " +
+  "record in one click; a blank named anything else has to be typed by hand.\\n" +
+  "  WRONG: domiciliat în [localitatea], str. [...], nr. [...], bl. [...], CNP [...]\\n" +
+  "  RIGHT: domiciliat în [[seller.addressLocality]], str. [[seller.addressStreet]], " +
+  "nr. [[seller.addressNumber]], bl. [[seller.addressBlock]], CNP [[seller.nationalId]]\\n" +
+  "One blank per fact: a street, a number, a block and a flat are four blanks, not one gap repeated. " +
+  "Split an address into its parts (addressStreet / addressNumber / addressBlock / addressStair / " +
+  "addressFloor / addressApartment / addressLocality / addressCounty) whenever the clause writes them " +
+  "separately, and split an ID document into idSeries and idNumber when it says 'seria … nr. …'.\\n" +
+  "For anything the list does not cover — a case number, a price, a deadline, an issuing authority — " +
+  "still use double brackets, with a short description inside: [[the agreed price in EUR]]. " +
+  "Never write an unlabelled gap: no '[...]', no '[…]', no empty '[ ]', no '____' or '......', " +
+  "no {curly braces} or <angle brackets>, no 'TBD'/'N/A'/'XXX', and never a colon with nothing after it.\\n" +
+  "GENDER: keep the Romanian formulas that cover both — 'Domnul/Doamna', 'domiciliat(ă)', " +
+  "'identificat(ă)'. DocVex resolves them from the party's record when the document is filled in, so " +
+  "do NOT guess a gender and do not drop either half.\\n" +
+  "Never invent names, dates, case numbers or amounts that were not provided. When you revise a " +
+  "document, carry every existing placeholder through verbatim — brackets and field name included — " +
+  "unless the user supplied its value.";
+
 // Client-side tool: the model calls this to CREATE or UPDATE the document the
 // user is iteratively building. The backend does NOT build the file — it returns
 // the tool_use to the client, which packs `content` into a real .docx/.pptx/.xlsx
@@ -186,7 +228,8 @@ const WRITE_DOCUMENT_TOOL = {
           "The COMPLETE document. Format depends on kind — docx AND pdf: Markdown ('# Title', '## Heading', " +
           "'- bullet', paragraphs, **bold**/*italic*). pptx: each slide is '# Slide Title' then '- bullet' lines " +
           "(one slide per title). xlsx: CSV only, first row = column headers, no prose before or after. For xlsx, " +
-          "write live formulas like '=SUM(B2:B9)' (not pre-computed numbers) so the sheet stays dynamic.",
+          "write live formulas like '=SUM(B2:B9)' (not pre-computed numbers) so the sheet stays dynamic. " +
+          PLACEHOLDER_RULE,
       },
     },
     required: ["kind", "content"],
@@ -294,7 +337,12 @@ async function callClaudeRaw(opts: {
   return await resp.json();
 }
 
-function matterContext(projectName?: string, fileNames?: unknown): string {
+// Workspace framing appended to every system prompt: which matter is open,
+// which files are on hand, and — since migration 033 — which country's law
+// applies. The jurisdiction is resolved from the code the client sent against
+// the shared allow-list, so an unset (or unknown) value keeps the Romania
+// default this stack has always assumed.
+function matterContext(projectName?: string, fileNames?: unknown, jurisdiction?: unknown): string {
   const name = (projectName && String(projectName).trim()) || "";
   const files = Array.isArray(fileNames)
     ? fileNames.filter((f) => typeof f === "string").slice(0, 40)
@@ -303,7 +351,7 @@ function matterContext(projectName?: string, fileNames?: unknown): string {
   const filesLine = files.length
     ? `Files the user has on hand (names only, not their contents): ${files.join("; ")}.`
     : "";
-  return [ctx, filesLine].filter(Boolean).join(" ");
+  return [ctx, filesLine, jurisdictionPrompt(jurisdiction)].filter(Boolean).join(" ");
 }
 
 // ── ask ─────────────────────────────────────────────────────────────
@@ -316,6 +364,7 @@ async function handleAsk(body: {
   docTools?: boolean;
   forceDocument?: boolean;
   docKind?: string;
+  jurisdiction?: string;
 }): Promise<Response> {
   if (!ANTHROPIC_API_KEY) return jsonResponse({ ok: false, error: "ai_not_configured" });
 
@@ -340,7 +389,7 @@ async function handleAsk(body: {
     "You have a tool `ask_user` that renders interactive options/decisions for the user in the chat. Call it ONLY when you " +
     "genuinely need information you cannot reasonably infer, or to confirm a consequential/irreversible action before doing it. " +
     "Prefer a single question; never more than three. For anything you can reasonably decide yourself, just answer — do not ask. " +
-    `${matterContext(body.projectName, body.fileNames)} ` +
+    `${matterContext(body.projectName, body.fileNames, body.jurisdiction)} ` +
     "When the user attaches files, their full text contents are included inline in the user's message under a heading " +
     "such as 'The user attached the following file(s)'. Treat that text as the ACTUAL contents of those files — read it " +
     "and quote, summarise and reason over it directly to answer. (Long files may be marked '[content truncated]'.) " +
@@ -368,7 +417,8 @@ async function handleAsk(body: {
     "Once it is clear the user wants to create or change the document, default to doing the work: make good choices for names, " +
     "dates, sample data and formatting rather than interrogating the user, and use `ask_user` for a substantive missing detail " +
     "only when you truly cannot proceed without it. " +
-    matterContext(body.projectName, body.fileNames);
+    `${PLACEHOLDER_RULE} ` +
+    matterContext(body.projectName, body.fileNames, body.jurisdiction);
 
   const system = docTools ? docBuilderSystem : baseAssistantSystem;
   const toolsArr = docTools
@@ -449,6 +499,7 @@ async function handleSuggest(body: {
   fileName?: string;
   excerpt?: string;
   mimeType?: string;
+  jurisdiction?: string;
 }): Promise<Response> {
   if (!ANTHROPIC_API_KEY) return jsonResponse({ ok: false, error: "ai_not_configured" });
 
@@ -457,7 +508,7 @@ async function handleSuggest(body: {
   const mimeType = body.mimeType ? String(body.mimeType).slice(0, 120) : "";
 
   const system =
-    "You are DocVex AI, a legal assistant embedded in a Romanian law firm's document app. " +
+    `You are DocVex AI, a legal assistant embedded in ${firmDescriptor(body.jurisdiction)}'s document app. ` +
     "Given one file, propose 3 to 5 SHORT, high-value actions the lawyer is most likely to want to run on it. " +
     "Tailor them to the file's apparent content and type. Favour concrete legal-analysis actions such as risk " +
     "scoring, clause/obligation extraction, compliance or red-flag checks, summarisation, and plain-language " +
@@ -491,6 +542,7 @@ async function handleGenerate(body: {
   instructions?: string;
   projectName?: string;
   fileNames?: unknown;
+  jurisdiction?: string;
 }): Promise<Response> {
   if (!ANTHROPIC_API_KEY) return jsonResponse({ ok: false, error: "ai_not_configured" });
 
@@ -498,13 +550,13 @@ async function handleGenerate(body: {
   const instructions = (body.instructions && String(body.instructions).trim()) || "";
 
   const system =
-    "You are DocVex AI and you draft legal documents for a Romanian law firm. " +
-    "You produce a complete, professional draft in English, in a formal legal register, ready for a lawyer to " +
+    `You are DocVex AI and you draft legal documents for ${firmDescriptor(body.jurisdiction)}. ` +
+    "You produce a complete, professional draft in a formal legal register, ready for a lawyer to " +
     "review and adapt. Structure the document with a title on the first line (IN UPPERCASE), then numbered " +
-    "paragraphs or clauses as appropriate. Use placeholders like [...] only where a specific fact is genuinely " +
-    "unknown. Do not invent case numbers, dates or amounts that were not provided. " +
+    "paragraphs or clauses as appropriate. " +
+    `${PLACEHOLDER_RULE} ` +
     "Respond with ONLY the document text — no markdown, no code blocks, no commentary before or after. " +
-    `${matterContext(body.projectName, body.fileNames)}`;
+    `${matterContext(body.projectName, body.fileNames, body.jurisdiction)}`;
 
   const user =
     `Document type: ${template}.\n` +
@@ -589,6 +641,11 @@ async function handleOffice(body: {
   const userText =
     `Create a polished, professional ${kind.toUpperCase()} file from the content/spec below. ` +
     `${designGuide}` +
+    `Reproduce the content faithfully — in particular, keep every bracketed placeholder such as ` +
+    `[[the information that the user needs to provide]] EXACTLY as written, doubled brackets included, ` +
+    `as visible text. ` +
+    `Do not resolve, invent, delete or restyle them into underscores or blank gaps: they are the fields the ` +
+    `user fills in later. ` +
     `Build the COMPLETE file and SAVE it to disk with a .${kind} extension. This is the most important step — do not finish until the file is written. Output ONLY the file.\n\n` +
     (instructions ? `Additional instructions: ${instructions}\n\n` : "") +
     `CONTENT / SPEC:\n${content}`;

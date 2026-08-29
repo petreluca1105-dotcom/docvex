@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { withStyleSteer } from '../../lib/writingStyle';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -51,6 +52,13 @@ const FILE_STEER = '[Meta: You can CREATE real files in this project\'s Files ta
 
 // Conversation-rail width bounds (px) for the drag resizer on its divider.
 const RAIL_WIDTH_KEY = 'docvex.aichat.railWidth';
+// Whether the rail is hidden altogether (the toolbar's panel toggle). Kept
+// separate from the width so hiding and re-showing restores the width the user
+// dragged to, rather than resetting it.
+const RAIL_HIDDEN_KEY = 'docvex.aichat.railHidden';
+// The divider band's width (.aichat-resizer's flex-basis) — the hide slide has
+// to travel the rail AND its divider to clear the shell's left edge.
+const RAIL_DIVIDER_W = 9.6;
 const RAIL_MIN = 168;
 const RAIL_MAX = 384;
 const RAIL_DEFAULT = 216;
@@ -269,6 +277,21 @@ export default function ProjectAI() {
     return Number.isFinite(n) && n >= RAIL_MIN && n <= RAIL_MAX ? n : RAIL_DEFAULT;
   });
   const [railResizing, setRailResizing] = useState(false);
+  // Hidden rail: the whole conversation column slides out to the left and the
+  // thread takes the space. Implemented as a negative margin rather than a
+  // collapsing width so nothing INSIDE the rail reflows while it travels — the
+  // list keeps its layout width the whole way out and the thread column, which
+  // simply follows it, reads as being pushed across.
+  const [railHidden, setRailHidden] = useState(() => {
+    try { return localStorage.getItem(RAIL_HIDDEN_KEY) === '1'; } catch { return false; }
+  });
+  const toggleRail = () => {
+    setRailHidden((v) => {
+      const next = !v;
+      try { localStorage.setItem(RAIL_HIDDEN_KEY, next ? '1' : '0'); } catch { /* quota */ }
+      return next;
+    });
+  };
   const startRailResize = (e) => {
     e.preventDefault();
     setRailResizing(true);
@@ -874,12 +897,15 @@ export default function ProjectAI() {
     }
   };
 
-  // Append the file-creation steer to the last user message of an api payload.
-  const withSteer = (apiMessages) => {
+  // Append the file-creation steer to the last user message of an api payload,
+  // then the user's own writing style from the Playbook on top of it. Both land
+  // on the same turn and neither needs to know about the other.
+  const withSteer = async (apiMessages) => {
     if (!apiMessages.length) return apiMessages;
     const last = apiMessages[apiMessages.length - 1];
     if (last.role !== 'user' || typeof last.content !== 'string') return apiMessages;
-    return [...apiMessages.slice(0, -1), { ...last, content: `${last.content}\n\n${FILE_STEER}` }];
+    const withFile = [...apiMessages.slice(0, -1), { ...last, content: `${last.content}\n\n${FILE_STEER}` }];
+    return withStyleSteer(withFile);
   };
 
   // ── Send a turn ────────────────────────────────────────────────────────
@@ -930,7 +956,7 @@ export default function ProjectAI() {
     // on: the model can create files (write_document) or pause to clarify
     // (ask_user) — the steer note tells it when to do which.
     const digest = await getProjectDigest();
-    const apiMsgs = withSteer(withProjectContext(toApiMessages(convo), digest));
+    const apiMsgs = await withSteer(withProjectContext(toApiMessages(convo), digest));
     const res = await askProjectAi({
       messages: apiMsgs,
       projectName: selectedProject?.name || '',
@@ -1019,7 +1045,7 @@ export default function ProjectAI() {
     beginStreaming(threadId);
     const seq = ++turnSeqRef.current;
     const digest = await getProjectDigest();
-    const apiMsgs = withSteer(withProjectContext(toApiMessages(convo), digest));
+    const apiMsgs = await withSteer(withProjectContext(toApiMessages(convo), digest));
     const res = await askProjectAi({
       messages: apiMsgs,
       projectName: selectedProject?.name || '',
@@ -1191,6 +1217,22 @@ export default function ProjectAI() {
       {/* Static tools/tabs bar — the page itself never scrolls (only the
           bubbles column does), so there's no pinned/mini-header state. */}
       <div className="dvx-toolbar mini-glow" onMouseMove={miniHeaderSpot}>
+        {/* Hide / show the conversation rail. Sits at the far left of the bar,
+            over the rail it controls, and stays mounted while the rail is
+            hidden — it is the only way back. */}
+        {tab === 'chat' && hasThreads && (
+          <Tooltip content={railHidden ? 'Show conversations' : 'Hide conversations'}>
+            <button
+              type="button"
+              className={`aichat-railtoggle${railHidden ? ' is-off' : ''}`}
+              aria-label={railHidden ? 'Show conversations' : 'Hide conversations'}
+              aria-expanded={!railHidden}
+              onClick={toggleRail}
+            >
+              {I.panelLeft({ width: 16, height: 16 })}
+            </button>
+          </Tooltip>
+        )}
         <div className="dvx-tabs vb-tabs" role="tablist">
           <button
             type="button"
@@ -1295,10 +1337,21 @@ export default function ProjectAI() {
             </div>
           </div>
         ) : (
-          <div className="aichat-shell aichat-fill">
+          <div className={`aichat-shell aichat-fill${railHidden ? ' rail-hidden' : ''}${railResizing ? ' is-resizing' : ''}`}>
             {/* Conversation rail — every saved AI conversation + New chat.
                 Width is user-resizable via the divider next to it. */}
-            <aside className="aichat-rail" style={{ flexBasis: railWidth }}>
+            <aside
+              className="aichat-rail"
+              aria-hidden={railHidden}
+              /* Hidden: pull the rail (and its divider) off the shell's left
+                 edge. The width is untouched, so re-showing lands back on
+                 exactly the width the user dragged to. */
+              style={{
+                flexBasis: railWidth,
+                marginLeft: railHidden ? `${-(railWidth + RAIL_DIVIDER_W)}px` : 0,
+              }}
+              inert={railHidden || undefined}
+            >
               {/* New chat — OUTSIDE the scroller, so the items scroll under
                   it. Shaped like a chat item row; its resting look borrows the
                   sidebar's selected-tab style (accent tint + ring + text). */}

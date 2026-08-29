@@ -467,6 +467,11 @@
      thread stretch to its full height; the THREAD is the scroll container. */
   display: flex;
   align-items: stretch;
+  /* Clips the rail as it slides off the left edge (see the hide animation at
+     the end of the rail block). Everything that floats over the thread — the
+     composer, the ask panel, the overlay scrollbars — lives inside this box,
+     so nothing legitimate is cut off. */
+  overflow: hidden;
 }
 
 /* Timeline tab — intentionally empty placeholder; fills the same area as the
@@ -598,6 +603,77 @@
   z-index: 3;
 }
 .ai-chat-page .aichat-resizer-thumb.is-visible { opacity: 1; }
+
+/* ── Hiding the rail ────────────────────────────────────────────────────
+   The toolbar's panel toggle slides the conversation column out to the left
+   and lets the thread take the space. The travel is a negative margin-left on
+   the rail (written inline by the page, since it depends on the dragged
+   width): the rail keeps its own width the whole way out, so its list never
+   reflows mid-flight, and the divider + thread column — laid out after it —
+   are carried the same distance, which is what reads as the push.
+
+   `margin-left` is not compositor-friendly, but it is the property that moves
+   the following siblings too; a transform would slide the rail alone and leave
+   a hole. The animated box is one flex item on a short trip, so it stays
+   smooth. */
+.ai-chat-page .aichat-rail {
+  transition: margin-left 320ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 200ms ease;
+}
+/* Dragging the divider writes a new width every mousemove — an eased
+   transition on the same axis would make the rail lag the cursor. */
+.ai-chat-page .aichat-shell.is-resizing .aichat-rail { transition: none; }
+
+.ai-chat-page .aichat-shell.rail-hidden .aichat-rail {
+  /* Fades slightly ahead of the slide so the rows are gone before they reach
+     the edge, rather than being visibly guillotined by the clip. */
+  opacity: 0;
+  pointer-events: none;
+}
+/* The divider rides out with the rail; kill its resize affordance so the
+   sliver at the very edge can't be grabbed mid-flight. */
+.ai-chat-page .aichat-shell.rail-hidden .aichat-resizer {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+/* The toolbar's rail toggle — same 40px bar, sized like a chrome tool. */
+.ai-chat-page .aichat-railtoggle {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 6.4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6.4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.ai-chat-page .aichat-railtoggle:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+/* Rail hidden — the toggle is the only way back, so it reads as engaged
+   rather than as an idle icon. */
+.ai-chat-page .aichat-railtoggle.is-off {
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+.ai-chat-page .aichat-railtoggle svg { display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-chat-page .aichat-rail,
+  .ai-chat-page .aichat-shell.rail-hidden .aichat-resizer { transition: none; }
+}
 .ai-chat-page .aichat-newbtn {
   width: 100%;
   display: inline-flex;

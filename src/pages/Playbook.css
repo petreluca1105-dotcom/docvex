@@ -1,0 +1,155 @@
+/* Playbook — the user's own documents and the writing voice learned from them.
+   Two sections: what it learned (top, because that is the answer), and the
+   documents it learned from (below, because that is the working area). All
+   `pbk-`-prefixed. Every colour a token — see tokens.css. */
+
+.pbk {
+  display: flex; flex-direction: column; gap: 24px;
+  max-width: 880px;
+  padding-bottom: 64px;
+}
+.pbk-signedout { color: var(--text-muted); font-size: 13px; }
+
+/* ── What it learned ────────────────────────────────────────────────── */
+.pbk-profile {
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg-card);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+}
+/* Nothing learned yet: quieter, and no fill — an empty card that looks like a
+   full one reads as a card that failed to load. */
+.pbk-profile.is-empty { background: transparent; box-shadow: none; border-style: dashed; }
+.pbk-profile-head {
+  display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.pbk-profile-title { flex: 1; min-width: 220px; }
+.pbk-profile-title h2 {
+  margin: 0 0 3px; font-family: var(--font-display); font-size: 17px; font-weight: 600;
+  color: var(--text-primary);
+}
+.pbk-profile-title p { margin: 0; font-size: 12px; color: var(--text-muted); }
+.pbk-profile-tools { display: flex; align-items: center; gap: 8px; }
+
+/* The learned guide, printed as prose because that is what it is — the user can
+   read exactly what the AI thinks of their writing, and disagree with it by
+   importing better examples. */
+.pbk-profile-body {
+  border-top: 1px solid var(--border); padding-top: 14px;
+  font-size: 13px; line-height: 1.65; color: var(--text-secondary);
+}
+.pbk-profile-body p { margin: 0 0 10px; }
+.pbk-profile-body p:last-child { margin-bottom: 0; }
+/* Switched off — still there, plainly not in force. */
+.pbk-profile-body.is-paused { opacity: 0.5; }
+.pbk-profile-blank {
+  margin: 0; max-width: 62ch;
+  font-size: 12.5px; line-height: 1.6; color: var(--text-muted);
+}
+
+/* On / off for the whole thing, without forgetting anything. */
+.pbk-switch {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-input); cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.pbk-switch.is-on { border-color: var(--accent); color: var(--text-primary); }
+.pbk-switch-track {
+  position: relative; flex: none;
+  width: 30px; height: 17px; border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 160ms ease;
+}
+.pbk-switch.is-on .pbk-switch-track { background: var(--accent); }
+.pbk-switch-knob {
+  position: absolute; top: 2.5px; left: 2.5px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--bg-card);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pbk-switch.is-on .pbk-switch-knob { transform: translateX(13px); }
+
+.pbk-relearn {
+  padding: 6px 13px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-input);
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.pbk-relearn:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--text-primary); }
+.pbk-relearn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── The documents ──────────────────────────────────────────────────── */
+.pbk-samples-head h2 {
+  margin: 0 0 4px; font-family: var(--font-display); font-size: 17px; font-weight: 600;
+  color: var(--text-primary);
+}
+.pbk-samples-head p { margin: 0 0 14px; max-width: 62ch; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); }
+
+.pbk-file { display: none; }
+.pbk-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 28px 24px;
+  border: 1.5px dashed var(--border-strong); border-radius: 12px;
+  background: var(--bg-elevated);
+  text-align: center;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.pbk-drop.is-over { border-color: var(--accent); background: var(--accent-tint); }
+.pbk-drop.is-busy { opacity: 0.6; pointer-events: none; }
+.pbk-drop-mark { color: var(--accent); margin-bottom: 4px; }
+.pbk-drop-title { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.pbk-drop-sub { margin: 0; font-size: 12px; color: var(--text-muted); }
+.pbk-drop-browse {
+  padding: 0; border: 0; background: none;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--accent);
+  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+/* What is kept and what is not, said here rather than in a policy nobody
+   opens — these are the user's own documents and some of them are privileged. */
+.pbk-drop-fine {
+  margin: 10px 0 0; max-width: 46ch;
+  font-size: 10.8px; line-height: 1.5; color: var(--text-muted);
+}
+
+.pbk-note {
+  margin: 12px 0 0; padding: 8px 12px; border-radius: 8px;
+  font-size: 12px; line-height: 1.5;
+}
+.pbk-note.is-ok { background: var(--success-soft); color: var(--text-primary); }
+.pbk-note.is-warn { background: var(--warning-soft); color: var(--text-primary); }
+.pbk-note.is-error { background: var(--danger-soft); color: var(--danger-text); }
+
+.pbk-empty { margin: 14px 0 0; font-size: 12px; color: var(--text-muted); }
+.pbk-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pbk-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--bg-card);
+}
+.pbk-item.is-reading { opacity: 0.6; }
+.pbk-item-mark { flex: none; display: grid; place-items: center; color: var(--text-muted); }
+.pbk-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pbk-item-name {
+  font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pbk-item-meta { font-size: 10.8px; color: var(--text-muted); }
+.pbk-item-drop {
+  flex: none; display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--text-muted); cursor: pointer;
+}
+.pbk-item-drop:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger-text); }
+.pbk-item-drop:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pbk-switch-knob, .pbk-switch-track, .pbk-drop { transition: none; }
+}

@@ -86,13 +86,24 @@ async function collectDropEntries(dataTransfer) {
 //                        then auto-delete. Each item shows a countdown pill.
 
 // ── Inline icon set (Feather-style, currentColor) ─────────────────────
-function Icon({ name, size = 16, strokeWidth = 1.8, className = '', filled = false }) {
+// Exported so surfaces that borrow the Files chrome — the Doc Viewer's
+// fill-from-a-picture picker — draw from the SAME glyph set. A second copy
+// would drift on the first icon either side changed.
+export function Icon({ name, size = 16, strokeWidth = 1.8, className = '', filled = false }) {
   const p = {
     width: size, height: size, viewBox: '0 0 24 24', fill: filled ? 'currentColor' : 'none',
     stroke: 'currentColor', strokeWidth, strokeLinecap: 'round',
     strokeLinejoin: 'round', className, 'aria-hidden': 'true',
   };
   switch (name) {
+    // A party to the case — used by "Add identity".
+    case 'identity':
+      return (
+        <svg {...p}>
+          <circle cx="12" cy="8" r="3.4" />
+          <path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" />
+        </svg>
+      );
     case 'folder': return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>;
     case 'edit-pen': return <svg {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>;
     case 'trash': return <svg {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></svg>;
@@ -185,7 +196,9 @@ function FullBinGlyph({ size = 42 }) {
 // WhatsApp export (it CONTAINS a chat transcript — see isWhatsAppExport) gets
 // the WhatsApp mark like the export zips do; every other folder gets the
 // folder glyph (optionally a custom colour).
-function FolderOrBinGlyph({ item, size = 42, color }) {
+// Exported alongside ItemThumbnail: a surface borrowing the Files tiles needs
+// the folder glyph too, or its folders come out as generic documents.
+export function FolderOrBinGlyph({ item, size = 42, color }) {
   if (item.binEntry) {
     const s = Math.round(size * 0.92);
     const full = item.binCount > 0;
@@ -811,7 +824,7 @@ export default function FilesWorkspace({
   selectTargetPath,       // path of a just-created file/FOLDER to auto-select (no rename)
   onSelectTargetConsumed, // () => void — clear the request once it's applied
   // actions
-  onOpen, onOpenContent, onRename, onDelete, onRestore, onNewFolder, onNewFile, onCreateTypedFile, onUpload, onUploadFolder, onOpenLocation,
+  onOpen, onOpenContent, onRename, onDelete, onRestore, onNewFolder, onNewFile, onCreateTypedFile, onAddIdentity, onUpload, onUploadFolder, onOpenLocation,
   onEmptyBin,
   onRefresh,         // () => void — re-list the folder (toolbar refresh button)
   onDebugSeedTrash,  // DEV-only — seed the bin with staggered-expiry dummy items
@@ -1601,6 +1614,7 @@ export default function FilesWorkspace({
         className: 'project-files-morph-ai',
         submenu: [
           { key: 'newfolder', label: <><Icon name="folder-plus" className="fx-icon" /> New folder</>, onClick: () => requestNewFolder() },
+          onAddIdentity && { key: 'identity', label: <><Icon name="identity" className="fx-icon" /> Add identity</>, onClick: () => onAddIdentity() },
           onCreateTypedFile && {
             key: 'aigroup',
             aiGroup: true,
@@ -2264,6 +2278,13 @@ export default function FilesWorkspace({
                       <button onClick={() => { setCreateMenuOpen(false); requestNewFolder(); }}>
                         <Icon name="folder-plus" className="fx-icon" /> New folder
                       </button>
+                      {/* A party to the case rather than a document — it lands
+                          in the project's Identities folder. */}
+                      {onAddIdentity && (
+                        <button onClick={() => { setCreateMenuOpen(false); onAddIdentity(); }}>
+                          <Icon name="identity" className="fx-icon" /> Identity
+                        </button>
+                      )}
                       {onCreateTypedFile && (
                         <>
                           <div className="fx-create-menu-head">Build with AI</div>

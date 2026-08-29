@@ -12,7 +12,7 @@ import {
   isElectronBranch,
   readLocalBlob,
 } from '../../lib/localFolder';
-import { openDocx, isDocxFile, openFileWindow, canViewInBrowser, openDocViewerWindow, prepareWhatsAppZip, prepareWhatsAppFolder, detectWhatsApp, notifyFilesRemoved, onFilesRemoved, onFilesChanged, allowLocalFile } from '../../lib/platform';
+import { openDocx, isDocxFile, openFileWindow, canViewInBrowser, openDocViewerWindow, prepareWhatsAppZip, prepareWhatsAppFolder, detectWhatsApp, notifyFilesRemoved, onFilesRemoved, onFilesChanged } from '../../lib/platform';
 import { openDocxInWindow } from '../../lib/openDocxWindow';
 import { emptyDocumentBlob, docKindFromName, mimeForKind } from '../../lib/documentGen';
 import { clearConversation, migrateConversation, migrateConversationsUnder } from '../../lib/conversationHistory';
@@ -26,9 +26,12 @@ import {
   renameEntry as renameSidecarEntry,
   reconcileWithFilesystem,
 } from '../../lib/localBranchMeta';
+import {
+  isIdentityFile, isIdentityCandidate, isInIdentityFolder, readIdentityIfRecord,
+  emptyIdentity, writeIdentity, IDENTITY_FOLDER,
+} from '../../lib/identities';
 import { getPrefetchedProjectFiles } from '../../lib/projectFilesPrefetch';
 import { prefetchMetadata } from '../../lib/metadataPrefetch';
-import { loadCaseTimeline } from '../../lib/caseTimeline';
 import './ProjectScoped.css';
 import './ProjectFiles.css';
 
@@ -156,31 +159,6 @@ export default function ProjectFiles({ embedded = false } = {}) {
   // set after an archive is extracted.
   const [selectTargetPath, setSelectTargetPath] = useState(null);
 
-  // The project's saved case timeline (built in the Timeline tab, stored via
-  // lib/caseTimeline) — used below only to surface timeline files that were
-  // picked from outside the project folder. Re-read when the panel mode
-  // changes so the listing picks up a timeline built since this page mounted.
-  const caseTimeline = useMemo(() => loadCaseTimeline(projectId), [projectId, filesTab]);
-
-  // Timeline files picked from OUTSIDE the project folder need explicit
-  // localfile:// permission before their tiles can paint — the containment
-  // layer only serves folders the user has actually opened, so mounting them
-  // first makes every thumbnail 403. Register the paths, THEN let the items
-  // into the listing (see externalTimelineItems below).
-  const [timelineFilesAllowed, setTimelineFilesAllowed] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    const paths = Object.values(caseTimeline?.fileRefs || {})
-      .map((r) => r?.path)
-      .filter(Boolean);
-    if (!paths.length) { setTimelineFilesAllowed(true); return undefined; }
-    setTimelineFilesAllowed(false);
-    Promise.all(paths.map((p) => allowLocalFile(p)))
-      .catch(() => { /* best-effort — unregistered paths just show a glyph */ })
-      .then(() => { if (alive) setTimelineFilesAllowed(true); });
-    return () => { alive = false; };
-  }, [caseTimeline]);
-
   // Undo / redo stack for file operations (delete, rename, new folder,
   // import, restore). Each action records its own inverse; see the
   // primitive helpers below.
@@ -232,6 +210,38 @@ export default function ProjectFiles({ embedded = false } = {}) {
       .catch(() => { /* recognition is cosmetic — just no mark */ });
     return () => { cancelled = true; };
   }, [waCandidatesKey]);
+
+  // Identity records: read each one's `kind` so its tile can show a person or an
+  // organisation. `.json` files are probed too, not just `.dvx` — records reach
+  // a folder by other routes (an older build, a hand-written file) and one
+  // wearing the generic JSON badge is one the user can't pick out. The read is
+  // what decides: `readIdentityIfRecord` returns null for ordinary JSON, so a
+  // `package.json` sitting in the folder keeps its own glyph.
+  //
+  // Same shape as the WhatsApp probe above, and like it purely cosmetic: a
+  // failure just means the default glyph.
+  const [idnKindByPath, setIdnKindByPath] = useState(() => ({}));
+  const idnCandidatesKey = browseFiles
+    .filter((f) => isIdentityCandidate(f.name))
+    .map((f) => f.path || f.name)
+    .filter(Boolean)
+    .join('\n');
+  useEffect(() => {
+    if (!idnCandidatesKey) return undefined;
+    let cancelled = false;
+    (async () => {
+      const paths = idnCandidatesKey.split('\n');
+      const found = {};
+      for (const path of paths) {
+        const rec = await readIdentityIfRecord(path);
+        if (rec) found[path] = rec.kind;
+      }
+      if (!cancelled && Object.keys(found).length) {
+        setIdnKindByPath((prev) => ({ ...prev, ...found }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [idnCandidatesKey]);
 
   // ── Hydrate the chosen folder when the project switches ───────────────
   useEffect(() => {
@@ -1298,11 +1308,23 @@ export default function ProjectFiles({ embedded = false } = {}) {
   };
   const draftItems = browseFiles.map((lf) => {
     const fid = sidecar.byFilename.get((lf.name || '').toLowerCase());
+    // Identity records report a SYNTHETIC extension so they wear a party glyph
+    // (a bust, or a facade for an organisation) instead of the generic JSON
+    // badge their real extension would earn them. Three ways to know: the `.dvx`
+    // extension, sitting in the Identities folder (both instant, so the glyph is
+    // right on the first paint), or the content probe above — which is also what
+    // says person vs organisation.
+    const idnPath = lf.path || lf.name;
+    const idn = isIdentityFile(lf.name)
+      || (isIdentityCandidate(lf.name) && isInIdentityFolder(idnPath))
+      || idnKindByPath[idnPath] != null;
     return {
       id: fid || lf.path || lf.name,
       kind: 'file',
       name: lf.name,
-      ext: fileExtOf(lf.name),
+      ext: idn
+        ? (idnKindByPath[idnPath] === 'org' ? 'identity-org' : 'identity')
+        : fileExtOf(lf.name),
       sizeLabel: lf.sizeBytes != null ? formatBytes(lf.sizeBytes) : '',
       modifiedLabel: formatDate(lf.mtimeIso),
       author: 'You',
@@ -1311,49 +1333,16 @@ export default function ProjectFiles({ embedded = false } = {}) {
       // (true/false once resolved; undefined while pending / for other types →
       // FilesWorkspace falls back to its name heuristic until the probe lands).
       isWhatsApp: lf.path ? waByPath[lf.path] : undefined,
-      descriptor: describeLocalFile({ localFile: lf }),
+      descriptor: idn ? null : describeLocalFile({ localFile: lf }),
       _raw: lf,
     };
   });
 
-  // ── Case-timeline files picked from OUTSIDE the project folder ──
-  // There's no separate "Timeline" folder: a timeline's files are just files.
-  // Anything the timeline references that already lives in the local folder
-  // shows up on its own (in whichever folder it sits in). What's left are the
-  // files picked from elsewhere on disk when the timeline was built — surface
-  // those in Home so the timeline's evidence is never hidden, and treat them
-  // like every other file (same menus, rename / delete / open).
-  const externalTimelineItems = (() => {
-    if (!caseTimeline || !atRoot || !timelineFilesAllowed) return [];
-    const out = [];
-    const seen = new Set();
-    const known = new Set(localFiles.map((f) => (f.name || '').toLowerCase()));
-    const shownHere = new Set(browseFiles.map((f) => (f.name || '').toLowerCase()));
-    for (const ev of caseTimeline.events || []) {
-      for (const name of ev.files || []) {
-        const key = (name || '').toLowerCase();
-        if (!key || seen.has(key) || known.has(key) || shownHere.has(key)) continue;
-        const ref = caseTimeline.fileRefs?.[name];
-        if (!ref?.path) continue;
-        seen.add(key);
-        const raw = { name, path: ref.path, mimeType: ref.mime };
-        out.push({
-          id: ref.path,
-          kind: 'file',
-          name,
-          ext: fileExtOf(name),
-          sizeLabel: raw.sizeBytes != null ? formatBytes(raw.sizeBytes) : '',
-          modifiedLabel: raw.mtimeIso ? formatDate(raw.mtimeIso) : '',
-          author: 'You',
-          status: 'synced',
-          descriptor: describeLocalFile({ localFile: raw }),
-          _raw: raw,
-        });
-      }
-    }
-    return out;
-  })();
-  if (externalTimelineItems.length) draftItems.push(...externalTimelineItems);
+  // The listing is exactly what's in the folder. Files referenced by the case
+  // timeline but stored elsewhere on disk are NOT surfaced here — they'd read
+  // as project files that aren't in the project directory. The timeline's own
+  // file chips (ProjectEvents) still open them from wherever they live.
+
   // Surface the bin as the first item in every folder (it opens the one
   // project-wide view regardless of where you are in the tree).
   const draftFolders = [binEntryItem, ...realDraftFolders];
@@ -1426,6 +1415,9 @@ export default function ProjectFiles({ embedded = false } = {}) {
       if (item._dir) handleEnterFolder(item._dir);
       return;
     }
+    // Identity records open in the Doc Viewer like everything else — it shows
+    // the record as a form rather than as the JSON it is stored as.
+    if (isIdentityFile(item.name)) { openIdentityInViewer(item._raw); return; }
     handleOpenLocalFile(item._raw);
   };
   // The menu's "Open content(s)". For a folder it browses the files (bypassing
@@ -1548,6 +1540,50 @@ export default function ProjectFiles({ embedded = false } = {}) {
       notify({ category: 'file', variant: 'error', title: 'Couldn’t create file', body: err?.message || String(err), dedupeKey: 'fx-newfile-error' });
     }
   };
+  // ── Identities ─────────────────────────────────────────────────────────
+  // A party to the case — a person or a company — rather than a document. The
+  // record lands in the project's `Identities/` folder as a `.dvx` file, so it
+  // lives with the documents it was taken from and shows up in this tab like
+  // anything else. The Timeline council writes the same files automatically for
+  // every party it finds in the story; this is the manual door to them.
+  //
+  // Nothing here is edited in a dialog: a record is a file, so creating one
+  // writes a blank record and opens it in the Doc Viewer — the same place an
+  // existing identity opens, and where it is actually filled in.
+  const openIdentityInViewer = (raw) => {
+    if (!raw?.path) return;
+    openDocViewerWindow({ path: raw.path, name: raw.name, mime: 'application/json' });
+  };
+
+  const fxAddIdentity = async () => {
+    if (!localFolder) {
+      notify({ category: 'file', variant: 'info', title: 'Connect a folder first', body: 'Choose a folder on your computer, then you can add identities to it.', dedupeKey: 'fx-identity-nofolder' });
+      return;
+    }
+    // A unique placeholder name, so adding two in a row doesn't overwrite the
+    // first. The viewer renames the file the moment the party is named.
+    const existing = new Set((localFiles || []).map((f) => String(f.name || '').toLowerCase()));
+    let seed = 'New identity';
+    for (let n = 2; existing.has(`${seed}.dvx`.toLowerCase()); n += 1) seed = `New identity ${n}`;
+    const res = await writeIdentity(localFolder, { ...emptyIdentity('person'), name: seed });
+    if (res.error) {
+      notify({ category: 'file', variant: 'error', title: 'Couldn’t add the identity', body: res.error === 'no_folder' ? 'No project folder is connected.' : String(res.error), dedupeKey: 'fx-identity-save' });
+      return;
+    }
+    setBrowseTick((t) => t + 1);
+    await refetchLocalFiles();
+    openIdentityInViewer({ path: res.path, name: res.filename });
+    notify({
+      category: 'file',
+      variant: 'success',
+      icon: 'plus',
+      title: 'Identity added',
+      body: `A blank record is in this project’s ${IDENTITY_FOLDER} folder — fill it in and save.`,
+      silent: true,
+      payload: actMeta('create', res.filename, { filePath: res.path }),
+    });
+  };
+
   // Create new <type> file → write an empty styled Office file of the chosen kind
   // (docx / pptx / xlsx) to disk, then open it in a Doc Viewer window with the AI
   // generator armed (generate:true) so the user describes what they want and
@@ -1698,6 +1734,7 @@ export default function ProjectFiles({ embedded = false } = {}) {
     onNewFolder: fxNewFolder,
     onNewFile: (hasLocalFolderApi && filesTab === 'drafts' && Boolean(localFolder)) ? fxNewFile : undefined,
     onCreateTypedFile: (hasLocalFolderApi && filesTab === 'drafts' && Boolean(localFolder)) ? fxCreateTypedFile : undefined,
+    onAddIdentity: (hasLocalFolderApi && filesTab === 'drafts' && Boolean(localFolder)) ? fxAddIdentity : undefined,
     renameTargetPath,
     onRenameTargetConsumed: () => setRenameTargetPath(null),
     selectTargetPath,

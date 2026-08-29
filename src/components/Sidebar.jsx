@@ -91,6 +91,35 @@ const NewspaperIcon = (
   </svg>
 );
 
+// Whether the System section is unfolded. Rail-wide, not per-user: it is a
+// preference about the shape of the sidebar, like its width.
+const SYSTEM_OPEN_KEY = 'docvex.sidebar.systemOpen';
+
+// The System section's fold chevron. Points down when open, right when folded
+// — the same reading as the rail's own collapse control.
+const FoldChevron = (
+  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
+
+// Open book with a ribbon — the Playbook destination.
+const PlaybookIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4.5A1.5 1.5 0 0 1 3 15.5z" />
+    <path d="M21 5.5A1.5 1.5 0 0 0 19.5 4H16v8l-2-1.4L12 12" />
+  </svg>
+);
+
+// Milestone flag on a path — the Roadmap destination.
+const RoadmapIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 21V4" />
+    <path d="M4 5h11l-1.6 3L15 11H4" />
+    <circle cx="4" cy="21" r="0.5" />
+  </svg>
+);
+
 // Layers/stack glyph — the Versions (release history) destination.
 const VersionsIcon = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -388,6 +417,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
       // Busy = a turn is thinking; done = a reply waits in a conversation.
       dot: advisorActivity.busy ? 'busy' : advisorActivity.unread ? 'done' : null,
     },
+    { to: '/roadmap', label: 'Roadmap', icon: RoadmapIcon },
   ] : [];
 
   // Personal destinations — the user's own feeds, always available.
@@ -402,6 +432,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
       pill: newBrief ? { kind: 'brief', text: 'new' } : null,
     },
     ...(session ? [{ to: '/mail', label: 'Mail', icon: MailIcon, end: true }] : []),
+    { to: '/playbook', label: 'Playbook', icon: PlaybookIcon, end: true },
     {
       to: '/versions', label: 'Versions', icon: VersionsIcon, end: true,
       // Update-available pill, colored by the pending release's bump type.
@@ -419,6 +450,24 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
     // (import.meta.env.DEV is false there but it's still a dev surface).
     ...((import.meta.env.DEV || isLocalhostWeb) ? [{ to: '/debug', label: 'Debug', icon: BugIcon, end: true }] : []),
   ];
+
+  // System section — foldable. Settings is the row anyone actually comes here
+  // for; Admin, Debug, Docs and Privacy are things you look up once and then
+  // want out of the way. Folded, the section keeps ONLY Settings, so the rail
+  // ends on the row it ends on for most people instead of five.
+  const [systemOpen, setSystemOpen] = useState(() => {
+    try { return localStorage.getItem(SYSTEM_OPEN_KEY) !== '0'; } catch { return true; }
+  });
+  const toggleSystem = () => {
+    setSystemOpen((v) => {
+      const next = !v;
+      try { localStorage.setItem(SYSTEM_OPEN_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  // What survives the fold: Settings alone. Not "the first item" — if Settings
+  // is missing (signed out) the section folds to nothing, which is correct.
+  const shownSystemItems = systemOpen ? systemItems : systemItems.filter((i) => i.to === '/settings');
 
   // Hub warm-up. Both halves are idempotent and de-duped internally (the
   // dynamic import resolves from the module cache, the fetch reuses its
@@ -690,13 +739,26 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
         )}
 
         {/* ── System — settings, admin, docs. Pinned to the bottom of the rail. ── */}
-        <li className="sidebar-cat sidebar-cat--end">
-          <span className="sidebar-cat-label"><span className="sidebar-cat-text">System</span></span>
+        <li className={`sidebar-cat sidebar-cat--end${systemOpen ? '' : ' is-folded'}`}>
+          {/* The label is the control. A section header that folds its own
+              section needs no second affordance, and a separate button would
+              be another target in a rail that is mostly targets. */}
+          <Tooltip content={systemOpen ? 'Fold — keep only Settings' : 'Unfold — Admin, Docs, Privacy'}>
+            <button
+              type="button"
+              className="sidebar-cat-label sidebar-cat-fold"
+              onClick={toggleSystem}
+              aria-expanded={systemOpen}
+            >
+              <span className="sidebar-cat-text">System</span>
+              <span className="sidebar-cat-chev" aria-hidden="true">{FoldChevron}</span>
+            </button>
+          </Tooltip>
           <div className="sidebar-cat-items">
-            {systemItems.map(renderNavItem)}
+            {shownSystemItems.map(renderNavItem)}
             {/* Documentation — external link to the website (opens in the
                 browser), not an in-app route, so it's a button. */}
-            <Tooltip content="Open the documentation site">
+            {systemOpen && <Tooltip content="Open the documentation site">
               <button
                 type="button"
                 className="nav-item"
@@ -705,12 +767,12 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
                 <span className="icon">{DocsIcon}</span>
                 <span className="label">Docs</span>
               </button>
-            </Tooltip>
+            </Tooltip>}
             {/* Privacy & security — where the files live, what reaches the AI
                 providers, which models those are, and the legal pages. A firm
                 has to be able to answer this for its clients, so it's one
                 click from anywhere rather than buried in Settings. */}
-            <Tooltip content="Privacy, security and AI">
+            {systemOpen && <Tooltip content="Privacy, security and AI">
               <button
                 type="button"
                 className="nav-item"
@@ -719,7 +781,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse, offstage 
                 <span className="icon">{InfoIcon}</span>
                 <span className="label">Privacy &amp; security</span>
               </button>
-            </Tooltip>
+            </Tooltip>}
             {/* Collapse / expand the rail. It used to ride on the Personal
                 divider at the top; it lives here now, last item in the rail,
                 behind its own hairline — a control ABOUT the sidebar rather

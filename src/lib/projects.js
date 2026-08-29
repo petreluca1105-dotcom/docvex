@@ -10,6 +10,7 @@
 // auth handling live in supabase/functions/<name>/index.ts.
 
 import { supabase } from './supabaseClient';
+import { coerceJurisdictionCode } from './jurisdictions';
 
 // Name of the window CustomEvent the picker (and any other consumer of the
 // caller's project list) listens for to invalidate cached project lists.
@@ -164,15 +165,47 @@ export async function createProject({ name, description = null }) {
 // `ai_context` / `ai_context_updated_at` back the Project Overview AI tab —
 // included here so the textarea seeds from the project row (and stays in sync
 // via ProjectContext's Realtime UPDATE merge, which carries the new columns).
+// Does `projects.jurisdiction` (migration 033) exist on this deployment?
+// null = not yet known, false = confirmed missing. PostgREST rejects a select
+// naming an unknown column outright (400 / 42703), so the first such failure is
+// remembered and every later query drops the column instead of re-failing —
+// otherwise every project fetch, in every window, logs another 400. Resets on
+// reload, which is when a freshly-applied migration gets picked up.
+let hasJurisdiction = null;
+const projectFields = (extra = '') => (
+  `id, name, description${hasJurisdiction === false ? '' : ', jurisdiction'}, ai_context, ai_context_updated_at${extra}`
+);
+// Called with the error (if any) from a select that named the column.
+function noteJurisdictionSupport(error) {
+  if (error?.code === '42703') { hasJurisdiction = false; return false; }
+  if (!error) hasJurisdiction = hasJurisdiction === false ? false : true;
+  return hasJurisdiction !== false;
+}
+
 export async function getProject(projectId) {
   const userResult = await supabase.auth.getUser();
   const userId = userResult.data.user?.id;
   if (!userId) return { data: null, error: new Error('Not signed in') };
 
   const [{ data: project, error: pErr }, { data: membership, error: mErr }] = await Promise.all([
-    supabase.from('projects').select('id, name, description, ai_context, ai_context_updated_at, created_at, updated_at').eq('id', projectId).maybeSingle(),
+    supabase.from('projects').select(projectFields(', created_at, updated_at')).eq('id', projectId).maybeSingle(),
     supabase.from('project_members').select('role').eq('project_id', projectId).eq('user_id', userId).maybeSingle(),
   ]);
+  // `jurisdiction` arrives with migration 033. Until that's applied PostgREST
+  // rejects the whole select with 42703 (undefined column), which would take
+  // the project page down rather than just losing one field — so retry once on
+  // the pre-033 column list and remember not to ask again. Safe to delete, along
+  // with `hasJurisdiction`, after the migration ships.
+  if (!noteJurisdictionSupport(pErr)) {
+    const { data: legacy, error: lErr } = await supabase
+      .from('projects')
+      .select(projectFields(', created_at, updated_at'))
+      .eq('id', projectId)
+      .maybeSingle();
+    if (lErr) return { data: null, error: lErr };
+    if (!legacy) return { data: null, error: new Error('Project not found') };
+    return { data: { ...legacy, jurisdiction: null, role: membership?.role ?? null }, error: null };
+  }
   if (pErr) return { data: null, error: pErr };
   if (mErr) return { data: null, error: mErr };
   if (!project) return { data: null, error: new Error('Project not found') };
@@ -194,8 +227,22 @@ export async function updateProject(projectId, patch) {
     .from('projects')
     .update(allowed)
     .eq('id', projectId)
-    .select('id, name, description, ai_context, ai_context_updated_at')
+    .select(projectFields())
     .single();
+  // Same pre-migration-033 guard as getProject: without the column PostgREST
+  // rejects the whole statement, which would break renaming a project rather
+  // than just omitting a field. The UPDATE itself is fine — only the returning
+  // clause is — so retry the read-back without it. Delete once 033 is applied.
+  if (!noteJurisdictionSupport(error)) {
+    const { data: legacy, error: lErr } = await supabase
+      .from('projects')
+      .update(allowed)
+      .eq('id', projectId)
+      .select(projectFields())
+      .single();
+    if (lErr) return { data: null, error: lErr };
+    return { data: { ...legacy, jurisdiction: null }, error: null };
+  }
   return { data, error };
 }
 
@@ -218,6 +265,25 @@ export async function updateProjectAiContext(projectId, aiContext) {
     })
     .eq('id', projectId)
     .select('id, ai_context, ai_context_updated_at')
+    .single();
+  return { data, error };
+}
+
+// Persist the project's jurisdiction — which country's law the AI works under
+// (migration 033). Admin-only via the same "admins update projects" RLS policy
+// as name / description / ai_context. `code` is an entry from
+// lib/jurisdictions (or null to clear, which puts the project back on the app
+// default); anything unknown is coerced to null rather than stored.
+export async function updateProjectJurisdiction(projectId, code) {
+  const value = coerceJurisdictionCode(code);
+  if (hasJurisdiction === false) {
+    return { data: null, error: new Error('This Supabase project is missing the `jurisdiction` column — apply migration 033.') };
+  }
+  const { data, error } = await supabase
+    .from('projects')
+    .update({ jurisdiction: value })
+    .eq('id', projectId)
+    .select('id, jurisdiction')
     .single();
   return { data, error };
 }

@@ -45,6 +45,11 @@ function parseRecord(raw) {
       // records (pre-branching) so the caller falls back to a single "Main".
       branches: Array.isArray(parsed.branches) ? parsed.branches : undefined,
       activeBranchId: parsed.activeBranchId || undefined,
+      // Per-paragraph conversations, keyed `para:<indices>`. Each is isolated
+      // from the document thread and from every other paragraph's, so reopening
+      // a file has to restore them all — not just the one that was on screen.
+      paraThreads: (parsed.paraThreads && typeof parsed.paraThreads === 'object'
+        && !Array.isArray(parsed.paraThreads)) ? parsed.paraThreads : undefined,
       updatedAt: parsed.updatedAt || 0,
     };
   } catch {
@@ -60,11 +65,18 @@ export function loadConversation(filePath) {
   return parseRecord(safeRead(keyFor(filePath))) || parseRecord(safeRead(KEY_PREFIX + filePath));
 }
 
-export function saveConversation(filePath, { messages, versions, branches, activeBranchId }) {
+export function saveConversation(filePath, { messages, versions, branches, activeBranchId, paraThreads }) {
   if (!filePath) return false;
   const msgs = Array.isArray(messages) ? messages : [];
   const vers = Array.isArray(versions) ? versions : [];
   const brs = Array.isArray(branches) ? branches : null;
+  // Drop paragraph threads that never got a message — an empty one is just a
+  // paragraph somebody clicked on, not a conversation worth storing.
+  const paras = {};
+  for (const [k, v] of Object.entries(paraThreads || {})) {
+    if (Array.isArray(v) && v.length) paras[k] = v;
+  }
+  const hasParaContent = Object.keys(paras).length > 0;
   // A thread may live only in a non-active branch, so count branch content too.
   const hasBranchContent = !!brs && brs.some((b) => Array.isArray(b.messages) && b.messages.length);
   // Empty → no-op. We must NOT delete here: the provider's save effect fires on
@@ -72,7 +84,7 @@ export function saveConversation(filePath, { messages, versions, branches, activ
   // it), and in React StrictMode that empty save runs BEFORE the load re-reads
   // storage — deleting on empty would wipe the saved chat on every reopen. Use
   // clearConversation() to remove a thread on purpose.
-  if (!msgs.length && !vers.length && !hasBranchContent) return false;
+  if (!msgs.length && !vers.length && !hasBranchContent && !hasParaContent) return false;
   const record = { messages: msgs, versions: vers, updatedAt: Date.now() };
   // Persist the branch set (split conversations) + which one is active so
   // reopening the file restores every branch, not just the active thread.
@@ -80,6 +92,7 @@ export function saveConversation(filePath, { messages, versions, branches, activ
     record.branches = brs;
     record.activeBranchId = activeBranchId || undefined;
   }
+  if (hasParaContent) record.paraThreads = paras;
   return safeWrite(keyFor(filePath), JSON.stringify(record));
 }
 

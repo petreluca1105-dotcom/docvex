@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useSelectedProject } from '../../context/SelectedProjectContext';
@@ -12,8 +12,11 @@ import { recognizeCanvas, OCR_MAX_EDGE } from '../../lib/ocr';
 import { transcribeAudio } from '../../lib/transcribe';
 import { runTimelineCouncil, refineTimelineWithClarifications, draftFlagAsks, DISPUTE_OPTIONS } from '../../lib/timelineCouncil';
 import { toLayoutPx } from '../../lib/appZoom';
-import { openDocViewerWindow, pathForFile, allowLocalFile } from '../../lib/platform';
+import { openDocViewerWindow, pathForFile, allowLocalFile, notifyFilesChanged } from '../../lib/platform';
 import { loadCaseTimeline, saveCaseTimeline } from '../../lib/caseTimeline';
+import { extractIdentities, saveExtractedIdentities } from '../../lib/identityExtract';
+import { localFolderApi } from '../../lib/localFolder';
+import { readProjectsDir } from '../../lib/projectsDir';
 import { loadExtract, saveExtract } from '../../lib/scanExtractCache';
 import { loadCaptions, saveCaptions } from '../../lib/captionsHistory';
 import { loadOcrHistory, saveOcrHistory } from '../../lib/extractionHistory';
@@ -94,12 +97,12 @@ const IcoSearch = (props) => (
 // ── Sample data (verbatim from the design bundle) ─────────────────────────
 const STEPS = [
   { id: 'upload', n: '1', label: 'Upload files' },
-  { id: 'scan', n: '2', label: 'Scanning & review' },
+  { id: 'scan', n: '2', label: 'Scanning' },
   { id: 'timeline', n: '3', label: 'Timeline' },
 ];
 
-// Masthead copy per step — the header reflects the active tab. (When the
-// timeline is built, the Timeline step swaps in its own story header.)
+// Masthead copy per step. (When the timeline is built, the Timeline step swaps
+// in its own story header.)
 const STEP_HEADERS = {
   upload: {
     title: 'Upload files',
@@ -107,15 +110,11 @@ const STEP_HEADERS = {
   },
   scan: {
     title: 'Scanning',
-    kicker: 'The AI council is reading your sources — three analysts draft independent chronologies in parallel while the chair cross-checks the drafts and merges them into one story.',
+    kicker: 'The AI council is reading your sources — three analysts draft independent chronologies in parallel while the chair cross-checks and merges them. Anything they are unsure about is put to you here, as it comes up.',
   },
   timeline: {
     title: 'Timeline',
     kicker: 'Drop in every document, email and recording tied to the matter. DocVex reads, transcribes and cross-checks them, then assembles a chronological story — flagging gaps and contradictions for you to resolve.',
-  },
-  review: {
-    title: 'Review',
-    kicker: 'The council needs you. Each flag below is an open question from the record — answer with what you know first-hand (or dismiss non-issues), and the final timeline is assembled from your answers.',
   },
 };
 
@@ -1309,7 +1308,18 @@ function EventFileChip({ name, fileRef }) {
 // margin rail and the AI flags as review annotations in the right gutter.
 // Renders the AI-reconstructed `timeline`; empty state until one is built.
 // (The lede renders in the page masthead, not here.)
-function TimelineStep({ timeline, draftPending, goReview, onRegenerate }) {
+function TimelineStep({ timeline, draftPending, goReview, onRegenerate, projectDir }) {
+  // Open one of the files the run produced. They live in the project's
+  // Identities/ folder, so the path is assembled from the project dir rather
+  // than from fileRefs (which only maps the SOURCE files the story cites).
+  const openMadeFile = (name) => {
+    if (!projectDir) return;
+    const sep = projectDir.includes('\\') ? '\\' : '/';
+    const path = `${projectDir}${sep}Identities${sep}${name}`;
+    allowLocalFile(path).finally(() => {
+      openDocViewerWindow({ path, name, mime: 'application/json' });
+    });
+  };
   // Anchors for the regenerate section and the very end of its bottom
   // clearance — the floating jump button scrolls to the END marker so the
   // section lands in view WITH its breathing room below.
@@ -1344,17 +1354,17 @@ function TimelineStep({ timeline, draftPending, goReview, onRegenerate }) {
     return () => obs.disconnect();
   }, [timeline]);
   if (!timeline) {
-    // A drafted story waiting on the Review round is NOT shown here — the
-    // timeline is only written from the author's answers.
+    // A story still being assembled is NOT shown here — a half-merged draft
+    // reads as a finished chronology that is missing events.
     if (draftPending) {
       return (
         <div className="cto-timeline-pending">
           <p className="cto-scan-empty">
-            The council has drafted the story, but it still has open questions —
-            the timeline is written from your answers.
+            The council is still folding your answers into the story — the
+            timeline appears once the chair has ruled.
           </p>
           <button type="button" className="cto-btn-ink" onClick={goReview}>
-            Answer the council’s questions
+            Back to the council
             <IcoArrow width="13" height="13" />
           </button>
         </div>
@@ -1430,6 +1440,63 @@ function TimelineStep({ timeline, draftPending, goReview, onRegenerate }) {
         ))}
       </div>
 
+      {/* What the run PRODUCED, at the foot of the story: the identity records
+          the council wrote for every party it found, and the source files it
+          copied into the project folder. Both are real files in the Files tab —
+          this is the receipt, and the way into them. */}
+      {(timeline.meta?.aiFiles?.length > 0 || timeline.meta?.imported?.length > 0) && (
+        <section className="cto-made">
+          <div className="cto-made-head">
+            <h2 className="cto-made-title">Filed with this story</h2>
+            <p className="cto-made-sub">
+              Everything below is in this project’s Files tab.
+            </p>
+          </div>
+
+          {timeline.meta?.aiFiles?.length > 0 && (
+            <div className="cto-made-group">
+              <div className="cto-made-label">
+                Created by the council · {timeline.meta.aiFiles.length}
+              </div>
+              <div className="cto-made-list">
+                {timeline.meta.aiFiles.map((f) => (
+                  <button
+                    type="button"
+                    key={f.name}
+                    className="cto-made-card"
+                    onClick={() => openMadeFile(f.name)}
+                  >
+                    <span className="cto-made-ico" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="8" r="3.2" />
+                        <path d="M5.8 19a6.2 6.2 0 0 1 12.4 0" />
+                      </svg>
+                    </span>
+                    <span className="cto-made-text">
+                      <span className="cto-made-name">{f.party || f.name}</span>
+                      <span className="cto-made-kind">Identity record</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {timeline.meta?.imported?.length > 0 && (
+            <div className="cto-made-group">
+              <div className="cto-made-label">
+                Sources copied into the project · {timeline.meta.imported.length}
+              </div>
+              <div className="cto-made-list">
+                {timeline.meta.imported.map((name) => (
+                  <EventFileChip key={name} name={name} fileRef={timeline.fileRefs?.[name]} />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Under all the content — the "not the story you wanted?" section.
           The council re-reads the sources and drafts a fresh story. */}
       <div className="cto-regen" ref={regenRef}>
@@ -1470,304 +1537,12 @@ function TimelineStep({ timeline, draftPending, goReview, onRegenerate }) {
   );
 }
 
-// Review step — the clarification round. Every flag the council raised
-// prompts the author: type what you know (their answer is authoritative) or
-// dismiss the flag as a non-issue. Once every flag is addressed, "Create
-// final story" sends story + answers back to the chair for ONE refinement
-// pass (lib/timelineCouncil's refineTimelineWithClarifications) and the
-// finalised timeline replaces the draft.
-function ReviewStep({ timeline, goTimeline, onFinalize, finalizing, finalizeError, asks, asksLoading, earlyAnswers }) {
-  const flags = timeline?.flags || [];
-  // One answer slot per flag: { text, dismissed, submitted } — `submitted`
-  // flips on the explicit "Submit answer" press and drives the strip's
-  // verified (✓) badge state; editing the text again un-verifies it.
-  // Flags the author already resolved in the chamber's flags notice arrive
-  // pre-filled (best-effort match by flag title — see earlyFlagAnswersRef).
-  const seedAnswer = (f) => {
-    const early = earlyAnswers?.[f?.title];
-    if (!early) return { text: '', dismissed: false, submitted: false };
-    return {
-      text: early.text || '',
-      dismissed: !!early.dismissed,
-      submitted: !!(early.dismissed || (early.text || '').trim()),
-    };
-  };
-  const [answers, setAnswers] = useState(() => flags.map(seedAnswer));
-  // The questions show ONE at a time — `cur` is the flag on deck; the top
-  // strip doubles as the navigator.
-  const [cur, setCur] = useState(0);
-  // A different flag set can land while this step is mounted (the debug
-  // variations seeder) — re-seat the answer slots and reset the deck.
-  useEffect(() => {
-    setAnswers((prev) => (prev.length === flags.length ? prev : flags.map(seedAnswer)));
-    setCur((c) => (c < flags.length ? c : 0));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flags.length]);
-  if (!timeline) {
-    return (
-      <p className="cto-scan-empty">
-        Nothing to review yet — build the timeline first (upload files and
-        press “Analyze with AI”).
-      </p>
-    );
-  }
-  const patchAnswer = (i, patch) => setAnswers((prev) => prev.map((a, j) => (j === i ? { ...a, ...patch } : a)));
-  const addressed = (a) => a.dismissed || a.text.trim().length > 0;
-  const allAddressed = answers.length === flags.length && answers.every(addressed);
-  return (
-    <div>
-      <div className="cto-kicker cto-flags-kicker">
-        {timeline.meta?.final ? 'Final story — remaining flags' : 'The council’s questions'}
-      </div>
-      {/* Flag strip — one badge per flag carrying the severity mini-gauge
-          (the three ascending bars), filling green as each is addressed.
-          It's the navigator: clicking a badge shows that question; a ring
-          marks the one on deck. The answered count sits on its own line
-          under the strip. */}
-      {flags.length > 0 && (
-        <>
-          <div className="cto-flagstrip" role="list" aria-label="Open flags">
-            {flags.map((fl, i) => {
-              const a = answers[i] || { text: '', dismissed: false, submitted: false };
-              return (
-                <Tooltip key={fl.title} content={`${fl.type} · ${fl.sev} — ${fl.title}`}>
-                  <button
-                    type="button"
-                    role="listitem"
-                    className={`cto-flagstrip-ico${a.dismissed ? ' is-dismissed' : a.submitted ? ' is-done' : ''}${i === cur ? ' is-active' : ''}`}
-                    data-sev={fl.tone}
-                    aria-label={`${fl.type}: ${fl.title}${a.dismissed ? ' (dismissed)' : a.submitted ? ' (answered)' : ''}`}
-                    aria-current={i === cur || undefined}
-                    onClick={() => setCur(i)}
-                  >
-                    {/* Severity bars until settled — then a verified ✓ for a
-                        submitted answer, or a greyed … for a dismissal. */}
-                    {a.dismissed ? (
-                      <IcoEllipsis width="14" height="14" />
-                    ) : a.submitted ? (
-                      <IcoCheck width="14" height="14" />
-                    ) : (
-                      <span className="cto-flag-bars" aria-hidden="true">
-                        <span data-on={fl.bars >= 1 || undefined} /><span data-on={fl.bars >= 2 || undefined} /><span data-on={fl.bars >= 3 || undefined} />
-                      </span>
-                    )}
-                  </button>
-                </Tooltip>
-              );
-            })}
-          </div>
-          <div className="cto-flag-nav">
-            <button
-              type="button"
-              className="cto-btn-back"
-              disabled={cur === 0}
-              onClick={() => setCur(cur - 1)}
-            >
-              ← Previous
-            </button>
-            <span className="cto-flag-nav-pos">Question {cur + 1} of {flags.length}</span>
-            <button
-              type="button"
-              className="cto-btn-back"
-              disabled={cur === flags.length - 1}
-              onClick={() => setCur(cur + 1)}
-            >
-              Next →
-            </button>
-          </div>
-        </>
-      )}
-      {flags.length === 0 && (
-        <p className="cto-scan-empty">No open flags — the record reads clean.</p>
-      )}
-      {/* ONE question at a time, in the Scanning tab's ask-panel language
-          (cc-ask-head / q / ctx / text / submit — same "the council needs
-          your input" look, no card box). Keyed so each switch replays the
-          pop-in; the strip above navigates; dismissing auto-advances. */}
-      {flags.length > 0 && (() => {
-        const fl = flags[cur] || flags[0];
-        const i = flags.indexOf(fl);
-        const a = answers[i] || { text: '', dismissed: false, submitted: false };
-        // The AI-designed ask for this flag: its question, shape and
-        // suggested answers. Absent (failed/loading) → plain free text.
-        const ask = asks?.[i] || null;
-        const kind = ask?.options?.length ? (ask.kind === 'multi' ? 'multi' : 'options') : 'text';
-        const sel = a.sel || [];
-        return (
-          <div className="cto-flag-list">
-            <div key={`${fl.title} ${i}`} className="cto-review-ask" data-sev={fl.tone}>
-              {/* Type · severity leads (with the severity mini-gauge as its
-                  indicator), then the flag's title as the eyebrow and the
-                  AI's question (or the flag detail) under it. */}
-              <div className="cto-review-ask-meta">
-                <span className="cto-flag-type">
-                  <span className="cto-flag-bars" aria-hidden="true">
-                    <span data-on={fl.bars >= 1 || undefined} /><span data-on={fl.bars >= 2 || undefined} /><span data-on={fl.bars >= 3 || undefined} />
-                  </span>
-                  {fl.type} <span>· {fl.sev}</span>
-                </span>
-              </div>
-              <div className="cc-ask-head">
-                <span>{fl.title}</span>
-              </div>
-              <p className="cc-ask-q">{ask?.question || fl.detail}</p>
-              {ask?.question && <p className="cc-ask-ctx">{fl.detail}</p>}
-              {/* The flag's sources as REAL timeline file tiles (fx-tile +
-                  morph pill; click selects, double click opens in the Doc
-                  Viewer). Falls back to the plain source line when the
-                  string carries no recognisable filenames. */}
-              {(() => {
-                const srcNames = String(fl.sources || '')
-                  .split('·').map((s) => s.trim()).filter((s) => s.includes('.'));
-                if (srcNames.length === 0) {
-                  return fl.sources
-                    ? <span className="cto-ev-source"><IcoDoc width="11" height="11" />{fl.sources}</span>
-                    : null;
-                }
-                return (
-                  <div className="cto-ev-files">
-                    <div className="cto-ev-files-head">Source files</div>
-                    {srcNames.map((n) => (
-                      <EventFileChip key={n} name={n} fileRef={timeline.fileRefs?.[n]} />
-                    ))}
-                  </div>
-                );
-              })()}
-              {/* AI suggestions still drafting — the free-text path works
-                  meanwhile. */}
-              {asksLoading && !ask && (
-                <p className="cc-ask-ctx cto-asks-loading">The council is drafting suggested answers…</p>
-              )}
-              {/* AI-suggested answers, in the chamber's option-tile language.
-                  Single pick answers (and advances) in one click; multi pick
-                  toggles, then Submit joins the picks. */}
-              {kind !== 'text' && (
-                <div className="cc-ask-opts">
-                  {ask.options.map((o, oi) => {
-                    const on = sel.includes(oi);
-                    return (
-                      <button
-                        key={`${o.label} ${oi}`}
-                        type="button"
-                        role={kind === 'multi' ? 'checkbox' : undefined}
-                        aria-checked={kind === 'multi' ? on : undefined}
-                        className={`cc-ask-opt${on ? ' is-picked' : ''}`}
-                        disabled={a.dismissed || finalizing}
-                        onClick={() => {
-                          if (kind === 'options') {
-                            // Select only (toggle off on re-click) — the
-                            // explicit Submit press confirms the answer.
-                            patchAnswer(i, on
-                              ? { sel: [], text: '', submitted: false, dismissed: false }
-                              : {
-                                sel: [oi],
-                                text: o.desc ? `${o.label} — ${o.desc}` : o.label,
-                                submitted: false,
-                                dismissed: false,
-                              });
-                          } else {
-                            patchAnswer(i, {
-                              sel: on ? sel.filter((x) => x !== oi) : [...sel, oi],
-                              submitted: false,
-                              dismissed: false,
-                            });
-                          }
-                        }}
-                      >
-                        <span className="cc-ask-opt-label">{o.label}</span>
-                        {o.desc && <span className="cc-ask-opt-desc">{o.desc}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* The author's clarification — first-hand knowledge the chair
-                  folds into the final story. Disabled once dismissed. */}
-              <textarea
-                className="cc-ask-text"
-                rows={3}
-                autoFocus
-                placeholder={kind === 'text'
-                  ? 'What do you know about this? Clarify dates, facts or context…'
-                  : '…or type your own answer'}
-                value={a.text}
-                disabled={finalizing}
-                // Editing after a submit un-verifies the badge — the shown
-                // answer must be the one that was actually submitted — and
-                // typing into a dismissed question un-dismisses it.
-                onChange={(e) => patchAnswer(i, { text: e.target.value, submitted: false, dismissed: false })}
-              />
-              <div className="cto-review-ask-actions">
-                {/* One button, two meanings: with an answer (typed or
-                    picked) it SUBMITS; with nothing it DISMISSES the flag
-                    as a non-issue. */}
-                {(() => {
-                  const hasInput = !!a.text.trim() || (kind === 'multi' && sel.length > 0);
-                  return (
-                    <button
-                      type="button"
-                      className={`cc-ask-submit${!hasInput && !a.submitted ? ' is-dismiss' : ''}`}
-                      disabled={finalizing || a.submitted || (a.dismissed && !hasInput)}
-                      onClick={() => {
-                        const text = a.text.trim()
-                          || (kind === 'multi' ? sel.map((oi) => ask.options[oi]?.label).filter(Boolean).join(' · ') : '');
-                        if (text) patchAnswer(i, { text, submitted: true, dismissed: false });
-                        else patchAnswer(i, { text: '', submitted: false, dismissed: true });
-                        if (i < flags.length - 1) setCur(i + 1);
-                      }}
-                    >
-                      {a.submitted ? 'Submitted' : a.dismissed ? 'Dismissed' : hasInput ? 'Submit' : 'Dismiss'}
-                    </button>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-      {finalizeError && (
-        <p className="cto-finalize-error">Couldn’t create the final story: {finalizeError}</p>
-      )}
-      <div className="cto-review-foot">
-        {/* No skip — answering (or dismissing) the questions is the path to
-            the timeline; only a finalised story offers the way back. */}
-        {timeline.meta?.final && (
-          <button type="button" className="cto-btn-back" onClick={goTimeline}>
-            ← Back to timeline
-          </button>
-        )}
-        {flags.length > 0 && (
-          <button
-            type="button"
-            className="cto-btn-ink"
-            disabled={!allAddressed || finalizing}
-            onClick={() => onFinalize(flags.map((fl, i) => ({
-              flag: { type: fl.type, sev: fl.sev, title: fl.title, detail: fl.detail, sources: fl.sources },
-              text: (answers[i]?.text || '').trim(),
-              dismissed: !!answers[i]?.dismissed,
-            })))}
-          >
-            {finalizing ? 'Assembling the timeline…' : 'Create timeline'}
-            {!finalizing && <IcoArrow width="13" height="13" />}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function ProjectEvents() {
   const { selectedProject, loading } = useSelectedProject();
   const { session } = useAuth();
   const [step, setStep] = useState('upload');
-  // The merged Scanning & review tab shows one of two faces: the council
-  // CHAMBER (file rail + ring + packets) or the REVIEW round (the council's
-  // questions). A flagged draft flips the tab to review BEFORE any gavel;
-  // once every flag is addressed the chamber returns for the finalize
-  // theatre, and only then the gavel + "It is decided" panel close the run.
-  const [scanView, setScanView] = useState('chamber');
   // Signed-in identity for the decision log's "You decided" rows — Google
   // avatar when present, first-letter circle fallback (app convention).
   const logUser = {
@@ -1778,6 +1553,131 @@ export default function ProjectEvents() {
   // Picked case files (File objects) — shared by the Upload list and the
   // Scanning grid. Held in memory only; the real pipeline isn't wired yet.
   const [files, setFiles] = useState([]);
+  // This run's file excerpts, kept so the identity pass can reuse them once the
+  // story is final (see runPostScanFiling).
+  const excerptsRef = useRef([]);
+  // One identity pass per story — the two paths to a final story (a clean run
+  // and a run the author clarified) both call it, and only the first should
+  // spend the tokens.
+  const identityPassRef = useRef(null);
+
+  // ── After the scan: file everything the run produced ───────────────────
+  // Two things happen once the chair has ruled, in this order:
+  //
+  //   1. The SOURCE files land in the project folder. They were uploaded into
+  //      this page and lived only in memory — the story cited documents the
+  //      Files tab had never heard of. Now the matter's files are the matter's
+  //      files, wherever you look at them from.
+  //   2. The PARTIES are written as identity records. The council has just read
+  //      every file, so it knows exactly who is in the story; that knowledge
+  //      used to evaporate with the run.
+  //
+  // Everything here is a side-effect of the story and can only ever fail
+  // quietly: a missing project folder, an AI that is not configured, or a run
+  // that finds nobody all end the same way. The timeline stands regardless.
+  const postScanRef = useRef(null);
+  // The project's folder on disk. Resolved once per project — the filing below
+  // writes into it, and the timeline's "Filed with this story" cards build
+  // their paths from it (so they still work on a story restored from a
+  // previous session, which never ran the filing).
+  const [projectDir, setProjectDir] = useState('');
+  useEffect(() => {
+    const projectId = selectedProject?.id;
+    if (!projectId) { setProjectDir(''); return undefined; }
+    let alive = true;
+    (async () => {
+      try {
+        const baseDir = readProjectsDir(session?.user?.id || '_anonymous') || undefined;
+        const res = await localFolderApi.projectDir(projectId, selectedProject?.name, baseDir);
+        if (alive) setProjectDir(res?.path || '');
+      } catch { if (alive) setProjectDir(''); }
+    })();
+    return () => { alive = false; };
+  }, [selectedProject?.id, selectedProject?.name, session?.user?.id]);
+
+  const runPostScanFiling = useCallback(async (built) => {
+    const projectId = selectedProject?.id;
+    if (!projectId || !built) return;
+    // One pass per story — both routes to a final story call this, and only
+    // the first should do the work.
+    const stamp = `${projectId}:${built.events?.length || 0}:${(built.lede || '').slice(0, 120)}`;
+    if (postScanRef.current === stamp) return;
+    postScanRef.current = stamp;
+
+    let dir = projectDir;
+    if (!dir) {
+      // The resolver above may not have landed yet on a fast run.
+      try {
+        const baseDir = readProjectsDir(session?.user?.id || '_anonymous') || undefined;
+        const res = await localFolderApi.projectDir(projectId, selectedProject?.name, baseDir);
+        dir = res?.path || '';
+        if (dir) setProjectDir(dir);
+      } catch { /* no folder resolver — nothing to file into */ }
+    }
+    if (!dir) return;
+
+    // ── 1. Source files into the project folder ──
+    const imported = [];
+    try {
+      // Skip anything already living inside the project folder (a file dragged
+      // in from the Files tab itself) — copying it back over itself is at best
+      // pointless and at worst a truncated write of a file we are reading.
+      const incoming = files.filter((f) => {
+        const p = pathForFile(f);
+        return !(p && p.startsWith(dir));
+      });
+      if (incoming.length) {
+        const { results } = await localFolderApi.writeFiles({
+          dir,
+          files: incoming.map((f) => ({ filename: f.name, blob: f })),
+        });
+        (results || []).forEach((r, i) => { if (r?.ok) imported.push(incoming[i].name); });
+        if (imported.length) {
+          addDecision(
+            LOG_INFO,
+            'Sources filed',
+            `— ${imported.length} ${imported.length === 1 ? 'file' : 'files'} copied into the project folder.`,
+          );
+        }
+      }
+    } catch { /* the story does not depend on this */ }
+
+    // ── 2. Parties as identity records ──
+    const created = [];
+    try {
+      const res = await extractIdentities({
+        projectName: selectedProject?.name,
+        timeline: built,
+        excerpts: excerptsRef.current,
+        jurisdiction: selectedProject?.jurisdiction,
+        usageProject: projectId,
+      });
+      if (res.identities.length) {
+        const saved = await saveExtractedIdentities(dir, res.identities);
+        if (saved.added || saved.updated) {
+          saved.names.forEach((n) => created.push({ name: `${n}.dvx`, kind: 'identity', party: n }));
+          const parts = [
+            saved.added ? `${saved.added} new` : '',
+            saved.updated ? `${saved.updated} updated` : '',
+          ].filter(Boolean).join(', ');
+          addDecision(LOG_OK, 'Parties filed', `— ${parts} in the project's Identities folder.`, saved.names.slice(0, 4));
+        }
+      }
+    } catch { /* a story is worth more than its cast list */ }
+
+    // Record what the run produced ON the story, so the timeline can show it
+    // at the foot of the page and a reload still knows about it.
+    if (imported.length || created.length) {
+      const withFiles = {
+        ...built,
+        meta: { ...built.meta, imported, aiFiles: created },
+      };
+      setTimeline(withFiles);
+      saveCaseTimeline(projectId, withFiles);
+      notifyFilesChanged();   // the Files tab relists and shows everything
+    }
+  }, [files, projectDir, selectedProject?.id, selectedProject?.name, selectedProject?.jurisdiction, session?.user?.id]);
+
   const addFiles = (list) => {
     const incoming = Array.from(list || []);
     if (incoming.length === 0) return;
@@ -1831,6 +1731,10 @@ export default function ProjectEvents() {
   const pendingFactsRef = useRef({});
   // Remaining debug ask variations — answering one advances to the next.
   const askQueueRef = useRef([]);
+  // Whether a question panel is CURRENTLY showing. Kept as a ref updated
+  // synchronously, so concurrent question designers can't both decide the
+  // panel is free and stomp each other's question.
+  const askOpenRef = useRef(false);
   // Which variation the ask-variations button is currently showing.
   const askVarIdxRef = useRef(0);
   const clearTimers = () => {
@@ -2010,6 +1914,31 @@ export default function ProjectEvents() {
       ? `— dismissed “${flag.title}” as a non-issue.`
       : `— answered “${flag.title}”.`);
   };
+  // Hold until the author has cleared every question that is open or queued.
+  // The questions are raised mid-scan, so the merge can finish while one is
+  // still on screen — ruling before the answer lands would waste the asking.
+  // Polled rather than promise-chained because a question can be ADDED while
+  // we wait (a slower designer landing), and a fixed list would miss it.
+  const waitForOpenAsks = () => new Promise((resolve) => {
+    const tick = () => {
+      if (!askOpenRef.current && askQueueRef.current.length === 0) { resolve(); return; }
+      window.setTimeout(tick, 250);
+    };
+    tick();
+  });
+
+  // The answers gathered during the scan, in the shape the chair's refinement
+  // call expects. A flag the author never got to is passed through unanswered
+  // rather than dropped — the chair is told it is still open.
+  const clarificationsFromEarlyAnswers = (tl) => (tl?.flags || []).map((fl) => {
+    const ans = earlyFlagAnswersRef.current[fl.title];
+    return {
+      flag: { type: fl.type, sev: fl.sev, title: fl.title, detail: fl.detail, sources: fl.sources },
+      text: (ans?.text || '').trim(),
+      dismissed: !!ans?.dismissed,
+    };
+  });
+
   // Turn a raised flag into a STANDARD ask (the same panel + styling as the
   // dispute question): before the AI's designed question arrives it's a
   // free-text ask carrying the flag's title/detail; once draftFlagAsks
@@ -2075,29 +2004,33 @@ export default function ProjectEvents() {
           if (e.flags > 0) {
             schedule(1000, () => sendPacket(e.member.id, 'chair', 'flag', 2000));
           }
-          // Surface the flags as they occur — each flag opens as a STANDARD
-          // "We have a question…" ask (one at a time; extras queue behind
-          // the open panel). The panel only opens once draftFlagAsks (the
-          // same designer the Review round uses) has returned, so the
-          // AI-suggested answers are ALREADY displaying when it appears —
-          // never a bare panel that upgrades later. If the designer fails,
-          // the plain free-text ask opens instead. Answers pre-fill the
-          // Review round; anything left unanswered returns there.
+          // Surface the flags AS THEY OCCUR — each one opens mid-scan as a
+          // standard "We have a question…" ask, one at a time, with its
+          // AI-suggested answers already displaying.
+          //
+          // Each flag's question is designed on its OWN call, not as a batch:
+          // the first to come back opens immediately instead of every question
+          // waiting on the slowest one in the set. The rest queue behind the
+          // open panel and follow as they land, so you answer them one by one
+          // while the council is still reading.
           if (e.flags > 0 && Array.isArray(e.flagDetails) && e.flagDetails.length > 0) {
-            const openFlagAsks = (designedList) => {
-              const asks = e.flagDetails.map((fl, fi) => flagAskFrom(fl, designedList?.[fi] || null));
-              if (councilStateRef.current?.ask) {
-                // A panel is already open (another member's flag, or the
-                // dispute) — queue behind it.
-                askQueueRef.current.push(...asks);
-              } else {
-                askQueueRef.current.push(...asks.slice(1));
-                patchCouncil({ ask: asks[0] });
-              }
+            const present = (fl, designed) => {
+              const ask = flagAskFrom(fl, designed);
+              // askOpenRef, not the council state: two designers can resolve in
+              // the same tick, and councilStateRef only catches up after a
+              // render — both would think the panel was free and the second
+              // would replace the first question unanswered.
+              if (askOpenRef.current) { askQueueRef.current.push(ask); return; }
+              askOpenRef.current = true;
+              patchCouncil({ ask });
             };
-            draftFlagAsks({ projectName: selectedProject?.name, timeline: { flags: e.flagDetails } })
-              .then((asks) => openFlagAsks(Array.isArray(asks) ? asks : null))
-              .catch(() => openFlagAsks(null));
+            e.flagDetails.forEach((fl) => {
+              draftFlagAsks({ projectName: selectedProject?.name, timeline: { flags: [fl] } })
+                .then((designed) => present(fl, Array.isArray(designed) ? designed[0] : null))
+                // The designer failing costs the suggested answers, not the
+                // question — it opens as plain free text.
+                .catch(() => present(fl, null));
+            });
           }
           addDecision(
             e.member.id,
@@ -2150,10 +2083,12 @@ export default function ProjectEvents() {
             ],
           };
         });
+        askOpenRef.current = true;   // the dispute owns the panel until answered
         schedule(1400, () => patchCouncil({ askMark: true }));
         break;
       }
       case 'steer':
+        askOpenRef.current = false;
         patchCouncil({ ask: null });
         setTask('dispute', 'done');
         addDecision('user', 'You decided', `— “${e.option.label}”.`);
@@ -2210,6 +2145,7 @@ export default function ProjectEvents() {
   // real run; on debug runs just logs the steer locally.
   const answerCouncil = (option) => {
     const ask = council?.ask;
+    askOpenRef.current = false;
     patchCouncil({ ask: null });
     // A held debug script (see holdForAsk) resumes the moment the panel is
     // answered or dismissed.
@@ -2222,7 +2158,8 @@ export default function ProjectEvents() {
       answerFlagEarly(ask.flag, option?.dismissed ? { dismissed: true } : { text: option.label });
       const next = askQueueRef.current.shift();
       if (next) {
-        schedule(700, () => {
+        askOpenRef.current = true;   // claimed now, so a designer landing during
+        schedule(700, () => {        // the beat below queues instead of stomping
           patchCouncil({ ask: next });
           if (debugRun) holdForAsk();
         });
@@ -2279,50 +2216,16 @@ export default function ProjectEvents() {
     allowTimelinePaths(saved).then(() => {
       if (!alive) return;
       setTimeline(saved);
-      // A saved DRAFT with open flags resumes at the merged tab's Review
-      // face (answer → final timeline); a finalised/clean story lands on
-      // the timeline.
-      const resumeReview = !!(saved && saved.flags?.length && !saved.meta?.final);
-      setScanView(resumeReview ? 'review' : 'chamber');
-      setStep(!saved ? 'upload' : (resumeReview ? 'scan' : 'timeline'));
+      // Questions are put during the scan now, so there is no round to resume
+      // INTO: a saved story lands on the timeline, and an unfinished draft
+      // shows the timeline's empty state with its "run it again" button.
+      setStep(!saved ? 'upload' : 'timeline');
       setScanError(null);
     });
     return () => { alive = false; };
   }, [selectedProject?.id]);
 
   // ── AI-designed Review asks ──────────────────────────────────────────────
-  // The council designs each flag's question: its shape (single pick / multi
-  // pick / free text) + suggested answers. The fetch is kicked off from the
-  // SCANNING step the moment a flagged draft lands (while the gavel finale
-  // plays), so entering Review finds the answers already loaded. Falls back
-  // to plain free-text questions on failure. Skipped for debug-seeded flags
-  // (the seeder supplies its own variations).
-  const [flagAsks, setFlagAsks] = useState(null);
-  const [asksLoading, setAsksLoading] = useState(false);
-  const asksForRef = useRef(null);
-  // One fetch per timeline build (generatedAt identity); the key guard also
-  // drops a stale response if a newer build superseded it mid-flight.
-  const prefetchFlagAsks = (tl) => {
-    if (!tl?.flags?.length || tl.meta?.final || tl.meta?.debugFlags) return;
-    const key = tl.meta?.generatedAt || 0;
-    if (asksForRef.current === key) return;
-    asksForRef.current = key;
-    setFlagAsks(null);
-    setAsksLoading(true);
-    draftFlagAsks({ projectName: selectedProject?.name, timeline: tl })
-      .then((a) => { if (asksForRef.current === key) setFlagAsks(a); })
-      .catch(() => { if (asksForRef.current === key) setFlagAsks(null); })
-      .finally(() => { if (asksForRef.current === key) setAsksLoading(false); });
-  };
-  // Fallback for drafts that DIDN'T just come off a scan run (a draft with
-  // open flags restored from a previous session resumes at Review) — the
-  // key guard makes this a no-op when the scan-time prefetch already ran.
-  useEffect(() => {
-    if (step !== 'scan' || scanView !== 'review') return;
-    prefetchFlagAsks(timeline);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, scanView, timeline]);
-
   // ── Final pass — the Review round's clarifications → chair refinement ────
   // One chair call folds the author's answers into the story, drops the
   // resolved/dismissed flags, and the finalised timeline replaces the draft
@@ -2332,8 +2235,11 @@ export default function ProjectEvents() {
   // Timeline). On failure the review face returns with the error shown.
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState(null);
-  const finalizeStory = async (clarifications) => {
-    if (!timeline || finalizing) return;
+  // `tl` is the story being finalised. Passed EXPLICITLY because the scan
+  // calls this in the same tick it set the timeline state — reading `timeline`
+  // from the closure there would finalise the previous run's story.
+  const finalizeStory = async (clarifications, tl = timeline) => {
+    if (!tl || finalizing) return;
     setFinalizing(true);
     setFinalizeError(null);
     // ── Chamber theatre while the refinement call is in flight ──
@@ -2343,17 +2249,16 @@ export default function ProjectEvents() {
     // session — seed the file rail from the saved story's refs so the
     // chamber has tiles to show.
     if (scanItems.length === 0) {
-      const seeded = Object.keys(timeline.fileRefs || {}).map((name) => ({
+      const seeded = Object.keys(tl.fileRefs || {}).map((name) => ({
         name,
-        mime: timeline.fileRefs[name]?.mime || '',
+        mime: tl.fileRefs[name]?.mime || '',
         url: '',
-        path: timeline.fileRefs[name]?.path,
+        path: tl.fileRefs[name]?.path,
       }));
       const items = seeded.length > 0 ? seeded : FALLBACK_SCAN_FILES;
       setScanItems(items);
       setScanProgress(items.map(() => 100));
     }
-    setScanView('chamber');
     setStep('scan');
     const answered = clarifications.filter((c) => !c.dismissed && c.text).length;
     const dismissed = clarifications.length - answered;
@@ -2381,24 +2286,26 @@ export default function ProjectEvents() {
     try {
       const parsed = await refineTimelineWithClarifications({
         projectName: selectedProject?.name,
-        timeline,
+        timeline: tl,
         clarifications,
       });
-      const built = normalizeTimeline(parsed, timeline.meta?.fileCount ?? 0);
+      const built = normalizeTimeline(parsed, tl.meta?.fileCount ?? 0);
       if (!built) throw new Error('the refined story came back empty');
       // Carry the run's identity forward: council credit, source-file refs,
       // and mark the story as finalised with the author's input.
       built.meta = {
         ...built.meta,
-        council: timeline.meta?.council,
-        fileCount: timeline.meta?.fileCount ?? built.meta.fileCount,
+        council: tl.meta?.council,
+        fileCount: tl.meta?.fileCount ?? built.meta.fileCount,
         final: true,
         clarified: answered,
       };
-      built.fileRefs = timeline.fileRefs;
+      built.fileRefs = tl.fileRefs;
       await allowTimelinePaths(built);
       setTimeline(built);
       saveCaseTimeline(selectedProject.id, built);
+      // The story is final — file the sources and the cast list alongside it.
+      runPostScanFiling(built);
       // ── End sequence: verdict packets home, gavel, "It is decided". ──
       // clearTimers also kills any still-pending shuttle starts so a late
       // packet can't hold the 'wait' stage open.
@@ -2425,7 +2332,6 @@ export default function ProjectEvents() {
       setFinalizeError(String(err?.message || err));
       patchCouncil({ phase: 'Adjourned', endStage: '' });
       addDecision(LOG_BAD, 'Refinement failed', `— ${String(err?.message || err)}`);
-      setScanView('review');
     } finally {
       setFinalizing(false);
     }
@@ -2445,6 +2351,7 @@ export default function ProjectEvents() {
     resetCouncilPause();
     pendingFactsRef.current = {};
     askQueueRef.current = [];
+    askOpenRef.current = false;
     askResolverRef.current = null;
     askHoldRef.current = false;
     earlyFlagAnswersRef.current = {};
@@ -2453,13 +2360,11 @@ export default function ProjectEvents() {
     setScanProgress(items.map(() => 0));
     setScanning(true);
     setStep('scan');
-    setScanView('chamber');
     decisionSeq.current = 0;
     setCouncil({ ...freshCouncil(), phase: 'Reading sources' });
     setTask('read', 'working');
     setTask('extract', 'working');
-    setActive('chair', true);
-    say('chair', `Council convened. ${files.length === 1 ? 'One source' : `${files.length} sources`} on the table — read, then we draft.`);
+    setActive('chair', true);    say('chair', `Council convened. ${files.length === 1 ? 'One source' : `${files.length} sources`} on the table — read, then we draft.`);
     addDecision(LOG_INFO, 'Session opened', `— ${files.length} file${files.length === 1 ? '' : 's'} handed to the council.`);
     try {
       // Split the excerpt budget across the files (each also hard-capped by
@@ -2566,6 +2471,10 @@ export default function ProjectEvents() {
           addFact(files[i].name, 'Not readable — filename used as context', LOG_WARN);
         }
       }
+      // Kept for the identity pass, which runs once the story is FINAL — that
+      // can be several rounds later (the author's clarifications), by which
+      // point this run's local `excerpts` is long out of scope.
+      excerptsRef.current = excerpts;
       const readable = excerpts.filter((e) => e.text).length;
       setTask('read', 'done');
       setTask('extract', 'done');
@@ -2618,10 +2527,9 @@ export default function ProjectEvents() {
       if (clean) built.meta.final = true;
       setTimeline(built);
       if (clean) saveCaseTimeline(selectedProject.id, built);
-      // Open flags → start drafting the Review round's suggested answers NOW
-      // (in the background, while the finale plays), so the Review tab opens
-      // with the AI's answers already loaded.
-      if (!clean) prefetchFlagAsks(built);
+      // A clean run IS the final story; a flagged one files from the refine
+      // path above, once the chair has folded in the answers.
+      if (clean) runPostScanFiling(built);
       setScanning(false);
       const councilChips = [
         result.council.merged ? 'merged by the chair' : 'best draft stands',
@@ -2646,17 +2554,27 @@ export default function ProjectEvents() {
         schedule(400, () => patchCouncil({ endStage: 'wait' }));
         schedule(5000, () => patchCouncil((c) => (c.endStage === 'wait' ? { endStage: 'gavel' } : {})));
       } else {
-        // Open flags — NO gavel yet. The chair suspends the ruling and the
-        // tab flips to its Review face (the council's questions); the
-        // chamber and the gavel return once every flag is addressed
-        // (finalizeStory's theatre).
+        // Open flags. There is no separate review round any more — every
+        // question was put to the author DURING the scan, one at a time, as
+        // its analyst raised it. So the chair folds those answers straight in
+        // and rules; the run never leaves the chamber.
+        //
+        // A question still on screen (or queued behind one) is waited for
+        // first: the whole point of asking mid-scan is that the answer lands
+        // before the merge is final.
         setTask('save', 'working');
         setActive('chair', true);
-        setPhase('Author consultation');
-        say('chair', `${built.flags.length} open ${built.flags.length === 1 ? 'question' : 'questions'} — I need the author before I rule.`);
-        addDecision(LOG_STEER, 'Ruling suspended', `— ${built.flags.length} open ${built.flags.length === 1 ? 'flag' : 'flags'}; the council turns to you for answers.`, councilChips);
-        // A beat so the chair's line lands, then the questions take the tab.
-        schedule(1600, () => setScanView('review'));
+        const pending = askOpenRef.current || askQueueRef.current.length > 0;
+        // Be honest about which of the two we are doing: still waiting on the
+        // author, or already folding in what they said.
+        setPhase(pending ? 'Waiting on you' : 'Folding in your answers');
+        say('chair', pending
+          ? 'One more answer from you and I can rule.'
+          : `${built.flags.length} ${built.flags.length === 1 ? 'question' : 'questions'} answered — folding them into the record.`);
+        addDecision(LOG_STEER, 'Answers in hand', `— ${built.flags.length} ${built.flags.length === 1 ? 'flag' : 'flags'} raised while we read; the chair rules on what you told us.`, councilChips);
+        await waitForOpenAsks();
+        setPhase('Folding in your answers');
+        finalizeStory(clarificationsFromEarlyAnswers(built), built);
       }
     } catch (err) {
       // Clears shuttles AND any scheduled dispute/ask timers, so a delayed
@@ -2681,6 +2599,7 @@ export default function ProjectEvents() {
     resetCouncilPause();
     pendingFactsRef.current = {};
     askQueueRef.current = [];
+    askOpenRef.current = false;
     askResolverRef.current = null;
     askHoldRef.current = false;
     earlyFlagAnswersRef.current = {};
@@ -2693,7 +2612,6 @@ export default function ProjectEvents() {
     setDebugRun(true);
     setScanError(null);
     setStep('scan');
-    setScanView('chamber');
     decisionSeq.current = 0;
     setCouncil({ ...freshCouncil(), phase: 'Reading sources' });
     // The maximal path, in one scripted session: an intake showing every
@@ -3026,98 +2944,6 @@ export default function ProjectEvents() {
     script.forEach(([d, fn]) => { at += d; schedule(at, fn); });
   };
 
-  // ── Debug ask variations (fourth button): step through every shape the
-  // "We have a question…" modal supports — single select, multi select,
-  // confirm, free text — advancing on each answer.
-  // Debug — TOGGLE the Review round between a seeded set of flag/ask
-  // variations (all severities, every ask shape: single pick / multi pick /
-  // free text, with and without parseable source filenames) and the real
-  // ones. In-memory only: the seeded timeline is never saved, and toggling
-  // back restores the real story + its AI-designed asks untouched.
-  const debugReviewBackupRef = useRef(null);
-  const debugReviewOn = !!timeline?.meta?.debugFlags;
-  // Seed the Review face with the flag/ask variations (backing up the real
-  // story + asks so the toggle can restore them). Shared by the Review-tab
-  // debug toggle AND the simulator's 'review' outcome.
-  const seedDebugReviewFlags = () => {
-    debugReviewBackupRef.current = { timeline, flagAsks };
-    const mk = (sev, tone, bars, type, title, detail, sources) => ({ type, sev, tone, bars, title, detail, sources });
-    setTimeline({
-      lede: 'Debug story — flag variations for the Review round.',
-      events: timeline?.events || [],
-      flags: [
-        mk('High', 'danger', 3, 'Contradiction',
-          'Transfer date conflict: 14 Oct (WhatsApp) vs 15 Oct (bank screenshot)',
-          'The WhatsApp thread reads as if the transfer happened on 14 Oct, but the bank screenshot shows a value date of 15 Oct. Which date should the story carry?',
-          '02_chat_whatsapp_export.txt · 05_screenshot_bank_app.png'),
-        mk('High', 'danger', 3, 'Missing evidence',
-          'The claimed repayment has no supporting document',
-          'A partial repayment is mentioned twice but no receipt, transfer or acknowledgement covers it. Did it happen, and is there a document for it?',
-          'no supporting file in the set'),
-        mk('Medium', 'warning', 2, 'Gap in the record',
-          'Nothing covers March–May 2024',
-          'The files jump from the notice straight to the payment demand — three months with no correspondence. What happened in between?',
-          '02_chat_whatsapp_export.txt'),
-        mk('Low', 'success', 1, 'Wording',
-          'Ambiguous “advance” wording in the acknowledgement',
-          'The handwritten note says “advance” — an advance on the debt, or a fresh loan? A one-word answer settles the reading.',
-          '06_foto_recunoastere_datorie.jpg'),
-      ],
-      fileRefs: timeline?.fileRefs || {},
-      meta: { ...(timeline?.meta || {}), fileCount: timeline?.meta?.fileCount ?? 3, final: false, debugFlags: true },
-    });
-    // One ask of every shape the AI can present, pre-populated with
-    // suggested answers.
-    setFlagAsks([
-      {
-        kind: 'options',
-        question: 'Which transfer date should the story carry?',
-        options: [
-          { label: '14 Oct — WhatsApp', desc: 'The money left when the chat says it did' },
-          { label: '15 Oct — bank record', desc: 'The value date on the statement governs' },
-          { label: 'Both are right', desc: 'Sent on the 14th, settled on the 15th' },
-        ],
-      },
-      {
-        kind: 'text',
-        question: 'Did the partial repayment actually happen — and is there any document for it?',
-        options: [],
-      },
-      {
-        kind: 'multi',
-        question: 'What happened between March and May 2024?',
-        options: [
-          { label: 'Verbal talks only', desc: 'Calls / in-person, nothing written' },
-          { label: 'A meeting took place', desc: 'The parties met at least once' },
-          { label: 'Complete silence', desc: 'No contact in that window' },
-        ],
-      },
-      {
-        kind: 'options',
-        question: 'What does “advance” mean in the handwritten note?',
-        options: [
-          { label: 'Advance on the existing debt', desc: 'Partial repayment of what was owed' },
-          { label: 'A fresh loan', desc: 'New money on top of the debt' },
-        ],
-      },
-    ]);
-  };
-  const startDebugReviewFlags = () => {
-    if (debugReviewOn) {
-      // Toggle OFF — restore the real flags + asks.
-      const backup = debugReviewBackupRef.current;
-      debugReviewBackupRef.current = null;
-      setTimeline(backup?.timeline || null);
-      setFlagAsks(backup?.flagAsks || null);
-      setScanView('review');
-      setStep('scan');
-      return;
-    }
-    seedDebugReviewFlags();
-    setScanView('review');
-    setStep('scan');
-  };
-
   const startDebugAsks = () => {
     if (analyzing) return;
     // Already showing a question in debug mode? Each press CYCLES to the
@@ -3125,6 +2951,7 @@ export default function ProjectEvents() {
     if (debugRun && council?.ask) {
       askVarIdxRef.current = (askVarIdxRef.current + 1) % ASK_VARIATIONS.length;
       askQueueRef.current = ASK_VARIATIONS.slice(askVarIdxRef.current + 1);
+      askOpenRef.current = true;
       patchCouncil({ ask: ASK_VARIATIONS[askVarIdxRef.current] });
       return;
     }
@@ -3132,6 +2959,7 @@ export default function ProjectEvents() {
     resetCouncilPause();
     pendingFactsRef.current = {};
     askQueueRef.current = [];
+    askOpenRef.current = false;
     askResolverRef.current = null;
     askHoldRef.current = false;
     earlyFlagAnswersRef.current = {};
@@ -3144,7 +2972,6 @@ export default function ProjectEvents() {
     setDebugRun(true);
     setScanError(null);
     setStep('scan');
-    setScanView('chamber');
     decisionSeq.current = 0;
     askVarIdxRef.current = 0;
     askQueueRef.current = ASK_VARIATIONS.slice(1);
@@ -3260,9 +3087,7 @@ export default function ProjectEvents() {
               </div>
             </>
           ) : (() => {
-            // The merged tab's review face wears the Review masthead copy.
-            const headerKey = step === 'scan' && scanView === 'review' ? 'review' : step;
-            const head = STEP_HEADERS[headerKey] || STEP_HEADERS.timeline;
+            const head = STEP_HEADERS[step] || STEP_HEADERS.timeline;
             return (
               <>
                 <h1 className="cto-mh-title">{head.title}</h1>
@@ -3275,7 +3100,7 @@ export default function ProjectEvents() {
             uploaded files (or the fallback sample set) and animates their
             progress; the pause toggle freezes the council process in place.
             Sit to the RIGHT of the Scanning header, on that tab only. */}
-        {step === 'scan' && scanView === 'chamber' && (
+        {step === 'scan' && (
           <div className="cto-debug-row">
             <button type="button" className="cto-debug-btn" onClick={startDebugScan}>
               Debug · simulate scan
@@ -3292,49 +3117,30 @@ export default function ProjectEvents() {
             </button>
           </div>
         )}
-        {/* Review-tab dev affordance — TOGGLES between a seeded set of
-            flag/ask variations and the real ones (in-memory only; the saved
-            story is untouched). */}
-        {step === 'scan' && scanView === 'review' && (
-          <div className="cto-debug-row">
-            <button
-              type="button"
-              className={`cto-debug-btn${debugReviewOn ? ' is-on' : ''}`}
-              onClick={startDebugReviewFlags}
-            >
-              {debugReviewOn ? 'Debug · back to real flags' : 'Debug · flag variations'}
-            </button>
-          </div>
-        )}
       </header>
 
-      {/* ── Step rail (option 1a) — numbered circles + connector lines. */}
-      <div className="cto-steps" role="tablist" aria-label="Onboarding steps">
+      {/* ── Step rail — numbered circles + connector lines. A PROGRESS
+          indicator, not navigation: the run moves itself from upload to scan
+          to timeline, and clicking a step used to drop the user out of a live
+          council with no way back into it. */}
+      <ol className="cto-steps" aria-label="Progress">
         {STEPS.map((s, i) => {
           const state = i === stepIdx ? 'active' : i < stepIdx ? 'done' : 'todo';
           return (
-            <div key={s.id} className="cto-step-cell">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={state === 'active'}
-                className="cto-step"
-                onClick={() => setStep(s.id)}
-              >
+            <li key={s.id} className="cto-step-cell">
+              <span className="cto-step" aria-current={state === 'active' ? 'step' : undefined}>
                 <span className="cto-step-dot" data-state={state}>
                   {state === 'done' ? <IcoCheck width="14" height="14" /> : s.n}
                 </span>
                 <span className="cto-step-label">{s.label}</span>
-              </button>
+              </span>
               {i < STEPS.length - 1 && <span className="cto-step-line" aria-hidden="true" />}
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
 
-      {/* The scan step's chamber↔review face swap re-keys the body too, so
-          the same enter animation plays on the flip. */}
-      <div key={step === 'scan' ? `scan-${scanView}` : step} className={`cto-step-body is-enter-${stepEnterDir}`}>
+      <div key={step} className={`cto-step-body is-enter-${stepEnterDir}`}>
       {step === 'upload' && (
         <UploadStep
           files={files}
@@ -3344,7 +3150,7 @@ export default function ProjectEvents() {
           analyzing={analyzing}
         />
       )}
-      {step === 'scan' && scanView === 'chamber' && (
+      {step === 'scan' && (
         <CouncilStep
           items={scanItems}
           progress={scanProgress}
@@ -3354,9 +3160,9 @@ export default function ProjectEvents() {
           error={scanError}
           onAnswer={answerCouncil}
           onPacketDone={removePacket}
-          // The ruling card only appears once the story is final (a clean
-          // run, or the post-review finalize theatre) — flagged drafts flip
-          // to the review face before any gavel.
+          // The ruling card only appears once the story is final — every
+          // question was already answered in the chamber, so there is no
+          // separate round standing between the merge and the gavel.
           onReadStory={() => setStep('timeline')}
           storyCta="Read the whole story"
           // Redo — re-run the same kind of session that just finished: the
@@ -3369,26 +3175,14 @@ export default function ProjectEvents() {
           }}
         />
       )}
-      {step === 'scan' && scanView === 'review' && (
-        <ReviewStep
-          timeline={timeline}
-          goTimeline={() => setStep('timeline')}
-          onFinalize={finalizeStory}
-          finalizing={finalizing}
-          finalizeError={finalizeError}
-          asks={flagAsks}
-          asksLoading={asksLoading}
-          earlyAnswers={earlyFlagAnswersRef.current}
-        />
-      )}
       {step === 'timeline' && (
         <TimelineStep
-          // The timeline EXISTS only once the author's review answers have
-          // built it (or a clean, flag-free run stood as the story) — an
-          // unanswered draft shows the empty state, not the draft story.
+          // The timeline EXISTS only once the chair has ruled — a draft still
+          // being folded together shows the empty state, not a half-story.
           timeline={timeline?.meta?.final ? timeline : null}
           draftPending={!!(timeline && !timeline.meta?.final)}
-          goReview={() => { setScanView('review'); setStep('scan'); }}
+          projectDir={projectDir}
+          goReview={() => setStep('scan')}
           // Re-run the council when the picks are still in hand; otherwise
           // bounce to Upload so the user can re-provide the sources.
           onRegenerate={() => {
